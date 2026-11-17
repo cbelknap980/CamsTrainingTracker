@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#111318">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Cam's Training Tracker</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-name">Cam's Training Tracker</span>
+      <span id="week-chip" class="chip"></span>
+    </div>
+    <button id="settings-btn" class="icon-btn" aria-label="Settings" title="Settings">&#9881;</button>
+  </header>
+
+  <main id="view" aria-live="polite"></main>
+
+  <nav id="tabs">
+    <button data-view="home" class="tab active">Home</button>
+    <button data-view="history" class="tab">History</button>
+    <button data-view="runs" class="tab">Runs</button>
+    <button data-view="architecture" class="tab">Architecture</button>
+  </nav>
+
+  <div id="toast" class="toast" hidden></div>
+  <div id="modal" class="modal" hidden></div>
+
+  <script src="vendor/xlsx.mini.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

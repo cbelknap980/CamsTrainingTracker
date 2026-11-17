@@ -1,0 +1,10 @@
+{
+  "startDate": "2026-11-16",
+  "units": "lb",
+  "bodyweightLb": 165,
+  "cues": { "vibrate": true, "beep": true, "warningTick": true },
+  "keepScreenOn": true,
+  "transitionSeconds": 30,
+  "backupFileName": "CamsTrainingTracker-backup.json",
+  "exportFileName": "CamsTrainingTracker-export.xlsx"
+}

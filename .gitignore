@@ -1,0 +1,9 @@
+# Cameron's data never goes in the repo
+*.backup.json
+*-backup.json
+exports/
+*.xlsx
+!docs/*.xlsx
+.DS_Store
+Thumbs.db
+node_modules/

@@ -1,0 +1,74 @@
+{
+  "rulesVersion": "1.0",
+  "increments": {
+    "default": 5,
+    "byExercise": { "strict_press": 2.5, "push_press": 2.5, "weighted_pullup": 2.5 }
+  },
+  "smallestJump": {
+    "barbell": 5,
+    "dumbbell": 5,
+    "machine": 5,
+    "cable": 5,
+    "weighted_bw": 2.5,
+    "bodyweight": 0
+  },
+  "mainLiftTest": {
+    "description": "Add weight when every set reaches the top of the rep range at RPE 8 or lower.",
+    "allSetsAtTopOfRange": true,
+    "maxRpe": 8,
+    "repNudge": 1
+  },
+  "accessoryRule": {
+    "description": "Add reps up to the top of the range first, then the smallest weight jump for that equipment.",
+    "repsFirst": true
+  },
+  "stall": {
+    "description": "Two consecutive sessions that fail the test: drop 10% and rebuild.",
+    "sessionsBeforeDrop": 2,
+    "dropFraction": 0.10,
+    "message": "Second miss in a row. Check sleep, food and ski load."
+  },
+  "baseline": {
+    "weeks": [1, 2],
+    "topSetReps": 5,
+    "topSetRir": 2,
+    "trainingFraction": 0.90,
+    "cleanTopSetReps": 2,
+    "description": "Week 1: work up to a set of 5 with 2 reps left on each main lift; train at about 90% of it for weeks 1-2. Clean: work up in doubles to a crisp, fast weight."
+  },
+  "phases": {
+    "light": { "weeks": [7], "setFactor": 0.5, "keepWeights": true },
+    "heavy": { "weeks": [8, 9, 10, 11], "mainLiftReps": [3, 5], "startWeightFactor": 1.05, "description": "Main lifts move to 3-5 reps. First heavy-week target = last 4-6 target plus 5%, rounded to the increment (assumption, editable)." },
+    "retest": { "weeks": [12], "description": "Main lifts: work up to a 5-rep set at RPE 8-9. Also max strict pull-ups, max unbroken toes-to-bar, 5K time." }
+  },
+  "rampUp": {
+    "description": "Ramp-up sets before a main lift. Fractions of the target weight; empty bar first.",
+    "steps": [
+      { "fraction": 0, "reps": 5, "label": "Empty bar" },
+      { "fraction": 0.5, "reps": 5 },
+      { "fraction": 0.7, "reps": 3 },
+      { "fraction": 0.85, "reps": 2 }
+    ],
+    "restSeconds": 60,
+    "skipBelowLb": 95,
+    "barWeightLb": 45
+  },
+  "trim": {
+    "description": "Trim to fit, applied in order when the projected finish is past the cap. Cameron confirms before it applies.",
+    "order": ["rests", "finisherRounds", "ifTime"],
+    "restCutFraction": 0.25,
+    "minRestSeconds": 30,
+    "minFinisherRounds": 1,
+    "neverTrim": ["stretch", "warmup"]
+  },
+  "timing": {
+    "transitionSeconds": 30,
+    "mainSetSeconds": 45,
+    "accessorySetSeconds": 40,
+    "finisherItemSeconds": 35,
+    "resumeWindowHours": 3,
+    "restWarningSeconds": 3
+  },
+  "e1rm": { "formula": "epley" },
+  "excludeFromAutoProgression": ["power_clean"]
+}

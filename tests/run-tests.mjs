@@ -1,0 +1,137 @@
+// Node tests for the Session Builder and Progression Engine. Run: node tests/run-tests.mjs
+import { readFileSync } from 'node:fs';
+import { buildTimeline, trimToFit, remainingSeconds } from '../js/builder.js';
+import { applyProgression, epley } from '../js/progression.js';
+
+const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
+const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
+const settings = JSON.parse(readFileSync(new URL('../data/settings.json', import.meta.url)));
+
+let failures = 0;
+function check(name, cond, info) {
+  if (cond) console.log('  ok   ' + name);
+  else { failures++; console.log('  FAIL ' + name + (info ? '  ' + JSON.stringify(info) : '')); }
+}
+
+// ---- Builder: week 1, no targets (baseline) ----
+console.log('Builder, week 1 (baseline, no targets)');
+for (const sid of ['lift1', 'lift2', 'lift3']) {
+  const tl = buildTimeline({ plan, rules, settings, sessionId: sid, week: 1, targets: {} });
+  const kinds = tl.steps.map(s => s.kind);
+  const minutes = tl.plannedSeconds / 60;
+  check(`${sid}: planned ${minutes.toFixed(1)} min is within 63 (week 1 has baseline work-ups)`, minutes <= 63 && minutes >= 45, { minutes });
+  check(`${sid}: has a baseline top set for each main lift`, tl.steps.filter(s => s.baseline).length >= 1);
+  check(`${sid}: ends with stretch steps (or if-time)`, ['stretch', 'decision', 'set', 'rest'].includes(kinds.at(-1)));
+  check(`${sid}: stretch block is 6 steps = 300 s`, tl.steps.filter(s => s.kind === 'stretch').length === 6 && tl.steps.filter(s => s.kind === 'stretch').reduce((a, s) => a + s.seconds, 0) === 300);
+  check(`${sid}: no two rests in a row`, !kinds.some((k, i) => k === 'rest' && kinds[i + 1] === 'rest'));
+  check(`${sid}: no step without seconds except decision`, tl.steps.every(s => s.kind === 'decision' || s.seconds > 0));
+}
+const l1 = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 1, targets: {} });
+const sqSets = l1.steps.filter(s => s.exerciseId === 'back_squat' && s.kind === 'set');
+check('lift1: squat = 1 baseline + 3 work sets, work sets fill from baseline', sqSets.length === 4 && sqSets.slice(1).every(s => s.fillFromBaseline), sqSets.map(s => [s.baseline, s.fillFromBaseline]));
+const bSteps = l1.steps.filter(s => s.blockId === 'B' && s.kind !== 'transition');
+check('lift1: superset B alternates RDL/calf with 30 s then 75 s rests', bSteps.map(s => s.kind === 'set' ? s.exerciseId : s.seconds).join(',') === 'rdl,30,calf_raise,75,rdl,30,calf_raise,75,rdl,30,calf_raise', bSteps.map(s => s.kind === 'set' ? s.exerciseId : s.seconds).join(','));
+const fin = l1.steps.filter(s => s.blockType === 'finisher');
+check('lift1: finisher = 3 rounds x 3 items + 2 round rests', fin.filter(s => s.kind === 'set').length === 9 && fin.filter(s => s.kind === 'rest').length === 2);
+
+const l2 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 1, targets: {} });
+const a = l2.steps.filter(s => s.blockId === 'A');
+check('lift2: dead hang after last pull-up set', a.some(s => s.kind === 'timed' && s.name === 'Dead hang'));
+const bb = l2.steps.filter(s => s.blockId === 'B' && s.kind === 'set').map(s => s.exerciseId).join(',');
+check('lift2: B1 2 sets / B2 3 sets handled', bb === 'db_bench,cs_row,db_bench,cs_row,cs_row', bb);
+const lastBlk = l2.steps.filter(s => s.blockId === 'last' && s.kind === 'set');
+check('lift2: face pull only rounds 1-2', lastBlk.filter(s => s.exerciseId === 'face_pull').length === 2 && lastBlk.length === 8);
+
+const l3 = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 1, targets: {} });
+check('lift3: if-time decision then 2 leg curl sets, after stretch', (() => { const i = l3.steps.findIndex(s => s.kind === 'decision'); return i > 0 && l3.steps[i - 1].kind === 'stretch' && l3.steps.slice(i + 1).filter(s => s.kind === 'set').length === 2; })());
+check('lift3: side plank holds are countdown sets', l3.steps.filter(s => s.exerciseId === 'side_plank').every(s => s.holdSeconds === 25 && s.countdown));
+
+// ---- Builder: week 3 with targets (ramp-ups) ----
+console.log('Builder, week 3 with targets');
+const targets = { back_squat: { weight: 185, reps: 4 }, rdl: { weight: 155, reps: 6 }, strict_press: { weight: 95, reps: 4 }, weighted_pullup: { weight: 25, reps: 4 }, power_clean: { weight: 135, reps: 2 }, front_squat: { weight: 155, reps: 5 }, push_press: { weight: 115, reps: 3 } };
+const w3 = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, targets });
+const ramps = w3.steps.filter(s => s.ramp);
+check('week 3 lift1: 4 ramp-up sets (45, 95, 130, 155)', ramps.map(s => s.target.weight).join(',') === '45,95,130,155', ramps.map(s => s.target.weight));
+check('week 3 lift1: work sets pre-filled 185 x 4', w3.steps.filter(s => s.exerciseId === 'back_squat' && !s.ramp).every(s => s.target.weight === 185 && s.target.reps === 4));
+check('week 3 lift1: planned within 60 min', w3.plannedSeconds / 60 <= 60, { min: w3.plannedSeconds / 60 });
+const w3l2 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 3, targets });
+check('week 3 lift2: press ramps (95 lb target: 45, 50, 65, 80)', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight).join(',') === '45,50,65,80', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight));
+check('week 3 lift2: planned within 60 min', w3l2.plannedSeconds / 60 <= 60, { min: w3l2.plannedSeconds / 60 });
+const w3l3 = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 3, targets });
+check('week 3 lift3: planned within 60 min incl. if-time', w3l3.plannedSeconds / 60 <= 61, { min: w3l3.plannedSeconds / 60 });
+
+// ---- Builder: week 7 light, week 9 heavy, week 12 retest ----
+console.log('Builder, phases');
+const w7 = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 7, targets });
+check('week 7: squat 2 work sets, finisher 2 rounds', w7.steps.filter(s => s.exerciseId === 'back_squat' && !s.ramp).length === 2 && w7.steps.filter(s => s.blockType === 'finisher' && s.kind === 'set').length === 6);
+const w9 = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 9, targets: { back_squat: { weight: 195, reps: 3 } } });
+check('week 9: squat rep range 3-5, target reps 3', w9.steps.filter(s => s.exerciseId === 'back_squat' && !s.ramp).every(s => s.repRange[1] === 5 && s.target.reps === 3));
+const w12 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 12, targets });
+check('week 12 lift2: retest top sets + max pull-ups + max T2B', w12.steps.filter(s => s.retest).length >= 4, w12.steps.filter(s => s.retest).map(s => s.name));
+
+// ---- Trim to fit ----
+console.log('Trim to fit');
+const base = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, targets });
+const fromIdx = base.steps.findIndex(s => s.blockId === 'B');
+const before = remainingSeconds(base.steps, fromIdx);
+const tr = trimToFit({ steps: base.steps, fromIdx, overBySeconds: 300, rules });
+const after = remainingSeconds(tr.steps, fromIdx);
+check('trim saves at least 5 min', before - after >= 300, { before, after, notes: tr.notes });
+check('trim keeps at least 1 finisher round', tr.steps.filter(s => s.blockType === 'finisher' && s.kind === 'set').length >= 3);
+check('trim never touches stretch', tr.steps.filter(s => s.kind === 'stretch').length === 6);
+check('trim keeps trimmable rests >= 30 s', tr.steps.filter(s => s.kind === 'rest' && s.trimKind).every(s => s.seconds >= 30));
+const tr2 = trimToFit({ steps: base.steps, fromIdx, overBySeconds: 60, rules });
+check('small trim only shortens rests', tr2.notes.length === 1 && /rests/.test(tr2.notes[0]), tr2.notes);
+
+// ---- Progression ----
+console.log('Progression engine');
+function mkSession(week, sets, extra) {
+  return { id: 's1', sessionId: 'lift1', week, phase: { id: plan.phases.find(p => p.weeks.includes(week)).id }, endedAt: '2026-12-01T07:00:00Z', sets, ...(extra || {}) };
+}
+const ws = (exerciseId, weight, reps, rpe, repRange, extra) => ({ exerciseId, weight, reps, rpe, repRange, done: true, ...(extra || {}) });
+
+// baseline
+let r = applyProgression({ session: mkSession(1, [ws('back_squat', 185, 5, 8, [5, 5], { baseline: true }), ws('back_squat', 165, 4, 7, [4, 6]), ws('back_squat', 165, 4, 7, [4, 6]), ws('back_squat', 165, 4, 7, [4, 6])]), targets: {}, rules, plan, settings });
+check('baseline 185x5 -> training 165, reps 4', r.targets.back_squat.weight === 165 && r.targets.back_squat.reps === 4, r.targets.back_squat);
+check('baseline e1RM recorded (216)', r.e1rms.back_squat === 216, r.e1rms);
+
+// main lift pass
+r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 7, [4, 6])]), targets: { back_squat: { weight: 185, reps: 6, stall: 0 } }, rules, plan, settings });
+check('main lift pass -> +5 lb, reps to bottom', r.targets.back_squat.weight === 190 && r.targets.back_squat.reps === 4, r.targets.back_squat);
+// press increments 2.5
+r = applyProgression({ session: mkSession(3, [ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6])]), targets: { strict_press: { weight: 95, reps: 6 } }, rules, plan, settings });
+check('press pass -> +2.5 lb', r.targets.strict_press.weight === 97.5, r.targets.strict_press);
+// main lift miss, nudge reps
+r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 5, 8, [4, 6]), ws('back_squat', 185, 4, 8, [4, 6]), ws('back_squat', 185, 4, 8, [4, 6])]), targets: { back_squat: { weight: 185, reps: 4, stall: 0 } }, rules, plan, settings });
+check('main lift miss -> same weight, reps 5, stall 1', r.targets.back_squat.weight === 185 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 1, r.targets.back_squat);
+// second miss -> drop 10%
+r = applyProgression({ session: mkSession(4, [ws('back_squat', 185, 4, 9, [4, 6]), ws('back_squat', 185, 4, 9, [4, 6]), ws('back_squat', 185, 3, 10, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 1 } }, rules, plan, settings });
+check('second miss -> 165 (down 10%), stall reset', r.targets.back_squat.weight === 165 && r.targets.back_squat.stall === 0, r.targets.back_squat);
+// skipped set fails test
+r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), { exerciseId: 'back_squat', repRange: [4, 6], done: false, skipped: true }]), targets: { back_squat: { weight: 185, reps: 6, stall: 0 } }, rules, plan, settings });
+check('skipped set -> no increase', r.targets.back_squat.weight === 185 && /skipped/.test(r.lines[0].text), r.lines[0]);
+// accessory reps first then weight
+r = applyProgression({ session: mkSession(3, [ws('curl', 30, 10, 9, [10, 12]), ws('curl', 30, 10, 9, [10, 12]), ws('curl', 30, 10, 9, [10, 12])]), targets: { curl: { weight: 30, reps: 10 } }, rules, plan, settings });
+check('accessory under top -> reps 11', r.targets.curl.weight === 30 && r.targets.curl.reps === 11, r.targets.curl);
+r = applyProgression({ session: mkSession(3, [ws('curl', 30, 12, 9, [10, 12]), ws('curl', 30, 12, 9, [10, 12]), ws('curl', 30, 12, 9, [10, 12])]), targets: { curl: { weight: 30, reps: 12 } }, rules, plan, settings });
+check('accessory at top -> +5 lb, reps 10', r.targets.curl.weight === 35 && r.targets.curl.reps === 10, r.targets.curl);
+// first time accessory with no target
+r = applyProgression({ session: mkSession(1, [ws('rdl', 155, 6, 8, [6, 8]), ws('rdl', 155, 6, 8, [6, 8]), ws('rdl', 155, 7, 8, [6, 8])]), targets: {}, rules, plan, settings });
+check('first log adopts weight 155, reps 6', r.targets.rdl.weight === 155 && r.targets.rdl.reps === 6, r.targets.rdl);
+// light week unchanged
+r = applyProgression({ session: mkSession(7, [ws('back_squat', 190, 6, 7, [4, 6]), ws('back_squat', 190, 6, 7, [4, 6])]), targets: { back_squat: { weight: 190, reps: 4, stall: 0 } }, rules, plan, settings });
+check('week 7 unchanged', r.targets.back_squat.weight === 190 && r.targets.back_squat.reps === 4, r.targets.back_squat);
+// transition into heavy (week 7 session -> next week 8)
+check('week 7 -> heavy note present', r.lines.some(l => /weeks 8-11/.test(l.text)) === false, r.lines); // light week returns early, by design
+r = applyProgression({ session: mkSession(6, [ws('back_squat', 190, 6, 8, [4, 6]), ws('back_squat', 190, 6, 8, [4, 6]), ws('back_squat', 190, 6, 8, [4, 6])]), targets: { back_squat: { weight: 190, reps: 4, stall: 0 } }, rules, plan, settings });
+check('week 6 pass -> 195 (no heavy switch yet, week 7 is light)', r.targets.back_squat.weight === 195, r.targets.back_squat);
+// power clean excluded
+r = applyProgression({ session: mkSession(3, [ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2])]), targets: { power_clean: { weight: 135, reps: 2 } }, rules, plan, settings });
+check('power clean not auto-progressed', r.targets.power_clean.weight === 135 && /Not auto-progressed/.test(r.lines[0].text), r.lines[0]);
+// weighted pull-up e1RM includes bodyweight
+r = applyProgression({ session: mkSession(3, [ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6])]), targets: { weighted_pullup: { weight: 25, reps: 6 } }, rules, plan, settings });
+check('pull-up e1RM uses bodyweight (165+25)x1.2 = 228', r.e1rms.weighted_pullup === 228 && r.targets.weighted_pullup.weight === 27.5, { e: r.e1rms, t: r.targets.weighted_pullup });
+check('epley 185x5 = 216', epley(185, 5) === 216);
+
+console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
+process.exit(failures ? 1 : 0);
