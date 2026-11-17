@@ -71,6 +71,7 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path='/usr/bin/google-chrome', headless=True, args=['--no-sandbox'])
     ctx = browser.new_context(viewport={'width': 393, 'height': 851}, device_scale_factor=2, is_mobile=True, has_touch=True, accept_downloads=True)
+    ctx.grant_permissions(['notifications'], origin='http://localhost:8080')
     page = ctx.new_page()
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
@@ -81,7 +82,7 @@ with sync_playwright() as p:
     page.wait_for_selector('.card.accent h1')
     page.screenshot(path=f'{SHOTS}/home-week1.png', full_page=True)
     check('home shows Lift 1 on Monday week 1', 'Lift 1' in page.locator('.card.accent h1').inner_text())
-    check('week chip says Week 1', 'Week 1' in page.locator('#week-chip').inner_text())
+    check('week chip says Week 1', 'week 1' in page.locator('#week-chip').inner_text().lower())
 
     # ---- Lift 1 end to end (week 1, baseline), go behind during block B to test trim ----
     print('Lift 1')
@@ -111,6 +112,8 @@ with sync_playwright() as p:
     before_idx = page.locator('.player-head .block').inner_text()
     page.reload(); page.wait_for_selector('h1')
     check('reload offers Resume', page.locator('h1', has_text='Resume session').count() == 1)
+    sw = page.evaluate("navigator.serviceWorker.getRegistration().then(r => !!(r && r.active))")
+    check('service worker active (notification path available)', sw, sw)
     page.screenshot(path=f'{SHOTS}/resume.png')
     page.click('button:has-text("Resume")'); page.wait_for_selector('.player')
     check('resume returns to the same block', page.locator('.player-head .block').inner_text() == before_idx, (before_idx, page.locator('.player-head .block').inner_text()))
@@ -186,7 +189,7 @@ with sync_playwright() as p:
     page.click('.modal button:has-text("Close")')
     page.clock.set_system_time('2026-11-30T06:00:00'); page.clock.set_fixed_time('2026-11-30T06:00:00')
     page.click('#tabs button[data-view="home"]'); page.wait_for_selector('.card.accent h1')
-    check('week 3 chip', 'Week 3' in page.locator('#week-chip').inner_text(), page.locator('#week-chip').inner_text())
+    check('week 3 chip', 'week 3' in page.locator('#week-chip').inner_text().lower(), page.locator('#week-chip').inner_text())
     page.click('.card.accent .btn.primary'); page.wait_for_selector('.player')
     # skip warmup to reach the first squat step
     for _ in range(12):
@@ -198,7 +201,26 @@ with sync_playwright() as p:
         page.wait_for_timeout(50)
     check('week 3 squat starts with a ramp-up set at 45 lb', page.locator('.step-kind').inner_text().lower().startswith('ramp') and '45 lb' in page.locator('.step-target').inner_text(), page.locator('.step-target').inner_text())
     page.screenshot(path=f'{SHOTS}/week3-ramp.png')
-    page.click('button:has-text("End")'); page.click('.modal button:has-text("End session")'); page.wait_for_selector('h1')
+    # v1.1 checks: last-time line, PR on a heavier set, menu sheet, tint attribute
+    check('week 3 body has work tint attr', page.evaluate("document.body.getAttribute('data-kind')") in ('work', 'calm'), page.evaluate("document.body.getAttribute('data-kind')"))
+    # advance through the ramp-ups to the first work set
+    for _ in range(12):
+        k = page.locator('.step-kind').inner_text().lower()
+        if k.startswith('work set'): break
+        page.click('button.btn.primary'); page.wait_for_timeout(60)
+    check('week 3 first work set shows Last time', page.locator('.last-time').count() == 1 and '165' in page.locator('.last-time').inner_text(), page.locator('.last-time').inner_text() if page.locator('.last-time').count() else 'none')
+    page.screenshot(path=f'{SHOTS}/week3-workset.png')
+    page.click('button:has-text("Edit")'); page.fill('#in-weight', '195'); page.fill('#in-reps', '5'); page.click('button.btn.primary')
+    page.wait_for_timeout(200)
+    check('heavier set triggers PR toast', page.locator('#toast').is_visible() and 'PR' in page.locator('#toast').inner_text(), page.locator('#toast').inner_text())
+    check('rest screen shows ring and up-next', page.locator('.ring-fg').count() == 1 and 'up next' in page.locator('.step-main').inner_text().lower(), page.locator('.step-main').inner_text()[:80])
+    page.screenshot(path=f'{SHOTS}/week3-rest.png')
+    page.click('.player-head .icon-btn'); page.wait_for_selector('.menu')
+    check('menu lists pause, back, end', page.locator('.menu-item').count() >= 3, page.locator('.menu-item').all_inner_texts())
+    page.screenshot(path=f'{SHOTS}/menu.png')
+    page.click('.menu-item:has-text("End session")'); page.click('.modal button:has-text("End session")'); page.wait_for_selector('h1')
+    check('summary shows PR card', page.locator('.pr-card').count() == 1, page.locator('.pr-card').inner_text() if page.locator('.pr-card').count() else 'none')
+    page.screenshot(path=f'{SHOTS}/week3-summary.png', full_page=True)
 
     real_errors = [e for e in errors if 'favicon' not in e and 'Failed to load resource' not in e]
     check('no console errors', not real_errors, real_errors[:5])

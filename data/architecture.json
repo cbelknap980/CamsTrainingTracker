@@ -1,38 +1,237 @@
 {
   "title": "Plan data goes in, a guided session and updated weights come out",
   "columns": [
-    { "id": "inputs", "name": "Inputs" },
-    { "id": "app", "name": "App (browser, works offline)" },
-    { "id": "outputs", "name": "Outputs" }
+    {
+      "id": "inputs",
+      "name": "Inputs"
+    },
+    {
+      "id": "app",
+      "name": "App (browser, works offline)"
+    },
+    {
+      "id": "outputs",
+      "name": "Outputs"
+    }
   ],
   "parts": [
-    { "id": "plan", "column": "inputs", "name": "Plan data (plan.json)", "lines": ["sessions, blocks, exercises,", "sets, reps, rest, minutes"], "file": "data/plan.json", "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes." },
-    { "id": "settings", "column": "inputs", "name": "Settings (settings.json)", "lines": ["cues on/off, transition time,", "start date, bodyweight"], "file": "data/settings.json", "description": "Defaults for cues (vibrate, beep, warning tick), screen wake lock, transition seconds, start date and bodyweight. Cameron's changes in the Settings screen are stored in IndexedDB on top of these defaults." },
-    { "id": "taps", "column": "inputs", "name": "Cameron's taps", "lines": ["Start, Done, edit a set,", "pause, skip, back, run form"], "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore." },
-    { "id": "rules", "column": "inputs", "name": "Rules (rules.json)", "lines": ["+5 lb / +2.5 lb, stall -10%,", "week 7, weeks 8-11 overrides"], "file": "data/rules.json", "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates." },
-    { "id": "builder", "column": "app", "name": "Session Builder", "lines": ["turns plan + saved targets into", "a timeline of timed steps"], "file": "js/builder.js", "description": "Expands a session from plan.json into a flat, ordered list of steps: warm-up holds, ramp-up sets, work sets, rests, superset alternation (B1 set, short rest, B2 set, longer rest), finisher rounds, dead hangs, transitions, stretches. Fills each set's target weight and reps from the saved targets, applies the week's phase (baseline, light, heavy, retest) and estimates each step's planned seconds for the clock." },
-    { "id": "player", "column": "app", "name": "Player", "lines": ["timestamp timers, cues, wake lock", "ahead/behind clock, trim to fit"], "file": "js/player.js", "description": "Walks the timeline one step at a time. Timers are computed from timestamps so they stay right when the screen locks. Vibrates and beeps when a rest ends, keeps the screen awake, shows planned vs projected finish and how far ahead or behind the session is, and offers Trim to fit, which previews what it would cut (rests first, then finisher rounds, then the if-time block) before applying. Pause, skip, back and end early live here. The in-progress session is saved on every step so it can be resumed." },
-    { "id": "logger", "column": "app", "name": "Logger", "lines": ["one tap logs weight, reps, RPE", "run log form, session summary"], "file": "js/logger.js", "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. Builds the end-of-session summary (sets done, time vs planned, trims, what changed) and saves the session record. Also the run log form (date, type, distance, time, RPE, notes)." },
-    { "id": "progression", "column": "app", "name": "Progression Engine", "lines": ["applies rules after each save", "e1RM, next targets, what changed"], "file": "js/progression.js", "description": "Runs once after a session saves. For each exercise in the session: applies the week override if any, the baseline rule in weeks 1-2, otherwise the success test (main lifts) or the reps-then-weight rule (accessories), counts stalls and drops 10% after two misses, computes Epley estimated 1RM for benchmark lifts, writes the new targets and a plain-language what-changed line per exercise. Power clean is excluded from automatic progression." },
-    { "id": "storage", "column": "app", "name": "Storage and offline cache", "lines": ["IndexedDB: targets, sessions, runs", "service worker caches the app"], "file": "js/store.js, sw.js", "description": "IndexedDB holds targets, sessions, runs, what-changed lists, settings overrides and the in-progress session. The service worker caches the app's files under a versioned cache name so it opens with no signal and picks up a new version on the next open with signal. Backup writes a JSON file with everything; Restore reads one back." },
-    { "id": "architecture", "column": "outputs", "name": "Architecture tab", "lines": ["this diagram inside the app,", "searchable"], "file": "js/architecture.js, data/architecture.json", "description": "Draws this diagram from architecture.json and lists every part with its description. The search box filters parts and flows by any word. If a part is added, removed or renamed in code, this file changes in the same commit and the spec doc's diagram is redrawn to match." },
-    { "id": "session", "column": "outputs", "name": "Guided session screen", "lines": ["step, target, countdown,", "what's next, ahead/behind"], "description": "What Cameron sees at the gym: the current exercise, set number, target weight and reps, effort target, a countdown or count-up, what comes next, and the session clock." },
-    { "id": "history", "column": "outputs", "name": "History + what changed", "lines": ["past sessions, run log,", "next session's weights"], "description": "History lists past sessions and runs with every set. Each session shows its what-changed list. The Home screen shows next session's targets so there is no surprise at the gym; any target can be edited there." },
-    { "id": "backup", "column": "outputs", "name": "Backup and export", "lines": ["JSON to Drive via share sheet,", "sheet in the Log tab layout"], "file": "js/export.js", "description": "Back up opens the Android share sheet with the backup JSON so Cameron can save it to Drive > Training in one tap; Download saves it on a PC. Export builds an .xlsx with a Log sheet and a Runs sheet in the same columns as the Excel log, using SheetJS vendored in the repo." }
+    {
+      "id": "plan",
+      "column": "inputs",
+      "name": "Plan data (plan.json)",
+      "lines": [
+        "sessions, blocks, exercises,",
+        "sets, reps, rest, minutes"
+      ],
+      "file": "data/plan.json",
+      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes."
+    },
+    {
+      "id": "settings",
+      "column": "inputs",
+      "name": "Settings (settings.json)",
+      "lines": [
+        "cues on/off, transition time,",
+        "start date, bodyweight"
+      ],
+      "file": "data/settings.json",
+      "description": "Defaults for cues (vibrate, beep, warning tick), screen wake lock, transition seconds, start date and bodyweight. Cameron's changes in the Settings screen are stored in IndexedDB on top of these defaults."
+    },
+    {
+      "id": "taps",
+      "column": "inputs",
+      "name": "Cameron's taps",
+      "lines": [
+        "Start, Done, edit a set,",
+        "pause, skip, back, run form"
+      ],
+      "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore."
+    },
+    {
+      "id": "rules",
+      "column": "inputs",
+      "name": "Rules (rules.json)",
+      "lines": [
+        "+5 lb / +2.5 lb, stall -10%,",
+        "week 7, weeks 8-11 overrides"
+      ],
+      "file": "data/rules.json",
+      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates."
+    },
+    {
+      "id": "builder",
+      "column": "app",
+      "name": "Session Builder",
+      "lines": [
+        "turns plan + saved targets into",
+        "a timeline of timed steps"
+      ],
+      "file": "js/builder.js",
+      "description": "Expands a session from plan.json into a flat, ordered list of steps: warm-up holds, ramp-up sets, work sets, rests, superset alternation (B1 set, short rest, B2 set, longer rest), finisher rounds, dead hangs, transitions, stretches. Fills each set's target weight and reps from the saved targets, applies the week's phase (baseline, light, heavy, retest) and estimates each step's planned seconds for the clock."
+    },
+    {
+      "id": "player",
+      "column": "app",
+      "name": "Player",
+      "lines": [
+        "timestamp timers, cues, wake lock",
+        "clock, trim, last time, live PRs"
+      ],
+      "file": "js/player.js",
+      "description": "Walks the timeline one step at a time. Timers are computed from timestamps so they stay right when the screen locks. Vibrates and beeps when a rest ends, keeps the screen awake, shows planned vs projected finish and how far ahead or behind the session is, and offers Trim to fit (preview, then confirm). Each work set shows last session's result for that exercise. Logging a set runs a live PR check against the stored bests (estimated 1RM, heaviest weight) and gives a haptic tap. When the app is in the background during a rest, it asks the service worker to fire a notification at the end time. Pause, back and end early live behind the menu button; the in-progress session is saved on every step so it can be resumed."
+    },
+    {
+      "id": "logger",
+      "column": "app",
+      "name": "Logger",
+      "lines": [
+        "one tap logs weight, reps, RPE",
+        "run log form, session summary"
+      ],
+      "file": "js/logger.js",
+      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. Builds the end-of-session summary (sets done, time vs planned, trims, what changed) and saves the session record. Also the run log form (date, type, distance, time, RPE, notes)."
+    },
+    {
+      "id": "progression",
+      "column": "app",
+      "name": "Progression Engine",
+      "lines": [
+        "applies rules after each save",
+        "e1RM, next targets, what changed"
+      ],
+      "file": "js/progression.js",
+      "description": "Runs once after a session saves. For each exercise in the session: applies the week override if any, the baseline rule in weeks 1-2, otherwise the success test (main lifts) or the reps-then-weight rule (accessories), counts stalls and drops 10% after two misses, computes Epley estimated 1RM for benchmark lifts, writes the new targets and a plain-language what-changed line per exercise. Power clean is excluded from automatic progression. Also keeps each exercise's best estimated 1RM and heaviest weight and reports personal records when a session beats them."
+    },
+    {
+      "id": "storage",
+      "column": "app",
+      "name": "Storage and offline cache",
+      "lines": [
+        "IndexedDB: targets, sessions, runs",
+        "service worker: offline cache, alerts"
+      ],
+      "file": "js/store.js, sw.js",
+      "description": "IndexedDB holds targets (with per-exercise bests for PR checks), sessions, runs, what-changed lists, settings overrides and the in-progress session. The service worker caches the app's files under a versioned cache name so it opens with no signal, picks up a new version on the next open with signal, and shows the rest-end notification when the page asks it to while in the background. Backup writes a JSON file with everything; Restore reads one back."
+    },
+    {
+      "id": "architecture",
+      "column": "outputs",
+      "name": "Architecture tab",
+      "lines": [
+        "this diagram inside the app,",
+        "searchable"
+      ],
+      "file": "js/architecture.js, data/architecture.json",
+      "description": "Draws this diagram from architecture.json and lists every part with its description. The search box filters parts and flows by any word. If a part is added, removed or renamed in code, this file changes in the same commit and the spec doc's diagram is redrawn to match."
+    },
+    {
+      "id": "session",
+      "column": "outputs",
+      "name": "Guided session screen",
+      "lines": [
+        "step, target, countdown,",
+        "what's next, ahead/behind"
+      ],
+      "description": "What Cameron sees at the gym: the current exercise, set number, target weight and reps, effort target, a countdown or count-up, what comes next, and the session clock."
+    },
+    {
+      "id": "history",
+      "column": "outputs",
+      "name": "History + what changed",
+      "lines": [
+        "past sessions, run log, PRs,",
+        "next session's weights"
+      ],
+      "description": "History lists past sessions and runs with every set. Each session shows its what-changed list. The Home screen shows next session's targets so there is no surprise at the gym; any target can be edited there."
+    },
+    {
+      "id": "backup",
+      "column": "outputs",
+      "name": "Backup and export",
+      "lines": [
+        "JSON to Drive via share sheet,",
+        "sheet in the Log tab layout"
+      ],
+      "file": "js/export.js",
+      "description": "Back up opens the Android share sheet with the backup JSON so Cameron can save it to Drive > Training in one tap; Download saves it on a PC. Export builds an .xlsx with a Log sheet and a Runs sheet in the same columns as the Excel log, using SheetJS vendored in the repo."
+    }
   ],
   "flows": [
-    { "from": "plan", "to": "builder", "label": "plan" },
-    { "from": "settings", "to": "player", "label": "cues, transition time" },
-    { "from": "taps", "to": "logger", "label": "taps" },
-    { "from": "rules", "to": "progression", "label": "rules" },
-    { "from": "builder", "to": "player", "label": "timeline" },
-    { "from": "player", "to": "logger", "label": "step results" },
-    { "from": "logger", "to": "progression", "label": "session record" },
-    { "from": "progression", "to": "storage", "label": "targets, what changed" },
-    { "from": "storage", "to": "builder", "label": "saved targets (next session)" },
-    { "from": "player", "to": "session", "label": "screen" },
-    { "from": "progression", "to": "history", "label": "what changed" },
-    { "from": "storage", "to": "backup", "label": "backup JSON, export" },
-    { "from": "app", "to": "architecture", "label": "static content shipped with the app", "static": true }
+    {
+      "from": "plan",
+      "to": "builder",
+      "label": "plan"
+    },
+    {
+      "from": "settings",
+      "to": "player",
+      "label": "cues, transition time"
+    },
+    {
+      "from": "taps",
+      "to": "logger",
+      "label": "taps"
+    },
+    {
+      "from": "rules",
+      "to": "progression",
+      "label": "rules"
+    },
+    {
+      "from": "builder",
+      "to": "player",
+      "label": "timeline"
+    },
+    {
+      "from": "player",
+      "to": "logger",
+      "label": "step results"
+    },
+    {
+      "from": "logger",
+      "to": "progression",
+      "label": "session record"
+    },
+    {
+      "from": "progression",
+      "to": "storage",
+      "label": "targets, what changed"
+    },
+    {
+      "from": "storage",
+      "to": "builder",
+      "label": "saved targets (next session)"
+    },
+    {
+      "from": "player",
+      "to": "session",
+      "label": "screen"
+    },
+    {
+      "from": "progression",
+      "to": "history",
+      "label": "what changed"
+    },
+    {
+      "from": "storage",
+      "to": "backup",
+      "label": "backup JSON, export"
+    },
+    {
+      "from": "app",
+      "to": "architecture",
+      "label": "static content shipped with the app",
+      "static": true
+    },
+    {
+      "from": "player",
+      "to": "storage",
+      "label": "rest-end notification request (background)"
+    },
+    {
+      "from": "storage",
+      "to": "player",
+      "label": "saved bests for the live PR check"
+    }
   ]
 }

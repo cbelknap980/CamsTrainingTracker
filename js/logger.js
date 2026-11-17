@@ -18,12 +18,13 @@ export async function saveSession(draft, { plan, rules }) {
     plannedSeconds: draft.plannedSeconds, actualSeconds: draft.actualSeconds, pausedSeconds: draft.pausedSeconds,
     trims: draft.trims || [], status: draft.status,
     sets: draft.sets.map(s => ({ ...s, logName: plan.exercises[s.exerciseId] ? (plan.exercises[s.exerciseId].logName || plan.exercises[s.exerciseId].name) : s.name })),
-    whatChanged: [], e1rms: {}
+    whatChanged: [], e1rms: {}, prs: []
   };
   const targets = await getTargets();
   const result = applyProgression({ session: record, targets, rules, plan, settings });
   record.whatChanged = result.lines;
   record.e1rms = result.e1rms;
+  record.prs = result.prs || [];
   await setTargets(result.targets);
   await putSession(record);
   return record;
@@ -44,6 +45,10 @@ export function renderSummary(container, record, { onDone, onBackup }) {
       record.trims.length ? el('tr', {}, [el('td', {}, 'Trimmed'), el('td', {}, record.trims.join('; '))]) : null
     ])
   ]);
+  const prs = (record.prs || []).length ? el('div', { class: 'card pr-card' }, [
+    el('h2', {}, `${record.prs.length === 1 ? 'Personal record' : 'Personal records'}`),
+    el('ul', { class: 'lines' }, record.prs.map(p => el('li', {}, p.kind === 'e1rm' ? `${p.name}: estimated 1RM ${p.value} lb (was ${p.prev})` : `${p.name}: heaviest set ${fmtWeight(p.value)} lb (was ${fmtWeight(p.prev)})`)))
+  ]) : null;
   const changes = el('div', { class: 'card' }, [
     el('h2', {}, 'What changed for next time'),
     record.whatChanged.length ? el('ul', { class: 'lines' }, record.whatChanged.map(l => el('li', {}, l.text))) : el('p', { class: 'muted' }, 'Nothing logged, nothing changed.')
@@ -61,12 +66,12 @@ export function renderSummary(container, record, { onDone, onBackup }) {
     el('button', { class: 'btn primary', onclick: onBackup }, 'Back up to Drive'),
     el('button', { class: 'btn', onclick: onDone }, 'Done')
   ]);
-  container.append(stats, changes, bench || '', sets, actions);
+  container.append(stats, prs || '', changes, bench || '', sets, actions);
 }
 
 export function setsTable(sets) {
   const rows = sets.filter(s => !s.ramp).map(s => el('tr', {}, [
-    el('td', {}, `${s.name}${s.baseline ? ' (baseline)' : ''}${s.retest ? ' (retest)' : ''}`),
+    el('td', {}, [`${s.name}${s.baseline ? ' (baseline)' : ''}${s.retest ? ' (retest)' : ''}`, s.pr && s.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null]),
     el('td', { class: 'num' }, s.setIndex != null ? (s.round ? `R${s.round}` : `${s.setIndex || ''}`) : ''),
     el('td', { class: 'num' }, s.skipped ? 'skipped' : `${s.weight != null ? fmtWeight(s.weight) + ' lb' : (s.holdSeconds ? '' : 'bw')} × ${s.reps != null ? s.reps : '?'}${s.holdSeconds ? ' s' : ''}`),
     el('td', { class: 'num' }, s.rpe != null && !s.skipped ? `RPE ${s.rpe}` : '')

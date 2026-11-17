@@ -15,14 +15,14 @@ import { effortText, effortToRpe, roundTo } from './data.js';
  *   ramp, baseline, retest, fillFromBaseline, iftime,
  *   trimKind: 'rest' | 'finisherRound' | 'iftime' | null, protectedBlock }
  */
-export function buildTimeline({ plan, rules, settings, sessionId, week, targets }) {
+export function buildTimeline({ plan, rules, settings, sessionId, week, targets, history }) {
   const session = plan.sessions.find(s => s.id === sessionId);
   if (!session) throw new Error(`Unknown session ${sessionId}`);
   const phase = phaseFor(plan, week);
   const t = rules.timing;
   const transitionSeconds = (settings && settings.transitionSeconds) || t.transitionSeconds;
   const steps = [];
-  const ctx = { plan, rules, settings, week, phase, targets: targets || {}, steps, transitionSeconds };
+  const ctx = { plan, rules, settings, week, phase, targets: targets || {}, history: history || {}, steps, transitionSeconds };
 
   const blocks = session.blocks;
   blocks.forEach((block, bi) => {
@@ -60,7 +60,7 @@ export function phaseFor(plan, week) {
 }
 
 function push(ctx, step) {
-  const s = { target: null, repRange: null, effort: null, effortText: '', rpeDefault: null, cue: '', exerciseId: null,
+  const s = { target: null, repRange: null, effort: null, effortText: '', rpeDefault: null, cue: '', exerciseId: null, last: null,
     setIndex: null, setCount: null, round: null, roundCount: null, perSide: false, holdSeconds: null,
     ramp: false, baseline: false, retest: false, fillFromBaseline: false, iftime: false, trimKind: null, protectedBlock: false,
     countdown: false, seconds: 0, ...step };
@@ -161,7 +161,9 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
 }
 
 function workSet(ctx, block, item, ex, k, sets, target, repRange, derived, extra) {
+  const last = ctx.history[item.exercise] || null;
   return push(ctx, {
+    last,
     kind: 'set', blockId: block.id, blockName: block.name, blockType: block.type, name: ex.name,
     exerciseId: item.exercise, setIndex: k + 1, setCount: sets,
     target: { weight: derived ? null : target.weight, reps: target.reps }, repRange,
@@ -349,6 +351,25 @@ export function trimToFit({ steps, fromIdx, overBySeconds, rules }) {
   const stillOver = overBySeconds - saved;
   if (stillOver > 60) notes.push(`Still about ${Math.round(stillOver / 60)} min over the cap after trimming; the rest is your call.`);
   return { steps: kept, notes, savedSeconds: saved };
+}
+
+/**
+ * lastResults(sessions) -> { exerciseId: { date, sessionName, sets: [{ weight, reps, rpe }] } }
+ * The most recent session's work sets per exercise (ramp-ups and skipped sets excluded). sessions newest first.
+ */
+export function lastResults(sessions) {
+  const out = {};
+  for (const s of sessions || []) {
+    for (const set of s.sets || []) {
+      if (set.ramp || !set.done || set.skipped || !set.exerciseId) continue;
+      if (!out[set.exerciseId]) out[set.exerciseId] = { date: s.date, sessionName: s.sessionName, sets: [], topSet: null };
+      const o = out[set.exerciseId];
+      if (o.date !== s.date) continue;
+      if (set.baseline || set.retest) o.topSet = { weight: set.weight, reps: set.reps, rpe: set.rpe };
+      else o.sets.push({ weight: set.weight, reps: set.reps, rpe: set.rpe });
+    }
+  }
+  return out;
 }
 
 // Projected remaining seconds from a step index (skipping done/removed).

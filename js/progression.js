@@ -3,6 +3,16 @@
 
 import { roundTo, fmtWeight } from './data.js';
 
+/** Live check used by the Player as a set is logged. Returns [] or a list of PR kinds. */
+export function checkPR(target, weight, reps, bodyweightAdd) {
+  const kinds = [];
+  if (!target || weight == null || !reps) return kinds;
+  const e = epley(weight + (bodyweightAdd || 0), reps);
+  if (target.bestE1rm != null && e > target.bestE1rm) kinds.push('e1rm');
+  if (target.bestWeight != null && weight > target.bestWeight) kinds.push('weight');
+  return kinds;
+}
+
 export function epley(weight, reps) {
   if (!weight || !reps) return null;
   return Math.round(weight * (1 + reps / 30));
@@ -16,13 +26,16 @@ export function incrementFor(rules, exerciseId, ex) {
 
 /**
  * applyProgression({ session, targets, rules, plan, settings })
- * returns { targets, lines: [{ exerciseId, name, text }], e1rms: { exerciseId: number } }
+ * returns { targets, lines: [{ exerciseId, name, text }], e1rms: { exerciseId: number }, prs: [{ exerciseId, name, kind, value, prev }] }
+ * Personal records: best estimated 1RM and heaviest weight per exercise, kept on the target record
+ * (bestE1rm, bestWeight). A PR is only reported when a previous best existed.
  * Does not mutate its inputs.
  */
 export function applyProgression({ session, targets, rules, plan, settings }) {
   const next = JSON.parse(JSON.stringify(targets || {}));
   const lines = [];
   const e1rms = {};
+  const prs = [];
   const bodyweight = (settings && settings.bodyweightLb) || 0;
   const week = session.week;
   const phase = session.phase && session.phase.id ? session.phase.id : phaseIdFor(plan, week);
@@ -51,11 +64,20 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     const isBw = ex && ex.equipment === 'weighted_bw';
     const loadOf = s => (s.weight || 0) + (isBw ? bodyweight : 0);
 
-    // e1RM for benchmark lifts
-    if (ex && ex.benchmark) {
+    // e1RM and personal records for any weighted exercise (benchmark lifts show e1RM on the summary)
+    if (ex && !ex.timed) {
       const cands = sets.filter(s => s.done && !s.skipped && s.weight != null && s.reps);
       const best = cands.reduce((m, s) => Math.max(m, epley(loadOf(s), s.reps) || 0), 0);
-      if (best > 0) { e1rms[id] = best; cur.e1rm = best; }
+      const heaviest = cands.reduce((m, s) => Math.max(m, s.weight || 0), 0);
+      if (best > 0) {
+        if (ex.benchmark) { e1rms[id] = best; cur.e1rm = best; }
+        if (cur.bestE1rm != null && best > cur.bestE1rm) prs.push({ exerciseId: id, name, kind: 'e1rm', value: best, prev: cur.bestE1rm });
+        if (cur.bestE1rm == null || best > cur.bestE1rm) cur.bestE1rm = best;
+      }
+      if (heaviest > 0) {
+        if (cur.bestWeight != null && heaviest > cur.bestWeight) prs.push({ exerciseId: id, name, kind: 'weight', value: heaviest, prev: cur.bestWeight });
+        if (cur.bestWeight == null || heaviest > cur.bestWeight) cur.bestWeight = heaviest;
+      }
     }
 
     // retest extras (max pull-ups, max T2B)
@@ -195,7 +217,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     next[id] = cur;
   }
 
-  return { targets: next, lines, e1rms };
+  return { targets: next, lines, e1rms, prs };
 }
 
 function phaseIdFor(plan, week) {

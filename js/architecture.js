@@ -64,6 +64,7 @@ export function drawSVG(arch, query) {
   svg.appendChild(svgEl('text', { x: C.x + C.w / 2, y: C.y + 24, 'font-size': 13, 'font-weight': 600, 'text-anchor': 'middle' }, arch.columns.find(c => c.id === 'app').name));
 
   // flows
+  const upCount = {};
   arch.flows.forEach(f => {
     const to = L.boxes[f.to]; if (!to) return;
     const from = L.boxes[f.from];
@@ -78,7 +79,10 @@ export function drawSVG(arch, query) {
     } else if (to.y > from.y) {
       d = `M${from.cx} ${from.y + from.h}V${to.y}`;
     } else {
-      d = `M${from.x} ${from.cy}H${from.x - 8}V${to.cy}H${to.x}`;
+      // upward loop on the left; stagger when the same source has several
+      const n = (upCount[f.from] = (upCount[f.from] || 0) + 1);
+      const gap = 8 + (n - 1) * 6;
+      d = `M${from.x} ${from.cy + (n - 1) * 10}H${from.x - gap}V${to.cy + (n - 1) * 10}H${to.x}`;
     }
     const p = svgEl('path', { d, class: cls, 'marker-end': 'url(#arch-arrow)' });
     if (f.static) p.setAttribute('stroke-dasharray', '4 4');

@@ -1,7 +1,7 @@
 // Node tests for the Session Builder and Progression Engine. Run: node tests/run-tests.mjs
 import { readFileSync } from 'node:fs';
-import { buildTimeline, trimToFit, remainingSeconds } from '../js/builder.js';
-import { applyProgression, epley } from '../js/progression.js';
+import { buildTimeline, trimToFit, remainingSeconds, lastResults } from '../js/builder.js';
+import { applyProgression, epley, checkPR } from '../js/progression.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -132,6 +132,28 @@ check('power clean not auto-progressed', r.targets.power_clean.weight === 135 &&
 r = applyProgression({ session: mkSession(3, [ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6])]), targets: { weighted_pullup: { weight: 25, reps: 6 } }, rules, plan, settings });
 check('pull-up e1RM uses bodyweight (165+25)x1.2 = 228', r.e1rms.weighted_pullup === 228 && r.targets.weighted_pullup.weight === 27.5, { e: r.e1rms, t: r.targets.weighted_pullup });
 check('epley 185x5 = 216', epley(185, 5) === 216);
+
+// ---- v1.1: last-time data and PRs ----
+console.log('v1.1: last time + PRs');
+const prevSessions = [
+  { date: '2026-11-23', sessionName: 'Lift 1: Legs', sets: [ws('back_squat', 165, 5, 8, [4, 6]), ws('back_squat', 165, 5, 8, [4, 6]), { exerciseId: 'back_squat', ramp: true, done: true, weight: 95, reps: 5 }, ws('rdl', 155, 7, 8, [6, 8])] },
+  { date: '2026-11-16', sessionName: 'Lift 1: Legs', sets: [ws('back_squat', 160, 4, 8, [4, 6])] }
+];
+const hist = lastResults(prevSessions);
+check('lastResults picks newest session, skips ramp-ups', hist.back_squat.sets.length === 2 && hist.back_squat.sets[0].weight === 165 && hist.rdl.sets.length === 1, hist);
+const tlH = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, targets, history: hist });
+const sq = tlH.steps.find(s => s.exerciseId === 'back_squat' && s.kind === 'set' && !s.ramp);
+check('work set carries last-time data', sq.last && sq.last.sets[0].weight === 165, sq.last);
+check('ramp-up sets do not show last time', tlH.steps.filter(s => s.ramp).every(s => !s.last));
+// engine PR tracking
+r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 7, [4, 6])]), targets: { back_squat: { weight: 185, reps: 6, stall: 0, bestE1rm: 200, bestWeight: 175 } }, rules, plan, settings });
+check('engine reports e1RM and weight PRs', r.prs.length === 2 && r.prs.some(p => p.kind === 'e1rm' && p.value === 222) && r.prs.some(p => p.kind === 'weight' && p.value === 185), r.prs);
+check('engine stores new bests', r.targets.back_squat.bestE1rm === 222 && r.targets.back_squat.bestWeight === 185, r.targets.back_squat);
+r = applyProgression({ session: mkSession(1, [ws('back_squat', 185, 5, 8, [5, 5], { baseline: true }), ws('back_squat', 165, 4, 7, [4, 6])]), targets: {}, rules, plan, settings });
+check('no PR reported when there was no previous best', r.prs.length === 0 && r.targets.back_squat.bestE1rm === 216, { prs: r.prs, t: r.targets.back_squat });
+check('checkPR live: 190x5 beats e1RM 216', checkPR({ bestE1rm: 216, bestWeight: 185 }, 190, 5, 0).join(',') === 'e1rm,weight');
+check('checkPR live: nothing without prior bests', checkPR({}, 190, 5, 0).length === 0);
+check('checkPR live: pull-up adds bodyweight', checkPR({ bestE1rm: 228 }, 27.5, 6, 165).join(',') === 'e1rm');
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

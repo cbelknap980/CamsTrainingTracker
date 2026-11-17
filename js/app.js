@@ -1,7 +1,8 @@
 // app.js - app shell: boot, tabs, Home, History, Runs, Settings, and the start/resume/summary flow.
 
 import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, toISODate } from './data.js';
-import { buildTimeline } from './builder.js';
+import { buildTimeline, lastResults } from './builder.js';
+import { icon } from './icons.js';
 import { Player } from './player.js';
 import { saveSession, renderSummary, runForm, setsTable, fmtPace } from './logger.js';
 import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll } from './store.js';
@@ -23,8 +24,12 @@ async function boot() {
     return;
   }
   setSettingsDefaults(D.settingsDefaults);
-  document.querySelectorAll('#tabs .tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.view)));
-  document.getElementById('settings-btn').addEventListener('click', () => renderSettings());
+  document.querySelectorAll('#tabs .tab').forEach(b => {
+    b.prepend(icon(b.dataset.view));
+    b.addEventListener('click', () => showTab(b.dataset.view));
+  });
+  const sb = document.getElementById('settings-btn'); sb.innerHTML = ''; sb.appendChild(icon('settings'));
+  sb.addEventListener('click', () => renderSettings());
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
@@ -135,10 +140,19 @@ function editTarget(id, ex, t) {
 async function startSession(sessionId, week) {
   const settings = await getSettings();
   const targets = await getTargets();
-  const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId, week, targets });
-  player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, container: view, onFinish: onSessionFinished });
+  const history = lastResults(await getSessions());
+  const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId, week, targets, history });
+  await askNotificationPermission(settings);
+  player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
   window.scrollTo(0, 0);
   player.start();
+}
+
+// Asked from the Start tap (a user gesture), only while the answer is still 'default'.
+async function askNotificationPermission(settings) {
+  if (!('Notification' in window) || !(settings.cues && settings.cues.notify !== false)) return;
+  if (Notification.permission !== 'default') return;
+  try { await Notification.requestPermission(); } catch (e) { /* ignore */ }
 }
 
 function offerResume(saved) {
@@ -150,7 +164,8 @@ function offerResume(saved) {
     el('div', { class: 'stack' }, [
       el('button', { class: 'btn primary', onclick: async () => {
         const settings = await getSettings();
-        player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, container: view, onFinish: onSessionFinished });
+        const targets = await getTargets();
+        player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
         player.resume(saved);
       } }, 'Resume'),
       el('button', { class: 'btn', onclick: async () => {
@@ -257,6 +272,8 @@ async function renderSettings() {
     toggle('Vibrate when a rest ends', 'cues.vibrate', s.cues.vibrate),
     toggle('Beep when a rest ends', 'cues.beep', s.cues.beep),
     toggle('3-second warning tick', 'cues.warningTick', s.cues.warningTick),
+    toggle('Notify when a rest ends while in another app', 'cues.notify', s.cues.notify !== false),
+    ('Notification' in window && Notification.permission === 'denied') ? el('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Notifications are blocked for this site in Android settings; allow them there to get the rest-end alert.') : null,
     toggle('Keep the screen on during a session', 'keepScreenOn', s.keepScreenOn !== false),
     el('div', { style: 'height:10px' }),
     el('div', { class: 'grid2' }, [numField('Bodyweight (lb)', 'bodyweightLb', 0.5), numField('Transition (s)', 'transitionSeconds', 5)]),
