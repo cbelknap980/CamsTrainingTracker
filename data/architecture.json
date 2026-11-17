@@ -42,8 +42,8 @@
       "column": "inputs",
       "name": "Cameron's taps",
       "lines": [
-        "Start, Done, edit a set,",
-        "pause, skip, back, run form"
+        "Start, Done, edit a set, review,",
+        "benchmarks, pause, skip, run form"
       ],
       "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore."
     },
@@ -86,18 +86,18 @@
       "name": "Logger",
       "lines": [
         "one tap logs weight, reps, RPE",
-        "run log form, session summary"
+        "end-of-session review, run log"
       ],
       "file": "js/logger.js",
-      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. Builds the end-of-session summary (sets done, time vs planned, trims, what changed) and saves the session record. Also the run log form (date, type, distance, time, RPE, notes)."
+      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. When the session ends it opens the Review screen: every exercise with its sets (tap to correct), the engine's verdict (Up / Hold / Drop / Set) with its reason, and the next weight and reps as editable fields; Save runs the engine on the corrected sets, applies any overrides (tagged 'set by you') and stores the session. Then the summary. Also the run log form (date, type, distance, time, RPE, notes)."
     },
     {
       "id": "progression",
       "column": "app",
       "name": "Progression Engine",
       "lines": [
-        "applies rules after each save",
-        "e1RM, next targets, what changed"
+        "applies rules after review and save",
+        "verdicts, e1RM, PRs, next targets"
       ],
       "file": "js/progression.js",
       "description": "Runs once after a session saves. For each exercise in the session: applies the week override if any, the baseline rule in weeks 1-2, otherwise the success test (main lifts) or the reps-then-weight rule (accessories), counts stalls and drops 10% after two misses, computes Epley estimated 1RM for benchmark lifts, writes the new targets and a plain-language what-changed line per exercise. Power clean is excluded from automatic progression. Also keeps each exercise's best estimated 1RM and heaviest weight and reports personal records when a session beats them."
@@ -137,12 +137,12 @@
     {
       "id": "history",
       "column": "outputs",
-      "name": "History + what changed",
+      "name": "Log, benchmarks, what changed",
       "lines": [
-        "past sessions, run log, PRs,",
-        "next session's weights"
+        "sessions, exercises over time, PRs,",
+        "benchmarks and next targets"
       ],
-      "description": "History lists past sessions and runs with every set. Each session shows its what-changed list. The Home screen shows next session's targets so there is no surprise at the gym; any target can be edited there."
+      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it."
     },
     {
       "id": "backup",

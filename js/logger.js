@@ -6,9 +6,46 @@ import { getTargets, setTargets, putSession, putRun, newId, getSettings } from '
 import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, weekNumber } from './data.js';
 import { el, toast, closeModal, showModal } from './ui.js';
 
-/** Build the session record from the Player's draft, apply progression, save, return the record. */
-export async function saveSession(draft, { plan, rules }) {
+/** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
+export async function previewSession(draft, { plan, rules }) {
   const settings = await getSettings();
+  const record = buildRecord(draft, plan);
+  const targets = await getTargets();
+  const result = applyProgression({ session: record, targets, rules, plan, settings });
+  return { record, result, targets, settings };
+}
+
+/**
+ * Save the session: run the engine, then apply any next-target overrides from the Review screen
+ * (overrides = { exerciseId: { weight, reps } }, tagged 'set by you'), then store everything.
+ */
+export async function saveSession(draft, { plan, rules, overrides }) {
+  const settings = await getSettings();
+  const record = buildRecord(draft, plan);
+  const targets = await getTargets();
+  const result = applyProgression({ session: record, targets, rules, plan, settings });
+  const ov = overrides || {};
+  for (const [id, o] of Object.entries(ov)) {
+    const t = result.targets[id] || (result.targets[id] = {});
+    const changed = (o.weight != null && o.weight !== t.weight) || (o.reps != null && o.reps !== t.reps);
+    if (!changed) continue;
+    if (o.weight != null) t.weight = o.weight;
+    if (o.reps != null) t.reps = o.reps;
+    t.source = 'you'; t.updated = record.endedAt; t.sessionId = record.id;
+    const line = result.lines.find(l => l.exerciseId === id);
+    const txt = ` You set next time to ${fmtWeight(t.weight)} lb${t.reps != null ? ' x ' + t.reps : ''}.`;
+    if (line) { line.text += txt; line.verdict = 'you'; line.next = { weight: t.weight, reps: t.reps }; }
+    else result.lines.push({ exerciseId: id, name: plan.exercises[id] ? plan.exercises[id].name : id, text: txt.trim(), verdict: 'you', reason: 'set by you', next: { weight: t.weight, reps: t.reps } });
+  }
+  record.whatChanged = result.lines;
+  record.e1rms = result.e1rms;
+  record.prs = result.prs || [];
+  await setTargets(result.targets);
+  await putSession(record);
+  return record;
+}
+
+function buildRecord(draft, plan) {
   const tl = draft.timeline;
   const record = {
     id: newId('ses'),
@@ -17,17 +54,107 @@ export async function saveSession(draft, { plan, rules }) {
     date: toISODate(draft.startedAt), startedAt: draft.startedAt, endedAt: draft.endedAt,
     plannedSeconds: draft.plannedSeconds, actualSeconds: draft.actualSeconds, pausedSeconds: draft.pausedSeconds,
     trims: draft.trims || [], status: draft.status,
-    sets: draft.sets.map(s => ({ ...s, logName: plan.exercises[s.exerciseId] ? (plan.exercises[s.exerciseId].logName || plan.exercises[s.exerciseId].name) : s.name })),
+    // same objects as the draft, so edits on the Review screen stick across re-renders
+    sets: draft.sets.map(s => Object.assign(s, { logName: plan.exercises[s.exerciseId] ? (plan.exercises[s.exerciseId].logName || plan.exercises[s.exerciseId].name) : s.name })),
     whatChanged: [], e1rms: {}, prs: []
   };
-  const targets = await getTargets();
-  const result = applyProgression({ session: record, targets, rules, plan, settings });
-  record.whatChanged = result.lines;
-  record.e1rms = result.e1rms;
-  record.prs = result.prs || [];
-  await setTargets(result.targets);
-  await putSession(record);
+  if (!record.id || draft.recordId) record.id = draft.recordId || record.id;
   return record;
+}
+
+export const VERDICT = {
+  up: { label: 'Up', arrow: '↑', cls: 'up' },
+  hold: { label: 'Hold', arrow: '→', cls: 'hold' },
+  drop: { label: 'Drop', arrow: '↓', cls: 'drop' },
+  set: { label: 'Set', arrow: '•', cls: 'set' },
+  none: { label: '', arrow: '', cls: 'none' },
+  you: { label: 'You', arrow: '✎', cls: 'you' }
+};
+
+/**
+ * End-of-session Review (v1.3): every exercise with its sets (tap to edit), the engine's verdict and reason,
+ * and the next weight/reps as editable fields. Save runs the engine on the edited sets and applies overrides.
+ */
+export async function renderReview(container, draft, ctx, { onSave, onCancel }) {
+  const { plan, rules } = ctx;
+  const overrides = {};
+  draft.recordId = draft.recordId || newId('ses');
+  const settings = await getSettings();
+
+  async function paint() {
+    const { record, result } = await previewSession(draft, { plan, rules });
+    container.innerHTML = '';
+    const over = record.actualSeconds - record.plannedSeconds;
+    container.appendChild(el('div', { class: 'card' }, [
+      el('h1', {}, 'Review and save'),
+      el('p', { class: 'muted' }, `${record.sessionName} · week ${record.week} · ${fmtMinutes(record.actualSeconds)} (plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)})${record.status !== 'complete' ? ' · ended early' : ''}`),
+      el('p', { class: 'muted', style: 'margin:0' }, 'Tap a set to correct it. The arrow is the plan’s verdict for next time; change the next weight if you disagree.')
+    ]));
+
+    const order = [];
+    const groups = {};
+    for (const st of record.sets) { if (st.ramp) continue; if (!groups[st.exerciseId]) { groups[st.exerciseId] = []; order.push(st.exerciseId); } groups[st.exerciseId].push(st); }
+    for (const id of order) {
+      const sets = groups[id];
+      const ex = plan.exercises[id];
+      const line = result.lines.find(l => l.exerciseId === id) || { verdict: 'none', reason: '', next: { weight: null, reps: null } };
+      const v = VERDICT[line.verdict] || VERDICT.none;
+      const ov = overrides[id];
+      const nextW = ov && ov.weight != null ? ov.weight : line.next.weight;
+      const nextR = ov && ov.reps != null ? ov.reps : line.next.reps;
+      const curW = sets.find(x => x.done && x.weight != null && !x.baseline) ? sets.filter(x => x.done && x.weight != null && !x.baseline).slice(-1)[0].weight : null;
+      const delta = curW != null && nextW != null ? nextW - curW : null;
+      const card = el('div', { class: 'card review-card' });
+      card.appendChild(el('div', { class: 'row' }, [
+        el('div', {}, [el('b', {}, ex ? ex.name : (sets[0].name || id)), el('div', { class: 'muted', style: 'font-size:var(--t-small)' }, line.reason || '')]),
+        v.label ? el('span', { class: 'verdict ' + (ov ? 'you' : v.cls) }, ov ? '✎ set by you' : `${v.arrow} ${v.label}${delta != null && delta !== 0 ? ` ${delta > 0 ? '+' : ''}${fmtWeight(delta)}` : ''}`) : null
+      ]));
+      const rows = sets.map((st, i) => el('div', { class: 'review-set' + (st.skipped ? ' skipped' : ''), onclick: () => editSet(st, ex) }, [
+        el('span', { class: 'muted' }, st.baseline ? 'Base' : (st.retest ? 'Test' : (st.round ? `R${st.round}` : `${st.setIndex || i + 1}`))),
+        el('span', {}, st.skipped ? 'skipped' : `${st.weight != null ? fmtWeight(st.weight) + ' lb' : (st.holdSeconds ? '' : 'bw')} × ${st.reps != null ? st.reps : '?'}${st.holdSeconds ? ' s' : ''}`),
+        el('span', { class: 'muted' }, st.rpe != null && !st.skipped ? `RPE ${st.rpe}` : ''),
+        st.pr && st.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : el('span', { class: 'muted' }, '›')
+      ]));
+      card.appendChild(el('div', { class: 'review-sets' }, rows));
+      if (line.verdict !== 'none' && (nextW != null || (ex && ex.equipment !== 'bodyweight'))) {
+        const wIn = el('input', { type: 'number', step: String(ex && ex.mainLift ? (rules.increments.byExercise[id] || rules.increments.default) : (rules.smallestJump[(ex || {}).equipment] || 5)), value: nextW == null ? '' : nextW, inputmode: 'decimal', onchange: e => { overrides[id] = { ...(overrides[id] || {}), weight: e.target.value === '' ? null : Number(e.target.value) }; paint(); } });
+        const rIn = el('input', { type: 'number', step: '1', value: nextR == null ? '' : nextR, inputmode: 'numeric', onchange: e => { overrides[id] = { ...(overrides[id] || {}), reps: e.target.value === '' ? null : Number(e.target.value) }; paint(); } });
+        card.appendChild(el('div', { class: 'review-next' }, [
+          el('div', { class: 'field' }, [el('label', {}, 'Next weight (lb)'), wIn]),
+          el('div', { class: 'field' }, [el('label', {}, 'Next reps'), rIn]),
+          ov ? el('button', { class: 'btn small ghost', onclick: () => { delete overrides[id]; paint(); } }, 'Reset') : el('div')
+        ]));
+      }
+      container.appendChild(card);
+    }
+    if (result.prs && result.prs.length) container.appendChild(el('div', { class: 'card pr-card' }, [el('h2', {}, 'Personal records'), el('ul', { class: 'lines' }, result.prs.map(p => el('li', {}, p.kind === 'e1rm' ? `${p.name}: e1RM ${p.value} lb (was ${p.prev})` : `${p.name}: heaviest ${fmtWeight(p.value)} lb (was ${fmtWeight(p.prev)})`)))]));
+    container.appendChild(el('div', { class: 'stack' }, [
+      el('button', { class: 'btn primary', onclick: () => onSave(overrides) }, 'Save session'),
+      onCancel ? el('button', { class: 'btn ghost', onclick: onCancel }, 'Back') : null
+    ]));
+    window.scrollTo(0, 0);
+  }
+
+  function editSet(st, ex) {
+    const isBw = ex && ex.equipment === 'bodyweight';
+    const w = el('input', { type: 'number', step: '2.5', value: st.weight == null ? '' : st.weight, inputmode: 'decimal' });
+    const r = el('input', { type: 'number', step: '1', value: st.reps == null ? '' : st.reps, inputmode: 'numeric' });
+    const p = el('input', { type: 'number', step: '0.5', value: st.rpe == null ? '' : st.rpe, inputmode: 'decimal' });
+    showModal(el('div', {}, [
+      el('h2', {}, `${st.name}${st.setIndex ? ', set ' + st.setIndex : ''}`),
+      el('div', { class: 'grid3' }, [
+        isBw ? el('div') : el('div', { class: 'field' }, [el('label', {}, ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight'), w]),
+        el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r]),
+        el('div', { class: 'field' }, [el('label', {}, 'RPE'), p])
+      ]),
+      el('div', { class: 'btn-row' }, [
+        el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
+        st.skipped ? el('button', { class: 'btn', onclick: () => { st.skipped = false; st.done = true; st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = p.value === '' ? null : Number(p.value); closeModal(); paint(); } }, 'Mark done') : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.done = false; closeModal(); paint(); } }, 'Mark skipped'),
+        el('button', { class: 'btn primary', onclick: () => { st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = p.value === '' ? null : Number(p.value); st.done = true; st.skipped = false; closeModal(); paint(); } }, 'Save')
+      ])
+    ]));
+  }
+  await paint();
 }
 
 export function renderSummary(container, record, { onDone, onBackup }) {

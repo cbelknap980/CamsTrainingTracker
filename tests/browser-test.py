@@ -12,6 +12,19 @@ def check(name, cond, info=''):
     print(('  ok   ' if cond else '  FAIL ') + name + ('' if cond else f'  {info}'))
     if not cond: fails.append(name)
 
+def pass_review(page, prefix, override=None):
+    page.wait_for_selector('h1:has-text("Review and save")')
+    check(f'{prefix}: review shows verdict badges', page.locator('.verdict').count() >= 1, page.locator('.verdict').count())
+    page.screenshot(path=f'{SHOTS}/{prefix}-review.png', full_page=True)
+    if override:
+        card = page.locator('.review-card', has_text=override[0]).first
+        card.locator('.review-next input').first.fill(str(override[1]))
+        card.locator('.review-next input').first.dispatch_event('change')
+        page.wait_for_timeout(200)
+        check(f'{prefix}: override tags set by you', page.locator('.verdict.you').count() >= 1)
+    page.click('button:has-text("Save session")')
+    page.wait_for_selector('h1:has-text("Session")')
+
 def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests=True, go_behind_at=None):
     page.click(start_selector)
     page.wait_for_selector('.player')
@@ -19,7 +32,7 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
     kinds = []
     trimmed = False
     while steps < 400:
-        if page.locator('.card h1', has_text='Session').count() and not page.locator('.player').count():
+        if page.locator('h1', has_text='Review and save').count() and not page.locator('.player').count():
             break
         kind = page.locator('.step-kind').inner_text().strip().lower()
         kinds.append(kind)
@@ -64,7 +77,7 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
             page.click('button.btn.primary')
         page.wait_for_timeout(60)
         steps += 1
-    page.wait_for_selector('.card h1')
+    pass_review(page, shots_prefix, override=('Box squat', 170) if shots_prefix == 'lift1' else None)
     page.screenshot(path=f'{SHOTS}/{shots_prefix}-summary.png', full_page=True)
     return steps, kinds
 
@@ -95,7 +108,15 @@ with sync_playwright() as p:
     page.wait_for_selector('.card.accent')
     page.screenshot(path=f'{SHOTS}/home-after-lift1.png', full_page=True)
     rows = page.locator('table tr').all_inner_texts()
-    check('home next targets lists Box squat 165 x 4', any('Box squat' in r and '165' in r for r in rows), rows)
+    check('home next targets lists Box squat 170 x 4 (your override)', any('Box squat' in r and '170' in r and 'set by you' in r.lower() for r in rows), rows)
+    # Benchmarks: enter strict press 100 -> target 90 x 4
+    check('benchmarks card lists 7 lifts', page.locator('h3:has-text("Benchmarks")').count() == 1 and page.locator('tr.tappable', has_text='Strict press').count() == 1)
+    page.locator('tr.tappable', has_text='Strict press').click(); page.wait_for_selector('.modal input')
+    page.fill('.modal input', '100'); page.wait_for_timeout(100)
+    check('benchmark preview shows 90 x 4', '90 lb' in page.locator('.modal p.muted').last.inner_text(), page.locator('.modal p.muted').last.inner_text())
+    page.click('.modal button:has-text("Save benchmark")'); page.wait_for_timeout(300)
+    rows = page.locator('table tr').all_inner_texts()
+    check('home shows Strict press 90 x 4 from benchmark', any('Strict press' in r and '90' in r for r in rows), [r for r in rows if 'Strict' in r])
     check('home shows what changed card', page.locator('h3', has_text='What changed').count() == 1)
 
     # ---- Lift 2 with resume mid-way ----
@@ -132,10 +153,10 @@ with sync_playwright() as p:
             t = page.locator('#timer').inner_text(); m, s = t.split(':'); page.clock.run_for((int(m) * 60 + int(s) + 1) * 1000)
         else: page.click('button.btn.primary')
         page.wait_for_timeout(60); steps2 += 1
-    page.wait_for_selector('h1', state='visible')
+    pass_review(page, 'lift2')
     check('lift2 reached summary', page.locator('h1', has_text='Session').count() == 1)
     lines2 = page.locator('.card .lines li').all_inner_texts()
-    check('lift2 strict press baseline 95 -> 85 (2.5 lb rounding)', any('Strict press baseline' in l and '85' in l for l in lines2), lines2)
+    check('lift2 strict press used the benchmark target (no baseline step)', any('Strict press' in l and 'baseline' not in l for l in lines2), lines2)
     check('lift2 pull-up baseline logged', any('Weighted pull-up baseline' in l for l in lines2), lines2)
     page.screenshot(path=f'{SHOTS}/lift2-summary.png', full_page=True)
     page.click('button:has-text("Done")'); page.wait_for_selector('.card.accent')
@@ -155,6 +176,12 @@ with sync_playwright() as p:
     check('history lists 3 sessions', page.locator('.list-item').count() == 3, page.locator('.list-item').count())
     page.locator('.list-item').first.click(); page.wait_for_selector('.modal table')
     page.screenshot(path=f'{SHOTS}/history-detail.png', full_page=True)
+    page.click('.modal button:has-text("Close")')
+    page.click('.segmented button:has-text("Exercises")'); page.wait_for_timeout(400); page.wait_for_selector('.list-item')
+    check('exercise log lists exercises', page.locator('.list-item').count() >= 10, page.locator('.list-item').count())
+    page.locator('.list-item', has_text='Box squat').click(); page.wait_for_selector('.modal table')
+    check('exercise sheet has set rows', page.locator('.modal table tr').count() >= 4, page.locator('.modal table tr').count())
+    page.screenshot(path=f'{SHOTS}/exercise-log.png', full_page=True)
     page.click('.modal button:has-text("Close")')
 
     # ---- Runs ----
@@ -213,7 +240,7 @@ with sync_playwright() as p:
     check('v1.2 strip has one segment per block (6 on Lift 1)', page.locator('.strip-bar .seg').count() == 6, page.locator('.seg-label').all_inner_texts())
     check('v1.2 segment labels use exercise names', 'Squat' in page.locator('.seg-label').all_inner_texts() and any('RDL' in t for t in page.locator('.seg-label').all_inner_texts()), page.locator('.seg-label').all_inner_texts())
     check('v1.2 status line shows block and steps', 'Block 2 of 6' in page.locator('#clock').inner_text() and 'steps' in page.locator('#clock').inner_text(), page.locator('#clock').inner_text())
-    check('v1.2 readout tiles show weight and reps', page.locator('.readout .tile').count() == 3 and '165' in page.locator('.tile-weight').inner_text(), page.locator('.readout').inner_text())
+    check('v1.2 readout tiles show weight and reps', page.locator('.readout .tile').count() == 3 and '170' in page.locator('.tile-weight').inner_text(), page.locator('.readout').inner_text())
     page.click('.strip'); page.wait_for_selector('.overview')
     check('v1.2 overview lists blocks with set ticks', page.locator('.ov-block').count() == 6 and page.locator('.tick.current').count() == 1, page.locator('.ov-block').count())
     page.screenshot(path=f'{SHOTS}/overview.png', full_page=True)
@@ -226,7 +253,8 @@ with sync_playwright() as p:
     page.click('.player-head .icon-btn'); page.wait_for_selector('.menu')
     check('menu lists pause, back, end', page.locator('.menu-item').count() >= 3, page.locator('.menu-item').all_inner_texts())
     page.screenshot(path=f'{SHOTS}/menu.png')
-    page.click('.menu-item:has-text("End session")'); page.click('.modal button:has-text("End session")'); page.wait_for_selector('h1')
+    page.click('.menu-item:has-text("End session")'); page.click('.modal button:has-text("End session")')
+    pass_review(page, 'week3')
     check('summary shows PR card', page.locator('.pr-card').count() == 1, page.locator('.pr-card').inner_text() if page.locator('.pr-card').count() else 'none')
     page.screenshot(path=f'{SHOTS}/week3-summary.png', full_page=True)
 

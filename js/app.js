@@ -4,7 +4,8 @@ import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessi
 import { buildTimeline, lastResults } from './builder.js';
 import { icon } from './icons.js';
 import { Player } from './player.js';
-import { saveSession, renderSummary, runForm, setsTable, fmtPace } from './logger.js';
+import { saveSession, renderSummary, renderReview, runForm, setsTable, fmtPace } from './logger.js';
+import { epley, targetFromBenchmark } from './progression.js';
 import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
@@ -111,6 +112,8 @@ async function renderHome() {
     el('p', { class: 'muted', style: 'margin-top:8px' }, 'Tap a row to change a target by hand.')
   ]));
 
+  view.appendChild(benchmarksCard(targets, settings));
+
   const last = (await getSessions())[0];
   if (last && last.whatChanged && last.whatChanged.length) {
     view.appendChild(el('div', { class: 'card' }, [
@@ -118,6 +121,64 @@ async function renderHome() {
       el('ul', { class: 'lines' }, last.whatChanged.map(l => el('li', {}, l.text)))
     ]));
   }
+}
+
+// ---- Benchmarks (v1.3) ----
+function repRangeFor(exerciseId) {
+  for (const sess of D.plan.sessions) for (const b of sess.blocks) for (const it of b.items || []) if (it.exercise === exerciseId && it.reps) return it.reps;
+  return null;
+}
+
+function benchmarksCard(targets, settings) {
+  const ids = Object.entries(D.plan.exercises).filter(([, ex]) => ex.benchmark).map(([id]) => id);
+  const rows = ids.map(id => {
+    const ex = D.plan.exercises[id];
+    const t = targets[id] || {};
+    const bench = t.benchmarkWeight != null ? `${fmtWeight(t.benchmarkWeight)}` : '–';
+    const now = t.e1rm != null ? `${t.e1rm}` : (t.bestE1rm != null ? `${t.bestE1rm}` : '–');
+    const next = t.weight != null ? `${fmtWeight(t.weight)} × ${t.reps != null ? t.reps : '-'}` : '–';
+    return el('tr', { class: 'tappable', onclick: () => editBenchmark(id, ex, t, settings) }, [
+      el('td', {}, [ex.name, ' ', t.source === 'benchmark' ? el('span', { class: 'badge you' }, 'bench') : null]),
+      el('td', { class: 'num' }, bench),
+      el('td', { class: 'num' }, now),
+      el('td', { class: 'num' }, next)
+    ]);
+  });
+  return el('div', { class: 'card' }, [
+    el('h3', {}, 'Benchmarks'),
+    el('table', {}, [el('tr', {}, [el('th', {}, 'Lift'), el('th', { class: 'num' }, '5 w/ 2 left'), el('th', { class: 'num' }, 'e1RM'), el('th', { class: 'num' }, 'Next')]), ...rows]),
+    el('p', { class: 'muted', style: 'margin-top:8px' }, 'Tap a lift to enter a benchmark: the weight you can do for 5 with 2 reps left. Targets update from it right away (90% in weeks 1–2) and keep moving with your sessions. Pull-up: added weight.')
+  ]);
+}
+
+function editBenchmark(id, ex, t, settings) {
+  const w = el('input', { type: 'number', step: '2.5', value: t.benchmarkWeight != null ? t.benchmarkWeight : (t.weight != null ? t.weight : ''), inputmode: 'decimal', placeholder: 'lb' });
+  const range = repRangeFor(id);
+  const bwAdd = ex.equipment === 'weighted_bw' ? (settings.bodyweightLb || 0) : 0;
+  const preview = el('p', { class: 'muted' });
+  const upd = () => {
+    const v = w.value === '' ? null : Number(w.value);
+    if (v == null) { preview.textContent = ''; return; }
+    const tgt = targetFromBenchmark({ rules: D.rules, exerciseId: id, ex, benchmark: v, repRange: range, bodyweightAdd: bwAdd, existing: t });
+    preview.textContent = `Training target ${fmtWeight(tgt.weight)} lb × ${tgt.reps} · estimated 1RM ${epley(v + bwAdd, D.rules.baseline.topSetReps)} lb${bwAdd ? ' (incl. bodyweight)' : ''}`;
+  };
+  w.addEventListener('input', upd); upd();
+  showModal(el('div', {}, [
+    el('h2', {}, ex.name),
+    el('p', { class: 'muted' }, ex.equipment === 'weighted_bw' ? 'Added weight for a set of 5 with 2 reps left.' : (id === 'power_clean' ? 'A crisp, fast double. The app trains at 90% of it.' : 'Weight for a set of 5 with 2 reps left (RPE 8).')),
+    el('div', { class: 'field' }, [el('label', {}, 'Benchmark (lb)'), w]),
+    preview,
+    el('div', { class: 'btn-row' }, [
+      el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
+      el('button', { class: 'btn primary', onclick: async () => {
+        const v = w.value === '' ? null : Number(w.value);
+        if (v == null) { toast('Enter a weight'); return; }
+        const tgt = targetFromBenchmark({ rules: D.rules, exerciseId: id, ex, benchmark: v, repRange: range, bodyweightAdd: bwAdd, existing: t });
+        await setTarget(id, tgt);
+        closeModal(); toast(`${ex.name}: next ${fmtWeight(tgt.weight)} lb × ${tgt.reps}`); renderHome();
+      } }, 'Save benchmark')
+    ])
+  ]));
 }
 
 function editTarget(id, ex, t) {
@@ -181,13 +242,18 @@ function offerResume(saved) {
 async function onSessionFinished(draft) {
   player = null;
   try {
-    const record = await saveSession(draft, { plan: D.plan, rules: D.rules });
-    await updateWeekChip();
     window.scrollTo(0, 0);
-    const settings = await getSettings();
-    renderSummary(view, record, {
-      onDone: () => showTab('home'),
-      onBackup: () => backupNow(settings, D.plan.planVersion)
+    await renderReview(view, draft, { plan: D.plan, rules: D.rules }, {
+      onSave: async overrides => {
+        const record = await saveSession(draft, { plan: D.plan, rules: D.rules, overrides });
+        await updateWeekChip();
+        window.scrollTo(0, 0);
+        const settings = await getSettings();
+        renderSummary(view, record, {
+          onDone: () => showTab('home'),
+          onBackup: () => backupNow(settings, D.plan.planVersion)
+        });
+      }
     });
   } catch (e) {
     view.innerHTML = '';
@@ -196,11 +262,19 @@ async function onSessionFinished(draft) {
 }
 
 // ---- History ----
+let historyMode = 'sessions';
 async function renderHistory() {
   const sessions = await getSessions();
   view.innerHTML = '';
-  view.appendChild(el('h1', {}, 'History'));
+  view.appendChild(el('div', { class: 'row' }, [
+    el('h1', {}, 'Log'),
+    el('div', { class: 'segmented' }, [
+      el('button', { class: historyMode === 'sessions' ? 'on' : '', onclick: () => { historyMode = 'sessions'; renderHistory(); } }, 'Sessions'),
+      el('button', { class: historyMode === 'exercises' ? 'on' : '', onclick: () => { historyMode = 'exercises'; renderHistory(); } }, 'Exercises')
+    ])
+  ]));
   if (!sessions.length) { view.appendChild(el('p', { class: 'muted' }, 'No sessions yet.')); return; }
+  if (historyMode === 'exercises') { renderExerciseLog(sessions); return; }
   const list = el('div', { class: 'card' });
   sessions.forEach(s => {
     const done = s.sets.filter(x => x.done && !x.ramp).length;
@@ -212,6 +286,69 @@ async function renderHistory() {
     list.appendChild(item);
   });
   view.appendChild(list);
+}
+
+// ---- Exercise log (v1.3) ----
+function exerciseRows(sessions, id) {
+  const rows = [];
+  for (const s of sessions) for (const st of s.sets) if (st.exerciseId === id && !st.ramp && st.done && !st.skipped) rows.push({ date: s.date, week: s.week, sessionId: s.id, ...st });
+  return rows;
+}
+function renderExerciseLog(sessions) {
+  const settings = D.settingsDefaults;
+  const ids = [];
+  for (const s of sessions) for (const st of s.sets) if (st.exerciseId && !st.ramp && st.done && !ids.includes(st.exerciseId)) ids.push(st.exerciseId);
+  ids.sort((a, b) => (D.plan.exercises[a] ? D.plan.exercises[a].name : a).localeCompare(D.plan.exercises[b] ? D.plan.exercises[b].name : b));
+  const card = el('div', { class: 'card' });
+  ids.forEach(id => {
+    const ex = D.plan.exercises[id];
+    const rows = exerciseRows(sessions, id);
+    const best = rows.reduce((m, r) => Math.max(m, r.weight != null && r.reps && !r.holdSeconds ? epley(r.weight + (ex && ex.equipment === 'weighted_bw' ? (settings.bodyweightLb || 0) : 0), r.reps) : 0), 0);
+    const last = rows[0];
+    card.appendChild(el('div', { class: 'list-item', onclick: () => showExercise(id, sessions) }, [
+      el('div', { class: 'row' }, [el('b', {}, ex ? ex.name : id), el('span', { class: 'muted' }, best ? `best e1RM ${best}` : '')]),
+      el('div', { class: 'muted' }, `${rows.length} ${rows.length === 1 ? 'set' : 'sets'} · last ${fmtDate(last.date)}: ${last.weight != null ? fmtWeight(last.weight) + ' lb' : 'bw'} × ${last.reps}`)
+    ]));
+  });
+  view.appendChild(card);
+}
+function sparkline(points) {
+  if (points.length < 2) return null;
+  const W = 300, H = 60, pad = 4;
+  const xs = points.map((_, i) => pad + i * (W - 2 * pad) / (points.length - 1));
+  const min = Math.min(...points), max = Math.max(...points);
+  const y = v => max === min ? H / 2 : H - pad - (v - min) * (H - 2 * pad) / (max - min);
+  const d = points.map((v, i) => `${i ? 'L' : 'M'}${xs[i].toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+  const wrap = el('div', { class: 'spark' });
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${points.map((v, i) => `<circle cx="${xs[i].toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="var(--accent)"/>`).join('')}</svg>`;
+  return wrap;
+}
+function showExercise(id, sessions) {
+  const ex = D.plan.exercises[id];
+  const bw = ex && ex.equipment === 'weighted_bw' ? (D.settingsDefaults.bodyweightLb || 0) : 0;
+  const rows = exerciseRows(sessions, id);
+  // best e1RM per session, oldest first, for the trend
+  const perSession = [];
+  [...sessions].reverse().forEach(s => {
+    const best = s.sets.filter(st => st.exerciseId === id && !st.ramp && st.done && !st.skipped && st.weight != null && st.reps && !st.holdSeconds).reduce((m, st) => Math.max(m, epley(st.weight + bw, st.reps)), 0);
+    if (best) perSession.push({ date: s.date, best });
+  });
+  const table = el('table', {}, [
+    el('tr', {}, [el('th', {}, 'Date'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'RPE'), el('th', { class: 'num' }, 'e1RM')]),
+    ...rows.map(r => el('tr', {}, [
+      el('td', {}, fmtDate(r.date)),
+      el('td', { class: 'num' }, r.baseline ? 'Base' : (r.round ? `R${r.round}` : `${r.setIndex || ''}`)),
+      el('td', { class: 'num' }, `${r.weight != null ? fmtWeight(r.weight) + ' lb' : 'bw'} × ${r.reps}${r.holdSeconds ? ' s' : ''}`),
+      el('td', { class: 'num' }, r.rpe != null ? r.rpe : ''),
+      el('td', { class: 'num' }, [r.weight != null && r.reps && !r.holdSeconds ? `${epley(r.weight + bw, r.reps)}` : '', r.pr && r.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null])
+    ]))
+  ]);
+  showModal(el('div', {}, [
+    el('h2', {}, ex ? ex.name : id),
+    perSession.length >= 2 ? el('div', {}, [el('div', { class: 'label' }, `Estimated 1RM, ${perSession.length} sessions: ${perSession[0].best} → ${perSession[perSession.length - 1].best} lb`), sparkline(perSession.map(p => p.best))]) : (perSession.length === 1 ? el('p', { class: 'muted' }, `Estimated 1RM ${perSession[0].best} lb. The trend line appears after a second session.`) : null),
+    table,
+    el('button', { class: 'btn ghost', style: 'margin-top:12px', onclick: () => closeModal() }, 'Close')
+  ]));
 }
 
 function showSession(s) {
