@@ -1,6 +1,6 @@
 // sw.js - service worker: caches the app files so it opens with no signal, and fires the rest-end
 // notification when the app is in the background. Bump VERSION on every publish.
-const VERSION = 'v1.1.0';
+const VERSION = 'v1.1.1';
 const CACHE = `ctt-${VERSION}`;
 const FILES = [
   './',
@@ -25,13 +25,14 @@ self.addEventListener('activate', event => {
 });
 
 // Network first for the app's own files when online (so a new publish shows up), cache fallback offline.
+// cache: 'no-cache' makes the browser revalidate with GitHub Pages instead of reusing its 10-minute HTTP cache.
 self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   event.respondWith(
-    fetch(req).then(res => {
+    fetch(req, { cache: 'no-cache' }).then(res => {
       if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
       return res;
     }).catch(() => caches.match(req).then(hit => hit || (req.mode === 'navigate' ? caches.match('./index.html') : undefined)))
