@@ -5,11 +5,53 @@
   "startDate": "2026-11-16",
   "sessionCapMinutes": 60,
   "phases": [
-    { "id": "baseline", "name": "Baseline", "weeks": [1, 2], "note": "Work up to a set of 5 with 2 reps left on each main lift; train at about 90% of it." },
-    { "id": "build", "name": "Build", "weeks": [3, 4, 5, 6], "note": "Add reps, then weight." },
-    { "id": "light", "name": "Lighter week", "weeks": [7], "note": "Same weights, half the sets." },
-    { "id": "heavy", "name": "Heavier", "weeks": [8, 9, 10, 11], "note": "Main lifts at 3-5 reps." },
-    { "id": "retest", "name": "Retest", "weeks": [12], "note": "Week 1 benchmarks again." }
+    {
+      "id": "baseline",
+      "name": "Baseline",
+      "weeks": [
+        1,
+        2
+      ],
+      "note": "Work up to a set of 5 with 2 reps left on each main lift; train at about 90% of it."
+    },
+    {
+      "id": "build",
+      "name": "Build",
+      "weeks": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "note": "Add reps, then weight."
+    },
+    {
+      "id": "light",
+      "name": "Lighter week",
+      "weeks": [
+        7
+      ],
+      "note": "Same weights, half the sets."
+    },
+    {
+      "id": "heavy",
+      "name": "Heavier",
+      "weeks": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "note": "Main lifts at 3-5 reps."
+    },
+    {
+      "id": "retest",
+      "name": "Retest",
+      "weeks": [
+        12
+      ],
+      "note": "Week 1 benchmarks again."
+    }
   ],
   "calendar": {
     "1": "lift1",
@@ -21,38 +63,196 @@
     "0": null
   },
   "exercises": {
-    "back_squat": { "name": "Box squat", "logName": "Box squat", "equipment": "barbell", "mainLift": true, "benchmark": true, "cue": "Box, 3-s lowering while the knee settles. Add a 4th set once the knee is quiet." },
-    "rdl": { "name": "Romanian deadlift", "equipment": "barbell", "mainLift": false, "benchmark": true, "cue": "Hinge, soft knees, bar close." },
-    "calf_raise": { "name": "Standing calf raise", "equipment": "machine", "mainLift": false, "cue": "Pause at the bottom." },
-    "bss": { "name": "Bulgarian split squat", "equipment": "dumbbell", "mainLift": false, "perSide": true, "cue": "Tuck the pelvis on the back leg." },
-    "leg_curl": { "name": "Seated leg curl", "equipment": "machine", "mainLift": false },
-    "curl": { "name": "Curl", "equipment": "dumbbell", "mainLift": false },
-    "oh_tri_ext": { "name": "Overhead triceps extension", "equipment": "dumbbell", "mainLift": false },
-    "ab_wheel": { "name": "Ab wheel", "equipment": "bodyweight", "mainLift": false, "cue": "Pelvis tucked." },
-    "strict_press": { "name": "Strict press", "equipment": "barbell", "mainLift": true, "benchmark": true, "cue": "Couch stretch during the rests." },
-    "weighted_pullup": { "name": "Weighted pull-up", "equipment": "weighted_bw", "mainLift": true, "benchmark": true, "cue": "30-45 s dead hang after the last set." },
-    "db_bench": { "name": "Dumbbell bench press", "equipment": "dumbbell", "mainLift": false },
-    "cs_row": { "name": "Chest-supported row", "equipment": "machine", "mainLift": false },
-    "lateral_raise": { "name": "Lateral raise", "equipment": "dumbbell", "mainLift": false },
-    "incline_curl": { "name": "Incline curl", "equipment": "dumbbell", "mainLift": false },
-    "t2b": { "name": "Toes-to-bar", "equipment": "bodyweight", "mainLift": false },
-    "face_pull": { "name": "Face pull", "equipment": "cable", "mainLift": false },
-    "power_clean": { "name": "Power clean", "equipment": "barbell", "mainLift": true, "benchmark": true, "autoProgress": false, "cue": "Fast. Hang power clean if the catch bothers the knee." },
-    "front_squat": { "name": "Front squat", "equipment": "barbell", "mainLift": true, "benchmark": true },
-    "push_press": { "name": "Push press", "equipment": "barbell", "mainLift": true, "benchmark": true, "cue": "Or seated DB press." },
-    "db_row": { "name": "Dumbbell row", "equipment": "dumbbell", "mainLift": false, "cue": "Or chest-supported row." },
-    "preacher_curl": { "name": "Preacher curl", "equipment": "dumbbell", "mainLift": false },
-    "rope_pushdown": { "name": "Rope pushdown", "equipment": "cable", "mainLift": false },
-    "side_plank": { "name": "Side plank", "equipment": "bodyweight", "mainLift": false, "perSide": true, "timed": true, "cue": "Pelvis tucked. Copenhagen plank once this is easy." }
+    "back_squat": {
+      "name": "Box squat",
+      "logName": "Box squat",
+      "equipment": "barbell",
+      "mainLift": true,
+      "benchmark": true,
+      "cue": "Box, 3-s lowering while the knee settles. Add a 4th set once the knee is quiet.",
+      "short": "Squat"
+    },
+    "rdl": {
+      "name": "Romanian deadlift",
+      "equipment": "barbell",
+      "mainLift": false,
+      "benchmark": true,
+      "cue": "Hinge, soft knees, bar close.",
+      "short": "RDL"
+    },
+    "calf_raise": {
+      "name": "Standing calf raise",
+      "equipment": "machine",
+      "mainLift": false,
+      "cue": "Pause at the bottom.",
+      "short": "Calf"
+    },
+    "bss": {
+      "name": "Bulgarian split squat",
+      "equipment": "dumbbell",
+      "mainLift": false,
+      "perSide": true,
+      "cue": "Tuck the pelvis on the back leg.",
+      "short": "Split sq"
+    },
+    "leg_curl": {
+      "name": "Seated leg curl",
+      "equipment": "machine",
+      "mainLift": false,
+      "short": "Leg curl"
+    },
+    "curl": {
+      "name": "Curl",
+      "equipment": "dumbbell",
+      "mainLift": false,
+      "short": "Curl"
+    },
+    "oh_tri_ext": {
+      "name": "Overhead triceps extension",
+      "equipment": "dumbbell",
+      "mainLift": false,
+      "short": "Tri ext"
+    },
+    "ab_wheel": {
+      "name": "Ab wheel",
+      "equipment": "bodyweight",
+      "mainLift": false,
+      "cue": "Pelvis tucked.",
+      "short": "Ab wheel"
+    },
+    "strict_press": {
+      "name": "Strict press",
+      "equipment": "barbell",
+      "mainLift": true,
+      "benchmark": true,
+      "cue": "Couch stretch during the rests.",
+      "short": "Press"
+    },
+    "weighted_pullup": {
+      "name": "Weighted pull-up",
+      "equipment": "weighted_bw",
+      "mainLift": true,
+      "benchmark": true,
+      "cue": "30-45 s dead hang after the last set.",
+      "short": "Pull-up"
+    },
+    "db_bench": {
+      "name": "Dumbbell bench press",
+      "equipment": "dumbbell",
+      "mainLift": false,
+      "short": "DB bench"
+    },
+    "cs_row": {
+      "name": "Chest-supported row",
+      "equipment": "machine",
+      "mainLift": false,
+      "short": "Row"
+    },
+    "lateral_raise": {
+      "name": "Lateral raise",
+      "equipment": "dumbbell",
+      "mainLift": false,
+      "short": "Lat raise"
+    },
+    "incline_curl": {
+      "name": "Incline curl",
+      "equipment": "dumbbell",
+      "mainLift": false,
+      "short": "Inc curl"
+    },
+    "t2b": {
+      "name": "Toes-to-bar",
+      "equipment": "bodyweight",
+      "mainLift": false,
+      "short": "T2B"
+    },
+    "face_pull": {
+      "name": "Face pull",
+      "equipment": "cable",
+      "mainLift": false,
+      "short": "Face pull"
+    },
+    "power_clean": {
+      "name": "Power clean",
+      "equipment": "barbell",
+      "mainLift": true,
+      "benchmark": true,
+      "autoProgress": false,
+      "cue": "Fast. Hang power clean if the catch bothers the knee.",
+      "short": "Clean"
+    },
+    "front_squat": {
+      "name": "Front squat",
+      "equipment": "barbell",
+      "mainLift": true,
+      "benchmark": true,
+      "short": "Front sq"
+    },
+    "push_press": {
+      "name": "Push press",
+      "equipment": "barbell",
+      "mainLift": true,
+      "benchmark": true,
+      "cue": "Or seated DB press.",
+      "short": "Push press"
+    },
+    "db_row": {
+      "name": "Dumbbell row",
+      "equipment": "dumbbell",
+      "mainLift": false,
+      "cue": "Or chest-supported row.",
+      "short": "DB row"
+    },
+    "preacher_curl": {
+      "name": "Preacher curl",
+      "equipment": "dumbbell",
+      "mainLift": false,
+      "short": "Preacher"
+    },
+    "rope_pushdown": {
+      "name": "Rope pushdown",
+      "equipment": "cable",
+      "mainLift": false,
+      "short": "Pushdown"
+    },
+    "side_plank": {
+      "name": "Side plank",
+      "equipment": "bodyweight",
+      "mainLift": false,
+      "perSide": true,
+      "timed": true,
+      "cue": "Pelvis tucked. Copenhagen plank once this is easy.",
+      "short": "Side plank"
+    }
   },
   "stretchBlock": {
     "name": "Stretch block",
     "minutes": 5,
     "items": [
-      { "name": "Couch stretch", "seconds": 60, "perSide": true, "cue": "Tuck pelvis, squeeze back glute, pad the knee. Swap to half-kneeling or side-lying quad stretch if the kneecap hurts." },
-      { "name": "90/90 hip hold", "seconds": 45, "perSide": true, "cue": "Sit tall." },
-      { "name": "Forward fold", "seconds": 45, "perSide": false, "cue": "Hinge at the hips." },
-      { "name": "Calf stretch on a step", "seconds": 45, "perSide": false, "cue": "Knee straight." }
+      {
+        "name": "Couch stretch",
+        "seconds": 60,
+        "perSide": true,
+        "cue": "Tuck pelvis, squeeze back glute, pad the knee. Swap to half-kneeling or side-lying quad stretch if the kneecap hurts."
+      },
+      {
+        "name": "90/90 hip hold",
+        "seconds": 45,
+        "perSide": true,
+        "cue": "Sit tall."
+      },
+      {
+        "name": "Forward fold",
+        "seconds": 45,
+        "perSide": false,
+        "cue": "Hinge at the hips."
+      },
+      {
+        "name": "Calf stretch on a step",
+        "seconds": 45,
+        "perSide": false,
+        "cue": "Knee straight."
+      }
     ]
   },
   "sessions": [
@@ -64,41 +264,171 @@
       "plannedMinutes": 58,
       "blocks": [
         {
-          "id": "warmup", "type": "warmup", "name": "Warm-up", "minutes": 6,
+          "id": "warmup",
+          "type": "warmup",
+          "name": "Warm-up",
+          "minutes": 6,
           "items": [
-            { "name": "Bike, easy", "seconds": 120 },
-            { "name": "Spanish squat or wall sit", "sets": 3, "seconds": 40, "restSeconds": 20 }
+            {
+              "name": "Bike, easy",
+              "seconds": 120
+            },
+            {
+              "name": "Spanish squat or wall sit",
+              "sets": 3,
+              "seconds": 40,
+              "restSeconds": 20
+            }
           ]
         },
         {
-          "id": "A", "type": "straight", "name": "A", "minutes": 14,
+          "id": "A",
+          "type": "straight",
+          "name": "A",
+          "minutes": 14,
           "items": [
-            { "exercise": "back_squat", "sets": 3, "reps": [4, 6], "effort": { "kind": "rpe", "min": 7, "max": 8 }, "restSeconds": 165, "rampUp": true }
+            {
+              "exercise": "back_squat",
+              "sets": 3,
+              "reps": [
+                4,
+                6
+              ],
+              "effort": {
+                "kind": "rpe",
+                "min": 7,
+                "max": 8
+              },
+              "restSeconds": 165,
+              "rampUp": true
+            }
           ]
         },
         {
-          "id": "B", "type": "superset", "name": "B", "minutes": 10,
+          "id": "B",
+          "type": "superset",
+          "name": "B",
+          "minutes": 10,
           "items": [
-            { "exercise": "rdl", "sets": 3, "reps": [6, 8], "effort": { "kind": "rir", "min": 2, "max": 2 }, "restSeconds": 30 },
-            { "exercise": "calf_raise", "sets": 3, "reps": [10, 15], "effort": { "kind": "rir", "min": 1, "max": 1 }, "restSeconds": 75 }
+            {
+              "exercise": "rdl",
+              "sets": 3,
+              "reps": [
+                6,
+                8
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 2,
+                "max": 2
+              },
+              "restSeconds": 30
+            },
+            {
+              "exercise": "calf_raise",
+              "sets": 3,
+              "reps": [
+                10,
+                15
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 1
+              },
+              "restSeconds": 75
+            }
           ]
         },
         {
-          "id": "C", "type": "superset", "name": "C", "minutes": 11,
+          "id": "C",
+          "type": "superset",
+          "name": "C",
+          "minutes": 11,
           "items": [
-            { "exercise": "bss", "sets": 3, "reps": [8, 10], "effort": { "kind": "rir", "min": 1, "max": 2 }, "restSeconds": 30 },
-            { "exercise": "leg_curl", "sets": 3, "reps": [8, 12], "effort": { "kind": "rir", "min": 0, "max": 1 }, "restSeconds": 60 }
+            {
+              "exercise": "bss",
+              "sets": 3,
+              "reps": [
+                8,
+                10
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 2
+              },
+              "restSeconds": 30
+            },
+            {
+              "exercise": "leg_curl",
+              "sets": 3,
+              "reps": [
+                8,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 0,
+                "max": 1
+              },
+              "restSeconds": 60
+            }
           ]
         },
         {
-          "id": "finisher", "type": "finisher", "name": "Finisher", "minutes": 9, "rounds": 3, "roundRestSeconds": 45, "protected": true,
+          "id": "finisher",
+          "type": "finisher",
+          "name": "Finisher",
+          "minutes": 9,
+          "rounds": 3,
+          "roundRestSeconds": 45,
+          "protected": true,
           "items": [
-            { "exercise": "curl", "reps": [10, 12], "effort": { "kind": "rir", "min": 1, "max": 1 } },
-            { "exercise": "oh_tri_ext", "reps": [10, 12], "effort": { "kind": "rir", "min": 1, "max": 1 } },
-            { "exercise": "ab_wheel", "reps": [10, 12], "effort": { "kind": "rir", "min": 1, "max": 1 } }
+            {
+              "exercise": "curl",
+              "reps": [
+                10,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 1
+              }
+            },
+            {
+              "exercise": "oh_tri_ext",
+              "reps": [
+                10,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 1
+              }
+            },
+            {
+              "exercise": "ab_wheel",
+              "reps": [
+                10,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 1
+              }
+            }
           ]
         },
-        { "id": "stretch", "type": "stretch", "name": "Stretch", "minutes": 5 }
+        {
+          "id": "stretch",
+          "type": "stretch",
+          "name": "Stretch",
+          "minutes": 5
+        }
       ]
     },
     {
@@ -109,44 +439,205 @@
       "plannedMinutes": 57,
       "blocks": [
         {
-          "id": "warmup", "type": "warmup", "name": "Warm-up", "minutes": 5,
+          "id": "warmup",
+          "type": "warmup",
+          "name": "Warm-up",
+          "minutes": 5,
           "items": [
-            { "name": "Band pull-aparts", "seconds": 60 },
-            { "name": "Scap pull-ups", "seconds": 60 },
-            { "name": "Muscle-up transitions or kip", "seconds": 180 }
+            {
+              "name": "Band pull-aparts",
+              "seconds": 60
+            },
+            {
+              "name": "Scap pull-ups",
+              "seconds": 60
+            },
+            {
+              "name": "Muscle-up transitions or kip",
+              "seconds": 180
+            }
           ]
         },
         {
-          "id": "A", "type": "superset", "name": "A", "minutes": 18,
+          "id": "A",
+          "type": "superset",
+          "name": "A",
+          "minutes": 18,
           "items": [
-            { "exercise": "strict_press", "sets": 4, "reps": [4, 6], "effort": { "kind": "rpe", "min": 7, "max": 8 }, "restSeconds": 80, "rampUp": true },
-            { "exercise": "weighted_pullup", "sets": 4, "reps": [4, 6], "effort": { "kind": "rpe", "min": 7, "max": 8 }, "restSeconds": 80, "afterLastSet": { "name": "Dead hang", "seconds": 40 } }
+            {
+              "exercise": "strict_press",
+              "sets": 4,
+              "reps": [
+                4,
+                6
+              ],
+              "effort": {
+                "kind": "rpe",
+                "min": 7,
+                "max": 8
+              },
+              "restSeconds": 80,
+              "rampUp": true
+            },
+            {
+              "exercise": "weighted_pullup",
+              "sets": 4,
+              "reps": [
+                4,
+                6
+              ],
+              "effort": {
+                "kind": "rpe",
+                "min": 7,
+                "max": 8
+              },
+              "restSeconds": 80,
+              "afterLastSet": {
+                "name": "Dead hang",
+                "seconds": 40
+              }
+            }
           ]
         },
         {
-          "id": "B", "type": "superset", "name": "B", "minutes": 9,
+          "id": "B",
+          "type": "superset",
+          "name": "B",
+          "minutes": 9,
           "items": [
-            { "exercise": "db_bench", "sets": 2, "reps": [6, 10], "effort": { "kind": "rir", "min": 2, "max": 2 }, "restSeconds": 30 },
-            { "exercise": "cs_row", "sets": 3, "reps": [8, 10], "effort": { "kind": "rir", "min": 1, "max": 2 }, "restSeconds": 75 }
+            {
+              "exercise": "db_bench",
+              "sets": 2,
+              "reps": [
+                6,
+                10
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 2,
+                "max": 2
+              },
+              "restSeconds": 30
+            },
+            {
+              "exercise": "cs_row",
+              "sets": 3,
+              "reps": [
+                8,
+                10
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 2
+              },
+              "restSeconds": 75
+            }
           ]
         },
         {
-          "id": "finisher", "type": "finisher", "name": "Finisher", "minutes": 10, "rounds": 3, "roundRestSeconds": 50, "protected": true,
+          "id": "finisher",
+          "type": "finisher",
+          "name": "Finisher",
+          "minutes": 10,
+          "rounds": 3,
+          "roundRestSeconds": 50,
+          "protected": true,
           "items": [
-            { "exercise": "lateral_raise", "reps": [12, 15], "effort": { "kind": "rir", "min": 0, "max": 1 } },
-            { "exercise": "incline_curl", "reps": [8, 12], "effort": { "kind": "rir", "min": 0, "max": 1 } },
-            { "exercise": "oh_tri_ext", "reps": [8, 12], "effort": { "kind": "rir", "min": 0, "max": 1 } }
+            {
+              "exercise": "lateral_raise",
+              "reps": [
+                12,
+                15
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 0,
+                "max": 1
+              }
+            },
+            {
+              "exercise": "incline_curl",
+              "reps": [
+                8,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 0,
+                "max": 1
+              }
+            },
+            {
+              "exercise": "oh_tri_ext",
+              "reps": [
+                8,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 0,
+                "max": 1
+              }
+            }
           ]
         },
         {
-          "id": "last", "type": "finisher", "name": "Last", "minutes": 7, "rounds": 3, "roundRestSeconds": 40,
+          "id": "last",
+          "type": "finisher",
+          "name": "Last",
+          "minutes": 7,
+          "rounds": 3,
+          "roundRestSeconds": 40,
           "items": [
-            { "exercise": "t2b", "reps": [8, 12], "effort": { "kind": "rir", "min": 1, "max": 1 } },
-            { "exercise": "calf_raise", "reps": [10, 15], "effort": { "kind": "rir", "min": 1, "max": 1 } },
-            { "exercise": "face_pull", "reps": [15, 15], "effort": { "kind": "rir", "min": 1, "max": 1 }, "rounds": [1, 2] }
+            {
+              "exercise": "t2b",
+              "reps": [
+                8,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 1
+              }
+            },
+            {
+              "exercise": "calf_raise",
+              "reps": [
+                10,
+                15
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 1
+              }
+            },
+            {
+              "exercise": "face_pull",
+              "reps": [
+                15,
+                15
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 1
+              },
+              "rounds": [
+                1,
+                2
+              ]
+            }
           ]
         },
-        { "id": "stretch", "type": "stretch", "name": "Stretch", "minutes": 5 }
+        {
+          "id": "stretch",
+          "type": "stretch",
+          "name": "Stretch",
+          "minutes": 5
+        }
       ]
     },
     {
@@ -157,54 +648,223 @@
       "plannedMinutes": 57,
       "blocks": [
         {
-          "id": "warmup", "type": "warmup", "name": "Warm-up", "minutes": 6,
+          "id": "warmup",
+          "type": "warmup",
+          "name": "Warm-up",
+          "minutes": 6,
           "items": [
-            { "name": "Row, easy", "seconds": 120 },
-            { "name": "Spanish squat", "sets": 2, "seconds": 40, "restSeconds": 20 },
-            { "name": "Empty-bar clean + front squat complex x2", "seconds": 90 }
+            {
+              "name": "Row, easy",
+              "seconds": 120
+            },
+            {
+              "name": "Spanish squat",
+              "sets": 2,
+              "seconds": 40,
+              "restSeconds": 20
+            },
+            {
+              "name": "Empty-bar clean + front squat complex x2",
+              "seconds": 90
+            }
           ]
         },
         {
-          "id": "A", "type": "straight", "name": "A", "minutes": 10,
+          "id": "A",
+          "type": "straight",
+          "name": "A",
+          "minutes": 10,
           "items": [
-            { "exercise": "power_clean", "sets": 4, "reps": [2, 2], "effort": { "kind": "rpe", "min": 7, "max": 7, "label": "Fast, RPE 7" }, "restSeconds": 90, "rampUp": true }
+            {
+              "exercise": "power_clean",
+              "sets": 4,
+              "reps": [
+                2,
+                2
+              ],
+              "effort": {
+                "kind": "rpe",
+                "min": 7,
+                "max": 7,
+                "label": "Fast, RPE 7"
+              },
+              "restSeconds": 90,
+              "rampUp": true
+            }
           ]
         },
         {
-          "id": "B", "type": "superset", "name": "B", "minutes": 12,
+          "id": "B",
+          "type": "superset",
+          "name": "B",
+          "minutes": 12,
           "items": [
-            { "exercise": "front_squat", "sets": 3, "reps": [5, 6], "effort": { "kind": "rpe", "min": 7, "max": 8 }, "restSeconds": 60 },
-            { "exercise": "lateral_raise", "sets": 3, "reps": [12, 15], "effort": { "kind": "rir", "min": 0, "max": 1 }, "restSeconds": 80 }
+            {
+              "exercise": "front_squat",
+              "sets": 3,
+              "reps": [
+                5,
+                6
+              ],
+              "effort": {
+                "kind": "rpe",
+                "min": 7,
+                "max": 8
+              },
+              "restSeconds": 60
+            },
+            {
+              "exercise": "lateral_raise",
+              "sets": 3,
+              "reps": [
+                12,
+                15
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 0,
+                "max": 1
+              },
+              "restSeconds": 80
+            }
           ]
         },
         {
-          "id": "C", "type": "superset", "name": "C", "minutes": 12,
+          "id": "C",
+          "type": "superset",
+          "name": "C",
+          "minutes": 12,
           "items": [
-            { "exercise": "push_press", "sets": 3, "reps": [3, 5], "effort": { "kind": "rpe", "min": 7, "max": 8 }, "restSeconds": 60 },
-            { "exercise": "db_row", "sets": 3, "reps": [8, 10], "effort": { "kind": "rir", "min": 1, "max": 2 }, "restSeconds": 75 }
+            {
+              "exercise": "push_press",
+              "sets": 3,
+              "reps": [
+                3,
+                5
+              ],
+              "effort": {
+                "kind": "rpe",
+                "min": 7,
+                "max": 8
+              },
+              "restSeconds": 60
+            },
+            {
+              "exercise": "db_row",
+              "sets": 3,
+              "reps": [
+                8,
+                10
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 2
+              },
+              "restSeconds": 75
+            }
           ]
         },
         {
-          "id": "finisher", "type": "finisher", "name": "Finisher", "minutes": 9, "rounds": 3, "roundRestSeconds": 45, "protected": true,
+          "id": "finisher",
+          "type": "finisher",
+          "name": "Finisher",
+          "minutes": 9,
+          "rounds": 3,
+          "roundRestSeconds": 45,
+          "protected": true,
           "items": [
-            { "exercise": "preacher_curl", "reps": [8, 12], "effort": { "kind": "rir", "min": 0, "max": 1 } },
-            { "exercise": "rope_pushdown", "reps": [10, 15], "effort": { "kind": "rir", "min": 0, "max": 1 } },
-            { "exercise": "side_plank", "seconds": 25, "perSide": true, "effort": { "kind": "rir", "min": 0, "max": 1 } }
+            {
+              "exercise": "preacher_curl",
+              "reps": [
+                8,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 0,
+                "max": 1
+              }
+            },
+            {
+              "exercise": "rope_pushdown",
+              "reps": [
+                10,
+                15
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 0,
+                "max": 1
+              }
+            },
+            {
+              "exercise": "side_plank",
+              "seconds": 25,
+              "perSide": true,
+              "effort": {
+                "kind": "rir",
+                "min": 0,
+                "max": 1
+              }
+            }
           ]
         },
-        { "id": "stretch", "type": "stretch", "name": "Stretch", "minutes": 5 },
         {
-          "id": "iftime", "type": "iftime", "name": "If time", "minutes": 3,
+          "id": "stretch",
+          "type": "stretch",
+          "name": "Stretch",
+          "minutes": 5
+        },
+        {
+          "id": "iftime",
+          "type": "iftime",
+          "name": "If time",
+          "minutes": 3,
           "items": [
-            { "exercise": "leg_curl", "sets": 2, "reps": [10, 12], "effort": { "kind": "rir", "min": 1, "max": 1 }, "restSeconds": 60 }
+            {
+              "exercise": "leg_curl",
+              "sets": 2,
+              "reps": [
+                10,
+                12
+              ],
+              "effort": {
+                "kind": "rir",
+                "min": 1,
+                "max": 1
+              },
+              "restSeconds": 60
+            }
           ]
         }
       ]
     }
   ],
   "runs": [
-    { "id": "run1", "name": "Run 1: Intervals", "day": "Tuesday", "type": "Intervals", "plannedMinutes": 35, "note": "5 min easy, intervals at RPE 8-9, 3 min easy, then the stretch block. Weeks 1-4: 5 x 2 min hard / 2 min easy. Weeks 5-8: 5 x 3 / 2. Weeks 9-12: 4 x 4 / 2-3. Week 1: a 5K time trial can replace this." },
-    { "id": "run2", "name": "Run 2: Long easy run", "day": "Weekend", "type": "Long run", "plannedMinutes": 55, "note": "Conversational pace. Start 3.5 mi, add 0.5 mi each time it's done, up to 6-7 mi. A ski day replaces it and doesn't reset the distance." }
+    {
+      "id": "run1",
+      "name": "Run 1: Intervals",
+      "day": "Tuesday",
+      "type": "Intervals",
+      "plannedMinutes": 35,
+      "note": "5 min easy, intervals at RPE 8-9, 3 min easy, then the stretch block. Weeks 1-4: 5 x 2 min hard / 2 min easy. Weeks 5-8: 5 x 3 / 2. Weeks 9-12: 4 x 4 / 2-3. Week 1: a 5K time trial can replace this."
+    },
+    {
+      "id": "run2",
+      "name": "Run 2: Long easy run",
+      "day": "Weekend",
+      "type": "Long run",
+      "plannedMinutes": 55,
+      "note": "Conversational pace. Start 3.5 mi, add 0.5 mi each time it's done, up to 6-7 mi. A ski day replaces it and doesn't reset the distance."
+    }
   ],
-  "runTypes": ["Intervals", "Long run", "5K test", "Easy run", "Bike/rower sub", "Ski day"]
+  "runTypes": [
+    "Intervals",
+    "Long run",
+    "5K test",
+    "Easy run",
+    "Bike/rower sub",
+    "Ski day"
+  ]
 }

@@ -174,3 +174,42 @@ label { display: block; font-size: var(--t-label); color: var(--muted); margin-b
 .arch-part.hit { border-left: 3px solid var(--accent); padding-left: 10px; }
 .arch-part .file { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.8rem; color: var(--muted); }
 mark { background: var(--accent); color: var(--accent-ink); border-radius: 3px; padding: 0 2px; }
+
+/* v1.2: session progress strip, overview sheet, tile readout */
+.strip { display: block; width: 100%; background: var(--surface-1); border: 0; border-radius: var(--radius-sm); padding: 10px 12px 8px; text-align: left; cursor: pointer; color: var(--text); }
+.strip:active { background: var(--surface-2); }
+.strip-bar { display: flex; gap: 4px; }
+.seg { min-width: 0; }
+.seg-track { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.seg-fill { height: 100%; background: var(--muted); width: 0; transition: width 0.3s; }
+.seg.current .seg-track { box-shadow: inset 0 0 0 1px var(--accent); }
+.seg.current .seg-fill { background: var(--accent); }
+.seg.finished .seg-fill { background: var(--good); opacity: 0.8; }
+.seg-label { font-size: 0.66rem; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.01em; }
+.seg.current .seg-label { color: var(--text); font-weight: 700; }
+.strip-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 8px; font-size: var(--t-label); color: var(--muted); text-transform: none; letter-spacing: 0; }
+.strip-status .delta { font-weight: 700; font-size: var(--t-small); }
+.strip-status .delta.ahead { color: var(--good); }
+.strip-status .delta.behind { color: var(--bad); }
+.strip-status .chip-btn { margin-top: 0; padding: 2px 8px 2px 6px; font-size: var(--t-label); }
+
+.overview .ov-block { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.overview .ov-block.current { border-left: 3px solid var(--accent); padding-left: 10px; margin-left: -3px; }
+.overview .ov-ex { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.overview .ov-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; font-size: var(--t-small); }
+.overview .ov-sets { display: flex; gap: 4px; }
+.overview .tick { color: var(--muted); font-size: 0.8rem; }
+.overview .tick.done { color: var(--good); }
+.overview .tick.current { color: var(--accent); }
+.overview .tick.skipped { color: var(--bad); }
+
+.readout { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px; margin: 8px 0 4px; text-align: center; }
+.readout .tile { background: var(--surface-1); border-radius: var(--radius-sm); padding: 10px 6px 8px; min-width: 0; }
+.readout .tile-label { font-size: var(--t-label); color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+.readout .tile-value { font-size: 2.1rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.readout .tile-value.small { font-size: 1.05rem; font-weight: 700; line-height: 1.2; margin-top: 9px; white-space: nowrap; }
+.readout .tile-weight { background: var(--accent); color: var(--accent-ink); }
+.readout .tile-weight .tile-label { color: rgba(26, 18, 0, 0.7); }
+.readout.quiet .tile-weight { background: var(--surface-2); color: var(--text); }
+.readout.quiet .tile-weight .tile-label { color: var(--muted); }
+.readout.quiet .tile-value { font-size: 1.7rem; }

@@ -4,7 +4,7 @@
 
 import { trimToFit, remainingSeconds } from './builder.js';
 import { setInProgress, clearInProgress } from './store.js';
-import { fmtClock, fmtTime, fmtWeight, repsText, roundTo } from './data.js';
+import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo } from './data.js';
 import { incrementFor, checkPR } from './progression.js';
 import { el, showModal, closeModal, toast } from './ui.js';
 import { icon } from './icons.js';
@@ -365,6 +365,83 @@ export class Player {
   }
   abandon() { this.teardown(); clearInProgress().catch(() => {}); }
 
+  // ---- session progress (v1.2) ----
+  blockSummary() {
+    const blocks = [];
+    const byId = {};
+    this.steps.forEach((st, i) => {
+      let b = byId[st.blockId];
+      if (!b) {
+        b = { id: st.blockId, name: st.blockName, type: st.blockType, label: this.blockLabel(st.blockId), planned: 0, done: 0, steps: 0, doneSteps: 0, firstIdx: i, exercises: [] };
+        byId[st.blockId] = b; blocks.push(b);
+      }
+      const secs = st.holdSeconds ? st.holdSeconds * (st.perSide ? 2 : 1) : (st.seconds || 0);
+      b.planned += secs; b.steps += 1;
+      if (st.done || st.skipped) { b.doneSteps += 1; b.done += secs; }
+      if (i === this.s.idx) { b.current = true; b.done += Math.min(secs, this.elapsedInStep()); }
+      if (st.kind === 'set' && !st.ramp) {
+        let e = b.exercises.find(x => x.exerciseId === st.exerciseId);
+        if (!e) { e = { exerciseId: st.exerciseId, name: st.name, sets: [] }; b.exercises.push(e); }
+        e.sets.push({ idx: i, done: !!st.done, skipped: !!st.skipped, current: i === this.s.idx, weight: st.record ? st.record.weight : (st.target ? st.target.weight : null), reps: st.record ? st.record.reps : (st.target ? st.target.reps : null), baseline: st.baseline, pr: st.pr });
+      }
+    });
+    return blocks;
+  }
+  blockLabel(blockId) {
+    const first = this.steps.find(st => st.blockId === blockId);
+    if (!first) return blockId;
+    if (first.blockType === 'warmup') return 'Warm';
+    if (first.blockType === 'stretch') return 'Stretch';
+    if (first.blockType === 'finisher') return first.blockName === 'Last' ? 'Last' : 'Finisher';
+    if (first.blockType === 'iftime') return 'If time';
+    const ids = [...new Set(this.steps.filter(st => st.blockId === blockId && st.kind === 'set' && !st.ramp).map(st => st.exerciseId))];
+    const names = ids.map(id => (this.plan.exercises[id] && this.plan.exercises[id].short) || (this.plan.exercises[id] && this.plan.exercises[id].name) || id);
+    return names.slice(0, 2).join(' / ');
+  }
+  renderStrip() {
+    const blocks = this.blockSummary();
+    const total = blocks.reduce((a, b) => a + b.planned, 0) || 1;
+    const bar = el('div', { class: 'strip-bar' }, blocks.map(b => {
+      const fill = b.planned ? Math.min(100, Math.round(100 * b.done / b.planned)) : (b.doneSteps === b.steps ? 100 : 0);
+      return el('div', { class: 'seg' + (b.current ? ' current' : '') + (b.doneSteps === b.steps && !b.current ? ' finished' : ''), style: `flex: ${Math.max(b.planned, 75)} 0 0` }, [
+        el('div', { class: 'seg-track' }, [el('div', { class: 'seg-fill', style: `width:${fill}%` })]),
+        el('div', { class: 'seg-label' }, b.label)
+      ]);
+    }));
+    const status = el('div', { class: 'strip-status', id: 'clock' });
+    const strip = el('button', { class: 'strip', onclick: () => this.openOverview(), 'aria-label': 'Session overview' }, [bar, status]);
+    return strip;
+  }
+  openOverview() {
+    const blocks = this.blockSummary();
+    const p = this.projection();
+    const d = p.deltaSeconds;
+    const body = el('div', { class: 'overview' }, [
+      el('div', { class: 'row' }, [el('h2', {}, this.s.timeline.sessionName), el('span', { class: 'muted' }, `${fmtMinutes(p.remaining)} left · finish ${fmtTime(p.projected)}`)]),
+      el('p', { class: 'muted', style: 'margin-top:-4px' }, `${Math.abs(d) < 60 ? 'On time' : `${Math.round(Math.abs(d) / 60)} min ${d > 0 ? 'behind' : 'ahead'}`} · planned ${fmtMinutes(this.s.timeline.plannedSeconds)}`),
+      ...blocks.map(b => el('div', { class: 'ov-block' + (b.current ? ' current' : '') }, [
+        el('div', { class: 'row' }, [
+          el('b', {}, ['warmup', 'stretch', 'finisher', 'iftime'].includes(b.type) ? b.name : `${b.name} · ${b.label}`),
+          el('span', { class: 'muted' }, `${b.doneSteps === b.steps ? 'done' : (b.current ? 'now' : 'up next')} · ${Math.round(b.done / 60)}/${Math.round(b.planned / 60)} min`)
+        ]),
+        b.exercises.length ? el('div', { class: 'ov-ex' }, b.exercises.map(e => el('div', { class: 'ov-row' }, [
+          el('span', { class: 'ov-name' }, e.name),
+          el('span', { class: 'ov-sets' }, e.sets.map(x => el('span', { class: 'tick' + (x.done ? ' done' : (x.skipped ? ' skipped' : (x.current ? ' current' : ''))), title: x.weight != null ? `${fmtWeight(x.weight)} × ${x.reps}` : '' }, x.done ? '✓' : (x.skipped ? '–' : (x.current ? '●' : '○'))))),
+          el('span', { class: 'ov-target muted' }, e.sets[0] && e.sets[0].weight != null ? `${fmtWeight(e.sets.find(x => x.current) ? e.sets.find(x => x.current).weight : e.sets[0].weight)} lb` : '')
+        ]))) : el('div', { class: 'muted', style: 'font-size:var(--t-small)' }, b.type === 'warmup' ? 'Timed holds' : (b.type === 'stretch' ? 'Couch, 90/90, forward fold, calf' : ''))
+      ])),
+      el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close')
+    ]);
+    showModal(body);
+  }
+  readout(weightText, repsLabel, repsText, effortText, accent) {
+    return el('div', { class: 'readout step-target' + (accent ? '' : ' quiet') }, [
+      el('div', { class: 'tile tile-weight' }, [el('div', { class: 'tile-label' }, 'Weight'), el('div', { class: 'tile-value' }, weightText)]),
+      el('div', { class: 'tile' }, [el('div', { class: 'tile-label' }, repsLabel), el('div', { class: 'tile-value' }, repsText)]),
+      el('div', { class: 'tile' }, [el('div', { class: 'tile-label' }, 'Effort'), el('div', { class: 'tile-value small' }, effortText || '–')])
+    ]);
+  }
+
   // ---- rendering ----
   describe(x) {
     if (!x) return '';
@@ -400,11 +477,10 @@ export class Player {
         el('div', { class: 'block' }, where)
       ]),
       el('div', { class: 'head-right' }, [
-        el('div', { class: 'clock', id: 'clock' }),
         el('button', { class: 'icon-btn', 'aria-label': 'More', onclick: () => this.openMenu() }, icon('more'))
       ])
     ]);
-    const prog = el('div', { class: 'progress' }, [el('div', { id: 'prog' })]);
+    const prog = this.renderStrip();
 
     const main = el('div', { class: 'step-main' });
     const next = this.steps[this.s.idx + 1];
@@ -419,15 +495,16 @@ export class Player {
         main.appendChild(el('div', { class: 'label', style: 'margin-top:14px' }, 'Up next'));
         main.appendChild(el('div', { class: 'step-name' }, next.name));
         if (next.kind === 'set') {
-          const w = next.target && next.target.weight != null ? `${fmtWeight(next.target.weight)} lb` : '';
-          const r = next.holdSeconds ? `${next.holdSeconds} s` : (next.target && next.target.reps != null ? `× ${next.target.reps}` : '');
-          main.appendChild(el('div', { class: 'step-target muted-target' }, [w, ' ', el('small', {}, r)]));
+          const nex = this.plan.exercises[next.exerciseId];
+          const w = next.target && next.target.weight != null ? `${fmtWeight(next.target.weight)} lb` : (nex && nex.equipment === 'bodyweight' ? 'BW' : '–');
+          const rl = next.holdSeconds ? 'Seconds' : 'Reps';
+          const r = next.holdSeconds ? `${next.holdSeconds}` : (next.target && next.target.reps != null ? `${next.target.reps}` : (next.repRange ? repsText(next.repRange) : 'max'));
+          main.appendChild(this.readout(w, rl, r, next.effortText, false));
           const prevSet = this.lastSetOf(next.exerciseId);
           const prevW = prevSet ? (prevSet.record && prevSet.record.weight != null ? prevSet.record.weight : (prevSet.target ? prevSet.target.weight : null)) : null;
           if (prevW != null && next.target && next.target.weight != null && prevW !== next.target.weight) {
             main.appendChild(el('div', { class: 'step-cue' }, `Change the bar: ${fmtWeight(prevW)} → ${fmtWeight(next.target.weight)} lb`));
           }
-          if (next.effortText) main.appendChild(el('div', { class: 'step-effort' }, next.effortText));
         } else if (next.seconds) {
           main.appendChild(el('div', { class: 'step-effort' }, fmtClock(next.seconds)));
         }
@@ -438,11 +515,13 @@ export class Player {
       main.appendChild(el('div', { class: 'step-name' }, [s.name, s.pr ? el('span', { class: 'pr-badge' }, 'PR') : null]));
       if (s.kind === 'set') {
         const ex = this.plan.exercises[s.exerciseId];
-        const w = s.target && s.target.weight != null ? `${fmtWeight(s.target.weight)} lb` : (ex && ex.equipment === 'bodyweight' ? 'Bodyweight' : (ex && ex.equipment === 'weighted_bw' ? '+0 lb' : 'Pick a weight'));
-        const r = s.holdSeconds ? `${s.holdSeconds} s${s.perSide ? ' per side' : ''}` : (s.target && s.target.reps != null ? `× ${s.target.reps}${s.perSide ? '/side' : ''}` : (s.repRange ? `× ${repsText(s.repRange)}` : 'max reps'));
-        main.appendChild(el('div', { class: 'step-target' }, [w, ' ', el('small', {}, r)]));
-        if (s.repRange && !s.holdSeconds && s.repRange[0] !== s.repRange[1]) main.appendChild(el('div', { class: 'step-effort' }, `Range ${repsText(s.repRange)} · ${s.effortText}`));
-        else if (s.effortText) main.appendChild(el('div', { class: 'step-effort' }, s.effortText));
+        const w = s.target && s.target.weight != null ? `${fmtWeight(s.target.weight)} lb` : (ex && ex.equipment === 'bodyweight' ? 'BW' : (ex && ex.equipment === 'weighted_bw' ? '+0 lb' : '?'));
+        const rl = s.holdSeconds ? (s.perSide ? 'Sec / side' : 'Seconds') : (s.perSide ? 'Reps / side' : 'Reps');
+        const r = s.holdSeconds ? `${s.holdSeconds}` : (s.target && s.target.reps != null ? `${s.target.reps}` : (s.repRange ? repsText(s.repRange) : 'max'));
+        const eff = s.baseline || s.retest ? (s.effort ? effortShort(s.effort) : '') : (s.effortText || '');
+        main.appendChild(this.readout(w, rl, r, eff, true));
+        if (s.repRange && !s.holdSeconds && s.repRange[0] !== s.repRange[1]) main.appendChild(el('div', { class: 'step-effort' }, `Range ${repsText(s.repRange)} reps`));
+        if ((s.baseline || s.retest) && s.effortText) main.appendChild(el('div', { class: 'step-effort' }, s.effortText));
         // L2: last time
         if (s.last && ((s.last.sets && s.last.sets.length) || s.last.topSet) && !s.ramp) {
           const l = s.last.sets && s.last.sets.length ? s.last : { ...s.last, sets: [s.last.topSet] };
@@ -483,7 +562,7 @@ export class Player {
     const wrap = el('div', { class: 'player', 'data-kind': group }, [head, prog, main, actions]);
     c.appendChild(wrap);
     this.updateTimerDom();
-    const pg = c.querySelector('#prog'); if (pg) pg.style.width = `${Math.round(100 * doneCount / this.steps.length)}%`;
+
   }
 
   lastSetOf(exerciseId) {
@@ -534,14 +613,27 @@ export class Player {
       const d = p.deltaSeconds;
       const abs = Math.abs(d);
       const label = abs < 60 ? 'on time' : `${Math.round(abs / 60)} min ${d > 0 ? 'behind' : 'ahead'}`;
+      const blocks = this.blockSummary();
+      const bi = blocks.findIndex(b => b.current);
+      const doneSteps = this.steps.filter(x => x.done || x.skipped).length;
       clock.innerHTML = '';
-      clock.appendChild(el('div', { class: 'delta ' + (d >= 60 ? 'behind' : (d <= -60 ? 'ahead' : '')) }, label));
-      clock.appendChild(el('div', { class: 'finish' }, `Finish ${fmtTime(p.projected)}`));
+      clock.appendChild(el('span', {}, `Block ${bi + 1} of ${blocks.length} · ${doneSteps}/${this.steps.length} steps · ${fmtMinutes(p.remaining)} left · finish ${fmtTime(p.projected)}`));
+      clock.appendChild(el('span', { class: 'delta ' + (d >= 60 ? 'behind' : (d <= -60 ? 'ahead' : '')) }, label));
       if (d >= 60 || p.overCapSeconds > 0) {
-        clock.appendChild(el('button', { class: 'chip-btn', id: 'trim-btn', onclick: () => this.trimPreview() }, [icon('scissors'), 'Trim']));
+        clock.appendChild(el('span', { class: 'chip-btn', id: 'trim-btn', onclick: e => { e.stopPropagation(); this.trimPreview(); } }, [icon('scissors'), 'Trim']));
       }
+      // keep segment fills moving with the clock
+      const segs = this.container.querySelectorAll('.strip-bar .seg');
+      blocks.forEach((b, i) => { const f = segs[i] && segs[i].querySelector('.seg-fill'); if (f) f.style.width = `${b.planned ? Math.min(100, Math.round(100 * b.done / b.planned)) : (b.doneSteps === b.steps ? 100 : 0)}%`; });
     }
   }
+}
+
+function effortShort(effort) {
+  if (!effort) return '';
+  if (effort.kind === 'rpe') return effort.min === effort.max ? `RPE ${effort.min}` : `RPE ${effort.min}-${effort.max}`;
+  if (effort.kind === 'rir') return `${effort.min === effort.max ? effort.min : effort.min + '-' + effort.max} left`;
+  return '';
 }
 
 function field(label, id, value, step) {
