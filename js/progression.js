@@ -177,6 +177,17 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     const rpeOk = done.every(s => s.rpe == null || s.rpe <= rules.mainLiftTest.maxRpe);
     const detail = `${done.length} x ${summarizeReps(done)} at ${fmtWeight(baseWeight)} lb`;
 
+    // v1.8 catch-up: when the session these sets came from already logged this exercise, it set the next target.
+    // The made-up sets are logged (and count for records) but do not move the target a second time. If that
+    // session held the weight only because a set was skipped, making the sets up takes that miss back.
+    const cu = session.catchUpInfo && session.catchUpInfo[id];
+    if (cu && cu.hadDone) {
+      if (cu.undoStall && allDone && cur.stall > 0) cur.stall -= 1;
+      say(`${name}: ${detail} made up. Next target stays as the session it came from set it.`, 'hold', 'catch-up sets');
+      next[id] = cur;
+      continue;
+    }
+
     // 3. lighter week: nothing changes
     if (phase === 'light') {
       say(`${name}: ${detail}. Lighter week, same weight next time.`, 'hold', 'lighter week');

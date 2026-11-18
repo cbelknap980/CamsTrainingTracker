@@ -56,7 +56,7 @@
         "week 7, weeks 8-11 overrides"
       ],
       "file": "data/rules.json",
-      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates. v1.4 adds set timing (tempo default, margin, set-up seconds by equipment, get-ready seconds), the effort scale behind the four effort buttons (stored as RPE 6, 8, 9, 10), and rough starting-weight estimates for free-weight accessories. v1.5: dumbbellPairs (pair lifts are stored as totals and jump two dumbbell steps), timing.confirmSetup (wait for a tap before each new block), review.blockSaveOnOpenItems, weighted pull-up jump 5 lb."
+      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates. v1.4 adds set timing (tempo default, margin, set-up seconds by equipment, get-ready seconds), the effort scale behind the four effort buttons (stored as RPE 6, 8, 9, 10), and rough starting-weight estimates for free-weight accessories. v1.5: dumbbellPairs (pair lifts are stored as totals and jump two dumbbell steps), timing.confirmSetup (wait for a tap before each new block), review.blockSaveOnOpenItems, weighted pull-up jump 5 lb. v1.8: catchUp (warm-up, rest for a lone superset exercise, stretch on or off)."
     },
     {
       "id": "builder",
@@ -101,6 +101,17 @@
       ],
       "file": "js/progression.js",
       "description": "Runs once after a session saves. For each exercise in the session: applies the week override if any, the baseline rule in weeks 1-2, otherwise the success test (main lifts) or the reps-then-weight rule (accessories), counts stalls and drops 10% after two misses, computes Epley estimated 1RM for benchmark lifts, writes the new targets and a plain-language what-changed line per exercise. Power clean is excluded from automatic progression. Also keeps each exercise's best estimated 1RM and heaviest weight and reports personal records when a session beats them. v1.5: incrementFor doubles the jump for pair lifts; starting estimates for pair lifts are totals."
+    },
+    {
+      "id": "catchup",
+      "column": "app",
+      "name": "Catch-up list",
+      "lines": [
+        "skipped sets and missed lifts",
+        "become a Slack-day session"
+      ],
+      "file": "js/catchup.js",
+      "description": "Works out what is still owed this week from the saved sessions: sets that were skipped or never reached (a session ended early), minus any already made up, plus whole lifts whose day has passed with nothing logged. Sets cut by Trim to fit and the if-time block are not owed, and nothing carries past Sunday. From the leftover sets it builds a Catch-up session (short warm-up, the owed blocks in plan order, stretch) that the Session Builder turns into a timeline like any other. On a Slack day it takes the today card on Home; on other days it shows as Owed this week. Catch-up sets are logged and count for records; they move a target only for an exercise the original session never logged. Settings are in rules.json under catchUp."
     },
     {
       "id": "storage",
@@ -223,6 +234,16 @@
       "from": "storage",
       "to": "builder",
       "label": "saved targets (next session)"
+    },
+    {
+      "from": "storage",
+      "to": "catchup",
+      "label": "this week's saved sessions"
+    },
+    {
+      "from": "catchup",
+      "to": "builder",
+      "label": "catch-up session"
     },
     {
       "from": "player",

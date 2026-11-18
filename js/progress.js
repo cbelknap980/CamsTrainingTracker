@@ -5,6 +5,7 @@
 import { epley } from './progression.js';
 import { el } from './ui.js';
 import { fmtWeight, fmtDate, weekNumber, phaseForWeek, parseISODate } from './data.js';
+import { owedSetsFor } from './catchup.js';
 
 const WEEKS = 12;
 const isWork = st => !st.ramp && st.done && !st.skipped;
@@ -47,7 +48,7 @@ export function adherence(sessions, plan, settings, today) {
       const recs = sessions.filter(s => s.sessionId === l.id && s.week === w);
       let status;
       if (recs.some(r => r.status === 'complete')) status = 'done';
-      else if (recs.length) status = 'partial';
+      else if (recs.length) status = owedSetsFor(plan, sessions, l.id, w) === 0 ? 'done' : 'partial'; // v1.8: made up on a catch-up day
       else status = w < current ? 'missed' : (w === current ? 'open' : 'later');
       cells.push({ week: w, status, date: recs.length ? recs[0].date : null });
     }

@@ -288,7 +288,7 @@ with sync_playwright() as p:
 
     # ---- Architecture tab + search ----
     page.click('#tabs button[data-view="architecture"]'); page.wait_for_selector('.arch-svg')
-    check('architecture draws 15 boxes', page.locator('.arch-svg g[data-part]').count() == 15, page.locator('.arch-svg g[data-part]').count())
+    check('architecture draws 16 boxes', page.locator('.arch-svg g[data-part]').count() == 16, page.locator('.arch-svg g[data-part]').count())
     page.fill('input[type="search"]', 'trim'); page.wait_for_timeout(100)
     check('search "trim" highlights Player and Rules', page.locator('.arch-svg .box.hit').count() >= 2, page.locator('.arch-svg .box.hit').count())
     check('search filters the part list', page.locator('.arch-part').count() <= 4, page.locator('.arch-part').count())

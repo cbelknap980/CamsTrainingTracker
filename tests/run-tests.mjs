@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { buildTimeline, trimToFit, remainingSeconds, lastResults, setTiming } from '../js/builder.js';
 import { applyProgression, epley, checkPR, estimateStart } from '../js/progression.js';
 import { effortPlain, effortLevel, spokenDuration } from '../js/data.js';
+import { weekOwed, owedSetsFor, owedLines, buildCatchUpSession, slackDays, plannedDay } from '../js/catchup.js';
 import { parseRepo, toBase64, fromBase64, setupLink, readSetupLink, explainStatus } from '../js/sync.js';
 import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks } from '../js/progress.js';
 
@@ -202,7 +203,7 @@ check('spoken duration', spokenDuration(165) === '2 minutes 45 seconds' && spoke
   const sess = [
     { id: 'b', sessionId: 'lift1', week: 2, date: '2026-11-24', startedAt: '2026-11-24T06:00:00', status: 'complete', sets: [set('back_squat', 135, 5, { ramp: true }), set('back_squat', 190, 5), set('back_squat', 190, 4), set('leg_curl', 80, 12), set('back_squat', 250, 1, { skipped: true })], prs: [{ exerciseId: 'back_squat', name: 'Box squat', kind: 'e1rm', value: 222, prev: 216 }] },
     { id: 'a', sessionId: 'lift1', week: 1, date: '2026-11-17', startedAt: '2026-11-17T06:00:00', status: 'complete', sets: [set('back_squat', 185, 5), set('back_squat', 185, 5), set('leg_curl', 70, 12), set('leg_curl', 70, 10)], prs: [] },
-    { id: 'c', sessionId: 'lift2', week: 1, date: '2026-11-18', startedAt: '2026-11-18T06:00:00', status: 'ended_early', sets: [set('weighted_pullup', 25, 5), set('curl', 50, 10)], prs: [] }
+    { id: 'c', sessionId: 'lift2', week: 1, date: '2026-11-18', startedAt: '2026-11-18T06:00:00', status: 'ended_early', sets: [set('weighted_pullup', 25, 5), set('curl', 50, 10), set('strict_press', null, null, { blockId: 'A', done: false, skipped: true })], prs: [] }
   ];
   const st = { ...settings, startDate: '2026-11-16', bodyweightLb: 165 };
   const series = strengthSeries(sess, plan, st);
@@ -237,6 +238,58 @@ check('v1.7 base64 survives accents and long text', fromBase64(toBase64('Renée 
   check('v1.7 set-up link: anything else in the address is ignored', readSetupLink('') === null && readSetupLink('#sync=notjson') === null && readSetupLink('#other=1') === null);
 }
 check('v1.7 GitHub errors are explained', explainStatus(401).includes('token') && explainStatus(404).includes('repo'));
+
+// ---- v1.8 catch-up day ----
+{
+  const S = (exerciseId, blockId, extra = {}) => ({ exerciseId, blockId, name: exerciseId, ramp: false, weight: 100, reps: 8, rpe: 8, done: true, skipped: false, repRange: [6, 8], ...extra });
+  const skip = { done: false, skipped: true, weight: null, reps: null };
+  const lift1 = { id: 'r1', sessionId: 'lift1', week: 3, date: '2026-11-30', startedAt: '2026-11-30T13:00:00Z', status: 'ended_early', whatChanged: [{ exerciseId: 'rdl', reason: 'a set was skipped' }], sets: [
+    S('back_squat', 'A', { ramp: true, ...skip }), S('back_squat', 'A'), S('back_squat', 'A'), S('back_squat', 'A'),
+    S('rdl', 'B'), S('calf_raise', 'B', skip), S('rdl', 'B'), S('calf_raise', 'B', skip), S('rdl', 'B', skip), S('calf_raise', 'B', skip),
+    S('bss', 'C'), S('leg_curl', 'C'), S('bss', 'C'), S('leg_curl', 'C'), S('bss', 'C'), S('leg_curl', 'C'),
+    S('curl', 'finisher'), S('oh_tri_ext', 'finisher'), S('ab_wheel', 'finisher'), S('curl', 'finisher'), S('oh_tri_ext', 'finisher'), S('ab_wheel', 'finisher'),
+    S('curl', 'finisher', skip), S('oh_tri_ext', 'finisher', skip), S('ab_wheel', 'finisher')
+  ] };
+  const thu = new Date(2026, 11, 3, 8); // Thursday of week 3, a Slack day
+  const owed = weekOwed({ plan, sessions: [lift1], week: 3, today: thu });
+  const l1 = owed.lifts.find(l => l.id === 'lift1');
+  const item = id => l1.blocks.flatMap(b => b.items).find(i => i.exerciseId === id);
+  check('v1.8 owed: skipped sets are counted per exercise, ramp-ups are not', l1.sets === 6 && item('rdl').sets === 1 && item('calf_raise').sets === 3 && item('curl').sets === 1 && item('oh_tri_ext').sets === 1 && !item('back_squat'), l1);
+  check('v1.8 owed: knows which exercises the session already logged', item('rdl').hadDone && item('rdl').undoStall && !item('calf_raise').hadDone);
+  check('v1.8 owed: a lift whose day passed with nothing logged is missed; a later one is not', owed.missed.join() === 'lift2' && owed.lifts.find(l => l.id === 'lift2').day === 'Wednesday' && !owed.lifts.some(l => l.id === 'lift3'), owed.missed);
+  check('v1.8 owed: other weeks owe nothing', weekOwed({ plan, sessions: [lift1], week: 4, today: new Date(2026, 11, 7, 8) }).totalSets === 0);
+  check('v1.8 Slack days come from the calendar', slackDays(plan).join() === 'Thursday,Sunday' && plannedDay(plan, 'lift3').name === 'Friday', slackDays(plan));
+  check('v1.8 owed lines read plainly', owedLines(owed)[0].short === 'Legs' && owedLines(owed)[0].text.startsWith('Romanian deadlift 1 set, Standing calf raise 3 sets'), owedLines(owed));
+
+  const cu = buildCatchUpSession(plan, rules, owed);
+  check('v1.8 catch-up session: warm-up, the owed blocks in plan order, stretch', cu.blocks.map(b => `${b.id}/${b.type}`).join() === 'warmup/warmup,lift1:B/superset,lift1:finisher/finisher,stretch/stretch', cu.blocks.map(b => `${b.id}/${b.type}`));
+  const tlc = buildTimeline({ plan, rules, settings, session: cu, week: 3, targets: { rdl: { weight: 150, reps: 6 }, calf_raise: { weight: 140, reps: 10 }, curl: { weight: 50, reps: 10 }, oh_tri_ext: { weight: 40, reps: 10 } } });
+  const sets = tlc.steps.filter(s => s.kind === 'set' && !s.ramp);
+  check('v1.8 catch-up timeline: exactly the owed sets, tagged with the lift they came from', sets.length === 6 && sets.filter(s => s.exerciseId === 'calf_raise').length === 3 && sets.every(s => s.blockId.startsWith('lift1:')) && tlc.sessionId === 'catchup' && tlc.catchUp, sets.map(s => [s.exerciseId, s.blockId]));
+  check('v1.8 catch-up timeline: every set still gets a get-ready count, and it is short', tlc.plannedSeconds / 60 < 25 && tlc.steps.filter(s => s.kind === 'stretch').length === 6, tlc.plannedSeconds / 60);
+  const onlyCalf = buildCatchUpSession(plan, rules, { lifts: [{ id: 'lift1', short: 'Legs', sets: 2, blocks: [{ blockId: 'B', items: [{ exerciseId: 'calf_raise', sets: 2, hadDone: true, undoStall: false }] }] }] });
+  const b = onlyCalf.blocks[1];
+  check('v1.8 a superset with one exercise left becomes straight sets with a full rest', b.type === 'straight' && b.items.length === 1 && b.items[0].sets === 2 && b.items[0].restSeconds >= 75, b);
+  check('v1.8 nothing owed, no catch-up session', buildCatchUpSession(plan, rules, { lifts: [{ id: 'lift2', missed: true, sets: 0, blocks: [] }] }) === null);
+  const w7 = buildTimeline({ plan, rules, settings, session: cu, week: 7, targets: {} });
+  check('v1.8 lighter week does not halve owed sets again', w7.steps.filter(s => s.kind === 'set' && s.exerciseId === 'calf_raise').length === 3);
+
+  // the catch-up gets logged: sets made up come off the list, and targets move only for exercises not logged before
+  const made = { id: 'c1', sessionId: 'catchup', week: 3, date: '2026-12-03', startedAt: '2026-12-03T13:00:00Z', endedAt: '2026-12-03T13:30:00Z', status: 'complete', catchUp: true, catchUpInfo: cu.catchUpInfo, phase: { id: 'build' }, sets: [
+    S('rdl', 'lift1:B', { weight: 150, reps: 8, repRange: [6, 8] }),
+    S('calf_raise', 'lift1:B', { weight: 140, reps: 15, repRange: [10, 15] }), S('calf_raise', 'lift1:B', { weight: 140, reps: 15, repRange: [10, 15] }), S('calf_raise', 'lift1:B', { weight: 140, reps: 15, repRange: [10, 15] }),
+    S('curl', 'lift1:finisher', { weight: 50, reps: 12, repRange: [10, 12] }), S('oh_tri_ext', 'lift1:finisher', skip)
+  ] };
+  const after = weekOwed({ plan, sessions: [lift1, made], week: 3, today: thu });
+  check('v1.8 made-up sets come off the list; one skipped again stays', after.lifts.find(l => l.id === 'lift1').sets === 1 && owedSetsFor(plan, [lift1, made], 'lift1', 3) === 1, after.lifts.find(l => l.id === 'lift1'));
+  const res = applyProgression({ session: made, targets: { rdl: { weight: 150, reps: 7, stall: 1 }, calf_raise: { weight: 140, reps: 10, stall: 0 }, curl: { weight: 50, reps: 11 } }, rules, plan, settings });
+  const line = id => res.lines.find(l => l.exerciseId === id);
+  check('v1.8 catch-up sets for a lift already logged do not move its target, and take back the skipped-set miss', res.targets.rdl.weight === 150 && res.targets.rdl.reps === 7 && res.targets.rdl.stall === 0 && line('rdl').reason === 'catch-up sets', [res.targets.rdl, line('rdl')]);
+  check('v1.8 an exercise done only on the catch-up day progresses as usual', res.targets.calf_raise.weight > 140 && line('calf_raise').verdict === 'up', [res.targets.calf_raise, line('calf_raise')]);
+  const a2 = adherence([lift1, made, { ...made, id: 'c2', sets: [S('oh_tri_ext', 'lift1:finisher')] }], plan, { ...settings, startDate: '2026-11-16' }, thu);
+  const a1 = adherence([lift1, made], plan, { ...settings, startDate: '2026-11-16' }, thu);
+  check('v1.8 Progress: ended early stays partial until everything is made up, then counts as done', a1.rows[0].cells[2].status === 'partial' && a2.rows[0].cells[2].status === 'done', [a1.rows[0].cells[2], a2.rows[0].cells[2]]);
+}
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
