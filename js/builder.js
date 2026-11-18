@@ -4,7 +4,7 @@
 import { effortText, effortToRpe, roundTo, equipmentFor } from './data.js';
 
 /**
- * v1.8: coach check-ins move rest times in small steps. restAdjust = { exerciseId | 'session:<id>': seconds }.
+ * v1.9: coach check-ins move rest times in small steps. restAdjust = { exerciseId | 'session:<id>': seconds }.
  * An exercise's rests (or its finisher's round rest) move by its own number plus the session's. Returns a copy.
  */
 export function applyRestAdjust(session, restAdjust) {
@@ -39,15 +39,17 @@ export function applyRestAdjust(session, restAdjust) {
  *   v1.4: auto (the set ends on its own timer), startSeconds, repSeconds, tips, equipment,
  *         setupSeconds / setupFor (on the rest or transition before an exercise's first set), lead (inserted set-up step) }
  */
-export function buildTimeline({ plan, rules, settings, sessionId, week, targets, history }) {
-  const raw = plan.sessions.find(s => s.id === sessionId);
+export function buildTimeline({ plan, rules, settings, sessionId, session: custom, week, targets, history }) {
+  // v1.8: `session` can be passed in directly (the catch-up session is built on the fly, it is not in plan.json)
+  const raw = custom || plan.sessions.find(s => s.id === sessionId);
   if (!raw) throw new Error(`Unknown session ${sessionId}`);
+  // v1.9: rest offsets from coach check-ins
   const session = applyRestAdjust(raw, settings && settings.restAdjust);
   const phase = phaseFor(plan, week);
   const t = rules.timing;
   const transitionSeconds = (settings && settings.transitionSeconds) || t.transitionSeconds;
   const steps = [];
-  const ctx = { plan, rules, settings, week, phase, targets: targets || {}, history: history || {}, steps, transitionSeconds };
+  const ctx = { plan, rules, settings, week, phase, targets: targets || {}, history: history || {}, steps, transitionSeconds, exactSets: !!session.catchUp };
 
   const blocks = session.blocks;
   blocks.forEach((block, bi) => {
@@ -79,7 +81,7 @@ export function buildTimeline({ plan, rules, settings, sessionId, week, targets,
   steps.forEach((s, i) => { s.idx = i; });
   const plannedSeconds = steps.reduce((a, s) => a + (s.seconds || 0), 0);
   return { sessionId: session.id, sessionName: session.name, logName: session.logName, week, phase, planVersion: plan.planVersion,
-    plannedMinutes: session.plannedMinutes, plannedSeconds, steps };
+    plannedMinutes: session.plannedMinutes, plannedSeconds, steps, ...(session.catchUp ? { catchUp: true, catchUpInfo: session.catchUpInfo || {} } : {}) };
 }
 
 export function phaseFor(plan, week) {
@@ -110,6 +112,7 @@ function nextBlockLabel(plan, block) {
 }
 
 function setsFor(ctx, n) {
+  if (ctx.exactSets) return n; // catch-up: the owed count is already what the week asked for
   const light = ctx.rules.phases.light;
   if (ctx.phase.id === 'light' && n) return Math.max(1, Math.ceil(n * light.setFactor));
   return n;

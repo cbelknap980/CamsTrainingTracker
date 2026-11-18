@@ -24,7 +24,7 @@
         "sets, reps, rest, minutes"
       ],
       "file": "data/plan.json",
-      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes. v1.4 adds a tempo and focus cues to every exercise and a goal sentence to every session. v1.5: exercises that use two dumbbells are marked pair, and every curl is named by type. v1.8: data/goals.json holds the ranked goals for the Plan tab, and data/muscles.json maps each exercise to muscle groups."
+      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes. v1.4 adds a tempo and focus cues to every exercise and a goal sentence to every session. v1.5: exercises that use two dumbbells are marked pair, and every curl is named by type. v1.9: data/goals.json holds the ranked goals for the Plan tab, and data/muscles.json maps each exercise to muscle groups."
     },
     {
       "id": "settings",
@@ -45,7 +45,7 @@
         "Start, Done, edit a set, review,",
         "benchmarks, pause, skip, run form"
       ],
-      "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore. v1.8: coach check-ins on the Plan tab: a note with quick tags (Too heavy, Too light, Rest too long, Need more rest, Pain, Slept badly, Felt good). Weight tags move that lift's next target one step; rest tags move its rest 15 s, at most 45 s either way (settings.restAdjust, applied by the Session Builder)."
+      "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore. v1.9: coach check-ins on the Plan tab: a note with quick tags (Too heavy, Too light, Rest too long, Need more rest, Pain, Slept badly, Felt good). Weight tags move that lift's next target one step; rest tags move its rest 15 s, at most 45 s either way (settings.restAdjust, applied by the Session Builder)."
     },
     {
       "id": "rules",
@@ -56,7 +56,7 @@
         "week 7, weeks 8-11 overrides"
       ],
       "file": "data/rules.json",
-      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates. v1.4 adds set timing (tempo default, margin, set-up seconds by equipment, get-ready seconds), the effort scale behind the four effort buttons (stored as RPE 6, 8, 9, 10), and rough starting-weight estimates for free-weight accessories. v1.5: dumbbellPairs (pair lifts are stored as totals and jump two dumbbell steps), timing.confirmSetup (wait for a tap before each new block), review.blockSaveOnOpenItems, weighted pull-up jump 5 lb."
+      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates. v1.4 adds set timing (tempo default, margin, set-up seconds by equipment, get-ready seconds), the effort scale behind the four effort buttons (stored as RPE 6, 8, 9, 10), and rough starting-weight estimates for free-weight accessories. v1.5: dumbbellPairs (pair lifts are stored as totals and jump two dumbbell steps), timing.confirmSetup (wait for a tap before each new block), review.blockSaveOnOpenItems, weighted pull-up jump 5 lb. v1.8: catchUp (warm-up, rest for a lone superset exercise, stretch on or off)."
     },
     {
       "id": "builder",
@@ -103,6 +103,17 @@
       "description": "Runs once after a session saves. For each exercise in the session: applies the week override if any, the baseline rule in weeks 1-2, otherwise the success test (main lifts) or the reps-then-weight rule (accessories), counts stalls and drops 10% after two misses, computes Epley estimated 1RM for benchmark lifts, writes the new targets and a plain-language what-changed line per exercise. Power clean is excluded from automatic progression. Also keeps each exercise's best estimated 1RM and heaviest weight and reports personal records when a session beats them. v1.5: incrementFor doubles the jump for pair lifts; starting estimates for pair lifts are totals."
     },
     {
+      "id": "catchup",
+      "column": "app",
+      "name": "Catch-up list",
+      "lines": [
+        "skipped sets and missed lifts",
+        "become a Slack-day session"
+      ],
+      "file": "js/catchup.js",
+      "description": "Works out what is still owed this week from the saved sessions: sets that were skipped or never reached (a session ended early), minus any already made up, plus whole lifts whose day has passed with nothing logged. Sets cut by Trim to fit and the if-time block are not owed, and nothing carries past Sunday. From the leftover sets it builds a Catch-up session (short warm-up, the owed blocks in plan order, stretch) that the Session Builder turns into a timeline like any other. On a Slack day it takes the today card on Home; on other days it shows as Owed this week. Catch-up sets are logged and count for records; they move a target only for an exercise the original session never logged. Settings are in rules.json under catchUp."
+    },
+    {
       "id": "storage",
       "column": "app",
       "name": "Storage and offline cache",
@@ -142,7 +153,7 @@
         "sessions, exercises over time, PRs,",
         "benchmarks and next targets"
       ],
-      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it. v1.8: the Log tab moved inside Progress as Sessions and Exercises next to Overview."
+      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it. v1.9: the Log tab moved inside Progress as Sessions and Exercises next to Overview."
     },
     {
       "id": "progress",
@@ -153,7 +164,7 @@
         "PRs, sets per week (big screen)"
       ],
       "file": "js/progress.js",
-      "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser. v1.8: with one session a lift card shows the best set and the next target instead of a lone dot; clicking a card opens every set of that lift; a card for work sets per muscle group this week against what the plan holds and a 10-set mark (data/muscles.json); sync status moved to the header."
+      "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser. v1.9: with one session a lift card shows the best set and the next target instead of a lone dot; clicking a card opens every set of that lift; a card for work sets per muscle group this week against what the plan holds and a 10-set mark (data/muscles.json); sync status moved to the header."
     },
     {
       "id": "backup",
@@ -175,7 +186,7 @@
         "computer loads it on open"
       ],
       "file": "js/sync.js",
-      "description": "Optional, off until set up in Settings. Keeps one file (tracker-data.json, the same content as a backup) in a private GitHub repo that belongs to Cameron. The phone uploads a few seconds after every saved session, run, target or settings change, and retries when signal returns. A device set to Only views downloads the file when the app opens and never uploads. The repo name and token are stored on the device only and are not part of a backup. The app refuses a public repo, and an empty phone loads the existing copy instead of overwriting it. Nothing is written to the app's own repo. v1.8: the header shows sync status with a refresh button. Both devices also read coach.json from the same repo (written by the coach review); only the phone applies its adjustments, once each."
+      "description": "Optional, off until set up in Settings. Keeps one file (tracker-data.json, the same content as a backup) in a private GitHub repo that belongs to Cameron. The phone uploads a few seconds after every saved session, run, target or settings change, and retries when signal returns. A device set to Only views downloads the file when the app opens and never uploads. The repo name and token are stored on the device only and are not part of a backup. The app refuses a public repo, and an empty phone loads the existing copy instead of overwriting it. Nothing is written to the app's own repo. v1.9: the header shows sync status with a refresh button. Both devices also read coach.json from the same repo (written by the coach review); only the phone applies its adjustments, once each."
     }
   ],
   "flows": [
@@ -223,6 +234,16 @@
       "from": "storage",
       "to": "builder",
       "label": "saved targets (next session)"
+    },
+    {
+      "from": "storage",
+      "to": "catchup",
+      "label": "this week's saved sessions"
+    },
+    {
+      "from": "catchup",
+      "to": "builder",
+      "label": "catch-up session"
     },
     {
       "from": "player",

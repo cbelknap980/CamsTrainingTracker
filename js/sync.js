@@ -7,7 +7,7 @@
 import { kvGet, kvSet, kvDel, exportAll, importAll, onDataChange } from './store.js';
 
 export const SYNC_FILE = 'tracker-data.json';
-export const COACH_FILE = 'coach.json'; // v1.8: written by the coach review, read by the app
+export const COACH_FILE = 'coach.json'; // v1.9: written by the coach review, read by the app
 const API = 'https://api.github.com';
 
 // ---- pure helpers (tested in node) ----
@@ -140,7 +140,7 @@ export async function pullNow() {
 }
 
 /**
- * v1.8: the coach's replies and adjustments (coach.json in the same private repo). Both devices read it; only the
+ * v1.9: the coach's replies and adjustments (coach.json in the same private repo). Both devices read it; only the
  * phone applies adjustments. Keeps the last copy on the device so it shows with no signal.
  */
 export async function pullCoach() {

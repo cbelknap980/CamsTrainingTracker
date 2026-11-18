@@ -57,7 +57,7 @@ Edit `data/plan.json` or `data/rules.json`, bump `VERSION` in `sw.js`, add a lin
 
 The spec doc (purpose, block diagram, data model, player logic, progression rules, storage, roadmap, change log) lives in Claude Docs: "General - Cam's Training Tracker: Spec".
 
-## Coach file (v1.8)
+## Coach file (v1.9)
 
 The coach review writes `coach.json` to the same private repo as `tracker-data.json`. The app reads it on open and when the sync button in the header is pressed. Only the phone applies adjustments, each one once (ids kept in kv `coachApplied`).
 

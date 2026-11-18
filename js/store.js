@@ -81,7 +81,7 @@ export async function getRuns() {
   return all.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
 
-// ---- v1.8: coach check-ins ----
+// ---- v1.9: coach check-ins ----
 export async function getCheckins() { return (await kvGet('checkins')) || []; }
 export async function addCheckin(c) { const all = await getCheckins(); all.push(c); await kvSet('checkins', all); changed(); return all; }
 export async function getCoachApplied() { return (await kvGet('coachApplied')) || []; }
@@ -171,7 +171,7 @@ export async function exportAll(appVersion, planVersion) {
     runs: await getRuns(),
     settings: (await kvGet('settings')) || {},
     pairTotals: (await kvGet('pairTotals')) || null,
-    // v1.8: coach check-ins and which coach changes the phone has applied
+    // v1.9: coach check-ins and which coach changes the phone has applied
     checkins: (await kvGet('checkins')) || [],
     coachApplied: (await kvGet('coachApplied')) || []
   };
@@ -189,7 +189,7 @@ export async function importAll(backup, opts = {}) {
     t.objectStore('kv').put(backup.targets || {}, 'targets');
     t.objectStore('kv').put(backup.settings || {}, 'settings');
     t.objectStore('kv').delete('inProgress');
-    // v1.8: a backup from before check-ins existed leaves them as they are
+    // v1.9: a backup from before check-ins existed leaves them as they are
     if (backup.checkins) t.objectStore('kv').put(backup.checkins, 'checkins');
     if (backup.coachApplied) t.objectStore('kv').put(backup.coachApplied, 'coachApplied');
     // a backup from before v1.5 has per-dumbbell numbers: clear the flag so the app asks again

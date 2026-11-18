@@ -1,4 +1,4 @@
-// app.js - app shell: boot, tabs, Home, Progress (with the log since v1.8), Plan, Runs, Settings, and the start/resume/summary flow.
+// app.js - app shell: boot, tabs, Home, Progress (with the log since v1.9), Plan, Runs, Settings, and the start/resume/summary flow.
 
 import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentFor, isPair, pairText, weightWithPair } from './data.js';
 import { buildTimeline, lastResults } from './builder.js';
@@ -10,6 +10,7 @@ import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, 
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
+import { weekOwed, owedLines, buildCatchUpSession, slackDays } from './catchup.js';
 import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
 import { renderPlan } from './plan-view.js';
 import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
@@ -36,7 +37,7 @@ async function boot() {
     return;
   }
   setSettingsDefaults(D.settingsDefaults);
-  // v1.8: a computer gets the sidebar layout and full-width pages
+  // v1.9: a computer gets the sidebar layout and full-width pages
   document.body.classList.toggle('computer', onComputer());
   document.getElementById('sync-chip').addEventListener('click', onSyncChip);
   document.querySelectorAll('#tabs .tab').forEach(b => {
@@ -75,7 +76,7 @@ async function startSync() {
   startAutoSync(() => ({ appVersion: APP_VERSION, planVersion: D.plan.planVersion }), r => { if (!r.ok) toast('Upload to the computer copy failed. It will retry.', 3500); updateSyncChip(); });
 }
 
-// ---- v1.8: sync status in the header ----
+// ---- v1.9: sync status in the header ----
 const clock = iso => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 const dayClock = iso => (toISODate(new Date(iso)) === toISODate(new Date()) ? clock(iso) : `${fmtDate(iso)} ${clock(iso)}`);
 async function updateSyncChip() {
@@ -111,7 +112,7 @@ async function onSyncChip() {
 }
 
 /**
- * v1.8: read the coach's file. On the phone, apply adjustments it has not applied yet (a target, or a rest offset
+ * v1.9: read the coach's file. On the phone, apply adjustments it has not applied yet (a target, or a rest offset
  * from the plan, kept inside the check-in limits). The computer only shows the replies.
  */
 async function syncCoach(rerender) {
@@ -210,7 +211,7 @@ async function updateWeekChip() {
 }
 
 function showTab(name) {
-  if (name === 'history') { progressMode = 'sessions'; name = 'progress'; } // v1.8: the log lives in Progress
+  if (name === 'history') { progressMode = 'sessions'; name = 'progress'; } // v1.9: the log lives in Progress
   currentTab = name;
   document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   window.scrollTo(0, 0);
@@ -236,6 +237,27 @@ async function renderHome() {
   const run = todayId ? D.plan.runs.find(r => r.id === todayId) : null;
   view.innerHTML = '';
 
+  // v1.8 catch-up: sets skipped or not reached this week, and lifts whose day passed with nothing logged
+  const owed = week >= 1 && week <= 12 ? weekOwed({ plan: D.plan, sessions: await getSessions(), week, today }) : { lifts: [], totalSets: 0, missed: [] };
+  const catchUp = owed.totalSets ? buildCatchUpSession(D.plan, D.rules, owed) : null;
+  const hasOwed = !!(catchUp || owed.missed.length);
+  const catchUpBody = (card, primary) => {
+    if (catchUp) {
+      const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session: catchUp, week, targets });
+      card.appendChild(el('p', { class: primary ? '' : 'muted' }, `${owed.totalSets} ${owed.totalSets === 1 ? 'set' : 'sets'} left over from this week, about ${fmtMinutes(tl.plannedSeconds)} with warm-up and stretch.`));
+      card.appendChild(el('ul', { class: 'lines owed-list' }, owedLines(owed).map(l => el('li', {}, [el('b', {}, `${l.short}: `), l.text]))));
+      card.appendChild(el('button', { class: 'btn ' + (primary ? 'primary' : ''), id: 'catchup-start', onclick: () => previewSession(catchUp, week) }, primary ? 'Start catch-up' : 'Do the catch-up now'));
+    }
+    owed.lifts.filter(l => l.missed).forEach(l => {
+      card.appendChild(el('p', { class: 'muted', style: 'margin:12px 0 8px' }, `${l.name} was planned for ${l.day} and is not logged.`));
+      card.appendChild(el('button', { class: 'btn ' + (primary && !catchUp ? 'primary' : ''), 'data-missed': l.id, onclick: () => previewSession(l.id, week) }, `Start ${l.name}`));
+    });
+    const slack = slackDays(D.plan);
+    card.appendChild(el('p', { class: 'muted', style: 'margin:12px 0 0;font-size:var(--t-small)' }, primary
+      ? 'Skipped sets and missed lifts land here. Anything still owed on Sunday night is dropped, it does not roll into next week.'
+      : `This waits for your next Slack day (${slack.join(' or ')}). Anything still owed on Sunday night is dropped.`));
+  };
+
   const todayCard = el('div', { class: 'card accent' });
   todayCard.appendChild(el('h3', {}, `Today, ${fmtDate(toISODate(today))} · week ${week}${phase.note ? ' · ' + phase.name : ''}`));
   if (session) {
@@ -247,11 +269,21 @@ async function renderHome() {
     todayCard.appendChild(el('h1', {}, run.name));
     todayCard.appendChild(el('p', { class: 'muted' }, run.note));
     todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => runForm(D.plan, settings, null, () => renderHome()) }, 'Log this run'));
+  } else if (hasOwed) {
+    // v1.8: on a Slack day the catch-up takes the today card
+    todayCard.id = 'catchup-card';
+    todayCard.appendChild(el('h1', {}, 'Catch-up day'));
+    catchUpBody(todayCard, true);
   } else {
     todayCard.appendChild(el('h1', {}, 'Slack day'));
-    todayCard.appendChild(el('p', { class: 'muted' }, 'Make-up day. Pick a session below if you missed one, or rest.'));
+    todayCard.appendChild(el('p', { class: 'muted' }, 'Nothing owed this week. Rest, or pick a session below.'));
   }
   view.appendChild(todayCard);
+  if (hasOwed && (session || run)) {
+    const c = el('div', { class: 'card', id: 'catchup-card' }, [el('h3', {}, 'Owed this week')]);
+    catchUpBody(c, false);
+    view.appendChild(c);
+  }
   // v1.4: install card, only while the app is running in a browser tab. v1.6: on a phone it sits right under
   // the today card so it is not missed; on a computer it stays at the bottom.
   const installCard = isInstalled() ? null : el('div', { class: 'card', id: 'install-card' }, [
@@ -296,7 +328,7 @@ async function renderHome() {
   }
 
   if (installCard && onComputer()) view.appendChild(installCard);
-  // v1.8: on a computer, the today card across the top, then two columns: next targets on the right
+  // v1.9: on a computer, the today card across the top, then two columns: next targets on the right
   if (document.body.classList.contains('computer')) {
     const [first, ...rest] = [...view.children];
     const right = rest.filter(c => c.id === 'next-targets');
@@ -382,10 +414,11 @@ function editTarget(id, ex, t) {
 
 // ---- Pre-session overview (v1.4) ----
 // What the session is for, every exercise with sets x reps and a weight you can change, and the time it should take.
-async function previewSession(sessionId, week) {
+async function previewSession(sessionRef, week) {
   const settings = await getSettings();
   const targets = await getTargets();
-  const session = sessionById(D.plan, sessionId);
+  // v1.8: a session id from the plan, or a session object (the catch-up session is built on the fly)
+  const session = typeof sessionRef === 'string' ? sessionById(D.plan, sessionRef) : sessionRef;
   const phase = phaseForWeek(D.plan, week);
   const weights = {};   // exerciseId -> weight for today (typed, saved target, or estimate)
   const estimated = {}; // exerciseId -> true while the number is still the app's estimate
@@ -394,7 +427,7 @@ async function previewSession(sessionId, week) {
     for (const [id, w] of Object.entries(weights)) if (w != null) t[id] = { ...(t[id] || {}), weight: w };
     return t;
   };
-  let tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId, week, targets });
+  let tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets });
   for (const st of tl.steps) {
     if (st.kind !== 'set' || st.ramp || !st.exerciseId || st.exerciseId in weights) continue;
     const ex = D.plan.exercises[st.exerciseId];
@@ -405,7 +438,7 @@ async function previewSession(sessionId, week) {
   }
 
   const paint = () => {
-    tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId, week, targets: withWeights() });
+    tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights() });
     view.innerHTML = '';
     window.scrollTo(0, 0);
     const finish = Date.now() + tl.plannedSeconds * 1000;
@@ -437,7 +470,7 @@ async function previewSession(sessionId, week) {
         const ex = D.plan.exercises[e.id] || {};
         const st = e.step;
         const reps = st.holdSeconds ? `${st.holdSeconds} s${st.perSide ? '/side' : ''}` : `${st.repRange ? repsText(st.repRange) : (st.target && st.target.reps) || ''}${st.perSide ? '/side' : ''}`;
-        const unit = b.type === 'finisher' ? 'rounds' : 'sets';
+        const unit = b.type === 'finisher' ? (e.sets === 1 ? 'round' : 'rounds') : (e.sets === 1 ? 'set' : 'sets');
         const sub = [equipmentFor(ex), `${e.sets} ${unit} × ${reps}`, st.effort ? effortPlain(st.effort) : ''].filter(Boolean).join(' · ');
         let right;
         if (ex.equipment === 'bodyweight' || st.holdSeconds) right = el('div', { class: 'pre-fixed' }, st.holdSeconds ? 'Timed' : 'Bodyweight');
@@ -464,7 +497,7 @@ async function previewSession(sessionId, week) {
           const t = targets[id];
           if (t && t.weight != null && t.weight !== w) await setTarget(id, { weight: w, source: 'you', updated: new Date().toISOString() });
         }
-        startSession(sessionId, week, withWeights());
+        startSession(session, week, withWeights());
       } }, 'Start workout'),
       el('button', { class: 'btn ghost', onclick: () => showTab('home') }, 'Back')
     ]));
@@ -473,11 +506,11 @@ async function previewSession(sessionId, week) {
 }
 
 // ---- Session flow ----
-async function startSession(sessionId, week, targetsForToday) {
+async function startSession(session, week, targetsForToday) {
   const settings = await getSettings();
   const targets = targetsForToday || await getTargets();
   const history = lastResults(await getSessions());
-  const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId, week, targets, history });
+  const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, history });
   await askNotificationPermission(settings);
   player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
   window.scrollTo(0, 0);
@@ -536,7 +569,7 @@ async function onSessionFinished(draft) {
   }
 }
 
-// ---- Progress: overview, sessions and exercises (v1.8: the Log tab merged in) ----
+// ---- Progress: overview, sessions and exercises (v1.9: the Log tab merged in) ----
 let progressMode = 'overview';
 function progressHeader() {
   const b = (k, label) => el('button', { class: progressMode === k ? 'on' : '', 'data-mode': k, onclick: () => { progressMode = k; window.scrollTo(0, 0); renderProgressTab(); } }, label);
@@ -659,7 +692,7 @@ async function renderProgressTab() {
   });
 }
 
-// ---- Plan and coach check-ins (v1.8) ----
+// ---- Plan and coach check-ins (v1.9) ----
 async function renderPlanTab() {
   const [settings, targets, sessions, runs, checkins, coachFile, cfg] = await Promise.all([getSettings(), getTargets(), getSessions(), getRuns(), getCheckins(), kvGet('coach'), getSync()]);
   if (currentTab !== 'plan') return;

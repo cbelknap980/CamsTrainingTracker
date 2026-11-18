@@ -58,6 +58,7 @@ function buildRecord(draft, plan) {
     sets: draft.sets.map(s => Object.assign(s, { logName: plan.exercises[s.exerciseId] ? (plan.exercises[s.exerciseId].logName || plan.exercises[s.exerciseId].name) : s.name })),
     whatChanged: [], e1rms: {}, prs: []
   };
+  if (tl.catchUp) { record.catchUp = true; record.catchUpInfo = tl.catchUpInfo || {}; }
   if (!record.id || draft.recordId) record.id = draft.recordId || record.id;
   return record;
 }
@@ -196,6 +197,7 @@ export function renderSummary(container, record, { onDone, onBackup }) {
   const stats = el('div', { class: 'card' }, [
     el('h1', {}, record.status === 'complete' ? 'Session done' : 'Session ended early'),
     el('p', { class: 'muted' }, `${record.sessionName} · week ${record.week}`),
+    (planned - done > 0) ? el('p', { id: 'owed-note' }, `${planned - done} ${planned - done === 1 ? 'set was' : 'sets were'} not done. ${planned - done === 1 ? 'It is' : 'They are'} on this week's catch-up list on Home.`) : null,
     el('table', {}, [
       el('tr', {}, [el('td', {}, 'Sets logged'), el('td', { class: 'num' }, `${done} of ${planned}`)]),
       el('tr', {}, [el('td', {}, 'Time'), el('td', { class: 'num' }, `${fmtMinutes(record.actualSeconds)} (plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)})`)]),

@@ -5,6 +5,7 @@
 import { epley } from './progression.js';
 import { el } from './ui.js';
 import { fmtWeight, fmtDate, weekNumber, phaseForWeek, parseISODate } from './data.js';
+import { owedSetsFor } from './catchup.js';
 
 const WEEKS = 12;
 const isWork = st => !st.ramp && st.done && !st.skipped;
@@ -47,7 +48,7 @@ export function adherence(sessions, plan, settings, today) {
       const recs = sessions.filter(s => s.sessionId === l.id && s.week === w);
       let status;
       if (recs.some(r => r.status === 'complete')) status = 'done';
-      else if (recs.length) status = 'partial';
+      else if (recs.length) status = owedSetsFor(plan, sessions, l.id, w) === 0 ? 'done' : 'partial'; // v1.8: made up on a catch-up day
       else status = w < current ? 'missed' : (w === current ? 'open' : 'later');
       cells.push({ week: w, status, date: recs.length ? recs[0].date : null });
     }
@@ -92,7 +93,7 @@ export function accessoryRows(sessions, plan) {
 }
 
 /**
- * v1.8: work sets per muscle group. A main muscle counts a full set, a helper half. `planned` is what one normal week
+ * v1.9: work sets per muscle group. A main muscle counts a full set, a helper half. `planned` is what one normal week
  * of the plan holds (sets, or rounds for finishers; if-time extras left out), so done can be read against it.
  */
 export function muscleSets(sessions, plan, muscles, week) {
@@ -273,7 +274,7 @@ function strengthCard(s, target, onOpen) {
   const up = s.delta > 0, flat = s.delta === 0;
   const one = s.points.length < 2;
   const change = one ? `estimated 1RM from ${shortDate(s.points[0].date)}` : (flat ? 'no change since the first session' : `${up ? '+' : '−'}${Math.abs(s.delta)} lb (${up ? '+' : '−'}${Math.abs(s.pct)}%) since ${shortDate(s.points[0].date)}`);
-  // v1.8: with one session a chart is a lone dot, so show the set it came from and what is next instead
+  // v1.9: with one session a chart is a lone dot, so show the set it came from and what is next instead
   const p = s.points[0];
   const baseline = one ? el('div', { class: 'baseline-box' }, [
     el('div', {}, [el('div', { class: 'label' }, 'Best set'), el('div', { class: 'baseline-num' }, `${fmtWeight(p.weight)} × ${p.reps}`)]),
@@ -292,7 +293,7 @@ function strengthCard(s, target, onOpen) {
   return card;
 }
 
-/** v1.8: sets per muscle group this week against what the plan holds, with the 10-set mark. */
+/** v1.9: sets per muscle group this week against what the plan holds, with the 10-set mark. */
 function muscleCard(rows, week, muscles) {
   const mark = muscles.weeklyTarget.sets;
   const max = Math.max(mark + 2, ...rows.map(r => Math.max(r.planned, r.done)));
@@ -329,7 +330,7 @@ export function renderProgress(view, data, opts = {}) {
   view.appendChild(opts.header || el('div', { class: 'row' }, [el('h1', {}, 'Progress')]));
 
   const fileInput = el('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: e => { const f = e.target.files[0]; if (f && opts.onLoadBackup) opts.onLoadBackup(f); } });
-  // v1.8: sync status moved to the header; the load-backup card shows only when sync is off
+  // v1.9: sync status moved to the header; the load-backup card shows only when sync is off
   const syncCard = opts.syncOn ? true : null;
   const loadCard = syncCard || !opts.onLoadBackup ? null : el('div', { class: 'card', id: 'load-backup' }, [
     el('h3', {}, 'On a computer'),

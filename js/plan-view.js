@@ -1,4 +1,4 @@
-// plan-view.js - v1.8 Plan tab: goals in order, the 12 weeks, this week day by day, every session as planned with
+// plan-view.js - v1.9 Plan tab: goals in order, the 12 weeks, this week day by day, every session as planned with
 // next targets, and the coach check-in thread. Reads the plan data and what the app stores; writes only check-ins.
 
 import { el } from './ui.js';

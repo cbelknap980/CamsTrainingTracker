@@ -385,6 +385,10 @@ body[data-kind="ready"] .rest-top .timer { font-size: 3.4rem; }
 .adh-key > span { display: inline-flex; align-items: center; gap: 6px; }
 .adh-key .adh-cell { width: 20px; height: 20px; font-size: 11px; }
 #load-backup p, #sync-card p { max-width: 72ch; }
+/* v1.8: catch-up card */
+.owed-list { margin: 0 0 12px; }
+.owed-list li { color: var(--text); }
+#owed-note { color: var(--accent); font-weight: 600; }
 /* v1.7.1: dumbbell question, one answer per lift */
 .pair-row { padding: 12px 0; border-top: 1px solid var(--line); }
 .pair-row .segmented { background: var(--surface-2); margin: 8px 0 6px; }
@@ -401,7 +405,7 @@ body[data-kind="ready"] .rest-top .timer { font-size: 3.4rem; }
 .acc-table td, .acc-table th { overflow-wrap: break-word; }
 #pr-list td:first-child { width: 46%; }
 
-/* ---- v1.8 ---- */
+/* ---- v1.9 ---- */
 /* sync status in the header */
 .top-actions { display: flex; align-items: center; gap: 8px; }
 .sync-chip { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px 0 12px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: var(--t-label); font-weight: 600; cursor: pointer; white-space: nowrap; max-width: 52vw; overflow: hidden; text-overflow: ellipsis; }

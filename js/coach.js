@@ -1,4 +1,4 @@
-// coach.js - v1.8 coach check-ins. Cameron writes how things feel, with optional quick tags. Tags tied to an
+// coach.js - v1.9 coach check-ins. Cameron writes how things feel, with optional quick tags. Tags tied to an
 // exercise nudge the next target or the rest time right away (small steps only); everything is kept, synced with
 // the rest of the log, and read by a scheduled coach review that answers in coach.json in his private repo.
 // The helpers at the top are pure (tested in node).
