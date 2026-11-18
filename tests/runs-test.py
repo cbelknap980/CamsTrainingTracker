@@ -183,7 +183,9 @@ with sync_playwright() as p:
     check('miles by week is drawn', page.locator('#runs-miles .viz-bar').count() == 1 and '6.8 mi this week' in week, week)
     long_item = page.locator('.run-item[data-id="garmin-906"]')
     check('a run from the watch is tagged, and asks for effort', 'Garmin' in long_item.inner_text() and 'Add effort' in long_item.inner_text(), long_item.inner_text())
+    page.evaluate("document.getElementById('tabs').style.display = 'none'")   # the fixed tab bar would sit across the middle of a full-page picture
     page.screenshot(path=f'{SHOTS}/runs-phone.png', full_page=True)
+    page.evaluate("document.getElementById('tabs').style.display = ''")
 
     print('The run sheet')
     long_item.click(); page.wait_for_selector('#run-sheet')
