@@ -24,7 +24,7 @@
         "sets, reps, rest, minutes"
       ],
       "file": "data/plan.json",
-      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes. v1.4 adds a tempo and focus cues to every exercise and a goal sentence to every session. v1.5: exercises that use two dumbbells are marked pair, and every curl is named by type."
+      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes. v1.4 adds a tempo and focus cues to every exercise and a goal sentence to every session. v1.5: exercises that use two dumbbells are marked pair, and every curl is named by type. v1.9: data/goals.json holds the ranked goals for the Plan tab, and data/muscles.json maps each exercise to muscle groups."
     },
     {
       "id": "settings",
@@ -45,7 +45,7 @@
         "Start, Done, edit a set, review,",
         "benchmarks, pause, skip, run form"
       ],
-      "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore."
+      "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore. v1.9: coach check-ins on the Plan tab: a note with quick tags (Too heavy, Too light, Rest too long, Need more rest, Pain, Slept badly, Felt good). Weight tags move that lift's next target one step; rest tags move its rest 15 s, at most 45 s either way (settings.restAdjust, applied by the Session Builder)."
     },
     {
       "id": "rules",
@@ -148,12 +148,12 @@
     {
       "id": "history",
       "column": "outputs",
-      "name": "Log, benchmarks, what changed",
+      "name": "Progress: sessions and exercises",
       "lines": [
         "sessions, exercises over time, PRs,",
         "benchmarks and next targets"
       ],
-      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it."
+      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it. v1.9: the Log tab moved inside Progress as Sessions and Exercises next to Overview."
     },
     {
       "id": "progress",
@@ -164,7 +164,7 @@
         "PRs, sets per week (big screen)"
       ],
       "file": "js/progress.js",
-      "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser."
+      "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser. v1.9: with one session a lift card shows the best set and the next target instead of a lone dot; clicking a card opens every set of that lift; a card for work sets per muscle group this week against what the plan holds and a 10-set mark (data/muscles.json); sync status moved to the header."
     },
     {
       "id": "backup",
@@ -186,7 +186,7 @@
         "computer loads it on open"
       ],
       "file": "js/sync.js",
-      "description": "Optional, off until set up in Settings. Keeps one file (tracker-data.json, the same content as a backup) in a private GitHub repo that belongs to Cameron. The phone uploads a few seconds after every saved session, run, target or settings change, and retries when signal returns. A device set to Only views downloads the file when the app opens and never uploads. The repo name and token are stored on the device only and are not part of a backup. The app refuses a public repo, and an empty phone loads the existing copy instead of overwriting it. Nothing is written to the app's own repo."
+      "description": "Optional, off until set up in Settings. Keeps one file (tracker-data.json, the same content as a backup) in a private GitHub repo that belongs to Cameron. The phone uploads a few seconds after every saved session, run, target or settings change, and retries when signal returns. A device set to Only views downloads the file when the app opens and never uploads. The repo name and token are stored on the device only and are not part of a backup. The app refuses a public repo, and an empty phone loads the existing copy instead of overwriting it. Nothing is written to the app's own repo. v1.9: the header shows sync status with a refresh button. Both devices also read coach.json from the same repo (written by the coach review); only the phone applies its adjustments, once each."
     }
   ],
   "flows": [

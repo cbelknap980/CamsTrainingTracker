@@ -7,6 +7,7 @@
 import { kvGet, kvSet, kvDel, exportAll, importAll, onDataChange } from './store.js';
 
 export const SYNC_FILE = 'tracker-data.json';
+export const COACH_FILE = 'coach.json'; // v1.9: written by the coach review, read by the app
 const API = 'https://api.github.com';
 
 // ---- pure helpers (tested in node) ----
@@ -135,6 +136,26 @@ export async function pullNow() {
     const err = offline(e);
     await saveSync({ lastError: String(err.message || err) });
     return { ok: false, error: String(err.message || err) };
+  }
+}
+
+/**
+ * v1.9: the coach's replies and adjustments (coach.json in the same private repo). Both devices read it; only the
+ * phone applies adjustments. Keeps the last copy on the device so it shows with no signal.
+ */
+export async function pullCoach() {
+  const cfg = await getSync();
+  if (!cfg || !cfg.repo || !cfg.token) return { ok: false, skipped: true, file: (await kvGet('coach')) || null };
+  try {
+    const res = await call(cfg, `/contents/${COACH_FILE}`, { raw: true });
+    if (res.status === 404) return { ok: true, empty: true, file: (await kvGet('coach')) || null };
+    if (!res.ok) throw new Error(explainStatus(res.status));
+    const file = await res.json();
+    if (!file || typeof file !== 'object') throw new Error(`${COACH_FILE} is not a coach file.`);
+    await kvSet('coach', file);
+    return { ok: true, file };
+  } catch (e) {
+    return { ok: false, error: String(offline(e).message || e), file: (await kvGet('coach')) || null };
   }
 }
 

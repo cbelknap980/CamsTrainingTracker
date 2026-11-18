@@ -1,0 +1,20 @@
+{
+  "note": "Cameron's goals for the 12-week block, in priority order, from the project knowledge file (confirmed Nov 17, 2026). Shown on the Plan tab.",
+  "goals": [
+    { "name": "Leg strength and size", "measure": "Box squat and Romanian deadlift estimated 1RM, front squat" },
+    { "name": "Arm and shoulder size", "measure": "Weekly sets for biceps, triceps and shoulders; curl and press numbers" },
+    { "name": "Overhead press and core", "measure": "Strict press and push press estimated 1RM; toes-to-bar" },
+    { "name": "Strength you can measure going up", "measure": "Week 12 retest against week 1 benchmarks" },
+    { "name": "Running and aerobic engine", "measure": "One hard interval session a week; long run distance and pace" },
+    { "name": "Keep CrossFit skills", "measure": "Power clean, toes-to-bar, pull-ups" },
+    { "name": "Knees that hold up to skiing and biking", "measure": "Knee feels fine on squats and RDLs; check-ins flag any pain" },
+    { "name": "Flexibility", "measure": "Stretch block after every lift" },
+    { "name": "Stay lean while gaining", "measure": "Not tracked in the app yet" },
+    { "name": "Back to CrossFit, more competitive", "measure": "Longer term: about 1 to 2 years out" }
+  ],
+  "rules": [
+    "Main lifts stay the same for the whole block so the numbers mean something.",
+    "Sessions fit in about 60 minutes. Supersets and accessories at the end.",
+    "Coach check-ins only nudge weights, reps and rest. Bigger changes go through a plan review first."
+  ]
+}

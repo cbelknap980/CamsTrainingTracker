@@ -1,6 +1,6 @@
 // sw.js - service worker: caches the app files so it opens with no signal, and fires the rest-end
 // notification when the app is in the background. Bump VERSION on every publish.
-const VERSION = 'v1.8.0';
+const VERSION = 'v1.9.0';
 const CACHE = `ctt-${VERSION}`;
 const FILES = [
   './',
@@ -8,8 +8,8 @@ const FILES = [
   './manifest.webmanifest',
   './css/app.css',
   './js/app.js', './js/builder.js', './js/player.js', './js/logger.js', './js/progression.js',
-  './js/store.js', './js/export.js', './js/architecture.js', './js/data.js', './js/ui.js', './js/icons.js', './js/progress.js', './js/sync.js', './js/catchup.js',
-  './data/plan.json', './data/rules.json', './data/settings.json', './data/architecture.json',
+  './js/store.js', './js/export.js', './js/architecture.js', './js/data.js', './js/ui.js', './js/icons.js', './js/progress.js', './js/sync.js', './js/catchup.js', './js/coach.js', './js/plan-view.js',
+  './data/plan.json', './data/rules.json', './data/settings.json', './data/architecture.json', './data/muscles.json', './data/goals.json',
   './vendor/xlsx.mini.min.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];

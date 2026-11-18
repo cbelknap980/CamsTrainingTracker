@@ -1,18 +1,20 @@
 // data.js - loads the data files and provides plan helpers (week number, phase, today's session).
 
-export const APP_VERSION = '1.8.0';
+export const APP_VERSION = '1.9.0';
 
 let cache = null;
 
 export async function loadData() {
   if (cache) return cache;
-  const [plan, rules, settingsDefaults, architecture] = await Promise.all([
+  const [plan, rules, settingsDefaults, architecture, muscles, goals] = await Promise.all([
     fetchJSON('data/plan.json'),
     fetchJSON('data/rules.json'),
     fetchJSON('data/settings.json'),
-    fetchJSON('data/architecture.json')
+    fetchJSON('data/architecture.json'),
+    fetchJSON('data/muscles.json'),
+    fetchJSON('data/goals.json')
   ]);
-  cache = { plan, rules, settingsDefaults, architecture };
+  cache = { plan, rules, settingsDefaults, architecture, muscles, goals };
   return cache;
 }
 

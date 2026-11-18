@@ -1,0 +1,40 @@
+{
+  "note": "Which muscle groups each exercise trains, for Progress > Sets per muscle group. A main muscle counts a full set, a helper counts half. Exercises not listed here are not counted.",
+  "groups": [
+    { "id": "quads", "name": "Quads" },
+    { "id": "posterior", "name": "Hamstrings and glutes" },
+    { "id": "calves", "name": "Calves" },
+    { "id": "chest", "name": "Chest" },
+    { "id": "back", "name": "Back" },
+    { "id": "shoulders", "name": "Shoulders" },
+    { "id": "biceps", "name": "Biceps", "arms": true },
+    { "id": "triceps", "name": "Triceps", "arms": true },
+    { "id": "core", "name": "Core" }
+  ],
+  "weeklyTarget": { "sets": 10, "source": "Schoenfeld, Ogborn and Krieger 2017 (J Sports Sci): 10 or more weekly sets per muscle grew more than fewer than 5." },
+  "exercises": {
+    "back_squat": { "main": ["quads"], "helper": ["posterior"] },
+    "rdl": { "main": ["posterior"], "helper": ["back"] },
+    "calf_raise": { "main": ["calves"] },
+    "bss": { "main": ["quads"], "helper": ["posterior"] },
+    "leg_curl": { "main": ["posterior"] },
+    "curl": { "main": ["biceps"] },
+    "oh_tri_ext": { "main": ["triceps"] },
+    "ab_wheel": { "main": ["core"] },
+    "strict_press": { "main": ["shoulders"], "helper": ["triceps"] },
+    "weighted_pullup": { "main": ["back"], "helper": ["biceps"] },
+    "incline_db_press": { "main": ["chest"], "helper": ["shoulders", "triceps"] },
+    "cs_row": { "main": ["back"], "helper": ["biceps"] },
+    "lateral_raise": { "main": ["shoulders"] },
+    "incline_curl": { "main": ["biceps"] },
+    "t2b": { "main": ["core"] },
+    "face_pull": { "main": ["shoulders"], "helper": ["back"] },
+    "power_clean": { "main": ["posterior"], "helper": ["quads", "back"] },
+    "front_squat": { "main": ["quads"], "helper": ["core"] },
+    "push_press": { "main": ["shoulders"], "helper": ["triceps"] },
+    "db_row": { "main": ["back"], "helper": ["biceps"] },
+    "preacher_curl": { "main": ["biceps"] },
+    "rope_pushdown": { "main": ["triceps"] },
+    "side_plank": { "main": ["core"] }
+  }
+}
