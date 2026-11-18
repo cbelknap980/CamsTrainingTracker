@@ -1081,7 +1081,16 @@
       "day": "Tuesday",
       "type": "Intervals",
       "plannedMinutes": 35,
-      "note": "5 min easy, intervals at RPE 8-9, 3 min easy, then the stretch block. Weeks 1-4: 5 x 2 min hard / 2 min easy. Weeks 5-8: 5 x 3 / 2. Weeks 9-12: 4 x 4 / 2-3. Week 1: a 5K time trial can replace this."
+      "note": "5 min easy, intervals at RPE 8-9, 3 min easy, then the stretch block. Weeks 1-4: 5 x 2 min hard / 2 min easy. Weeks 5-8: 5 x 3 / 2. Weeks 9-12: 4 x 4 / 2-3. Week 1: a 5K time trial can replace this.",
+      "effort": "hard, RPE 8-9",
+      "warmupMin": 5,
+      "cooldownMin": 3,
+      "intervals": [
+        { "weeks": [1, 4], "reps": 5, "hardMin": 2, "easyMin": "2" },
+        { "weeks": [5, 8], "reps": 5, "hardMin": 3, "easyMin": "2" },
+        { "weeks": [9, 12], "reps": 4, "hardMin": 4, "easyMin": "2-3" }
+      ],
+      "alsoCounts": ["5K test", "Bike/rower sub"]
     },
     {
       "id": "run2",
@@ -1089,7 +1098,10 @@
       "day": "Weekend",
       "type": "Long run",
       "plannedMinutes": 55,
-      "note": "Conversational pace. Start 3.5 mi, add 0.5 mi each time it's done, up to 6-7 mi. A ski day replaces it and doesn't reset the distance."
+      "note": "Conversational pace. Start 3.5 mi, add 0.5 mi each time it's done, up to 6-7 mi. A ski day replaces it and doesn't reset the distance.",
+      "effort": "conversational pace",
+      "distance": { "startMiles": 3.5, "stepMiles": 0.5, "capMiles": 7 },
+      "alsoCounts": ["Ski day"]
     }
   ],
   "runTypes": [

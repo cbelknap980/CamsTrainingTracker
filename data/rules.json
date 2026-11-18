@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.3",
+  "rulesVersion": "1.4",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -247,5 +247,19 @@
     ],
     "singleRestSeconds": 75,
     "includeStretch": true
+  },
+  "runLog": {
+    "note": "Run types whose distance is not running miles. They still count as the planned run they replace.",
+    "milesExclude": ["Bike/rower sub", "Ski day"]
+  },
+  "garmin": {
+    "note": "Which Garmin activities become runs in the log. match is tested against Garmin's activity type (lower case). type null means: Intervals on the interval day, Long run on the weekend, otherwise Easy run. Shorter activities than minMinutes are left out. Location fields never leave Garmin's side: the job in the private repo drops them.",
+    "types": [
+      { "match": "run", "type": null, "minMinutes": 5 },
+      { "match": "ski|snowboard", "type": "Ski day", "minMinutes": 30 },
+      { "match": "cycling|biking|rowing", "type": "Bike/rower sub", "minMinutes": 20 }
+    ],
+    "lookbackDays": 28,
+    "checkWaitSeconds": 150
   }
 }

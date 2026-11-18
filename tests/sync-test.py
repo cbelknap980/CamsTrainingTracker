@@ -52,8 +52,8 @@ def open_sync(page):
     page.click('#settings-btn'); page.wait_for_selector('#sync-open'); page.click('#sync-open'); page.wait_for_selector('#sync-save')
 def log_run(page, miles):
     page.click('#tabs button[data-view="runs"]'); page.click('button:has-text("Log a run")'); page.wait_for_selector('.modal')
-    page.fill('.modal input[type="number"] >> nth=0', str(miles)); page.fill('.modal input[type="number"] >> nth=1', '30')
-    page.click('.modal button:has-text("Save run")'); page.wait_for_selector('table')
+    page.fill('#run-distance', str(miles)); page.fill('#run-time', '30')
+    page.click('.modal button:has-text("Save run")'); page.wait_for_selector('.run-item')
 def wait_until(page, fn, seconds=8):
     # page.wait_for_timeout (not time.sleep) so the stand-in API keeps answering while we wait
     end = time.time() + seconds
@@ -149,8 +149,8 @@ with sync_playwright() as p:
     check('v1.9 the computer shows the coach reply and has no box to write in', 'Strong first week' in dpage.locator('.msg.coach').inner_text() and dpage.locator('#checkin-send').count() == 0, dpage.locator('#checkin').inner_text()[:200])
     dtg = dpage.evaluate("import('./js/store.js').then(m => m.getTargets())")
     check('v1.9 the computer never applies coach adjustments itself', (dtg.get('curl') or {}).get('source') != 'coach' or (dtg.get('curl') or {}).get('weight') == 45, dtg.get('curl'))
-    dpage.reload(); dpage.wait_for_selector('.card.accent h1'); dpage.click('#tabs button[data-view="runs"]'); dpage.wait_for_selector('h1:has-text("Runs")'); dpage.wait_for_selector('table')
-    check('after a reload the computer still has the data', dpage.locator('table tr').count() == 2, dpage.locator('table tr').count())
+    dpage.reload(); dpage.wait_for_selector('.card.accent h1'); dpage.click('#tabs button[data-view="runs"]'); dpage.wait_for_selector('h1:has-text("Runs")'); dpage.wait_for_selector('.run-item')
+    check('after a reload the computer still has the data', dpage.locator('.run-item').count() == 1, dpage.locator('.run-item').count())
 
     # ---- a new, empty phone ----
     print('New phone: loads the copy instead of wiping it')

@@ -1,0 +1,69 @@
+# Pulls your recent Garmin activities into garmin-activities.json in this repo, so Cam's Training Tracker
+# can add your runs on its own. It needs one secret in this repo: GARMIN_PERSONAL_API_KEY (your Garmin
+# personal API key). The key is only ever sent to Garmin. Location fields are dropped before saving.
+name: Garmin runs
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  push:
+    paths: ['garmin-request.json']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: garmin-runs
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ask Garmin for recent activities
+        env:
+          GARMIN_PERSONAL_API_KEY: ${{ secrets.GARMIN_PERSONAL_API_KEY }}
+          ASKED: ${{ github.event_name != 'schedule' }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os, urllib.error, urllib.parse, urllib.request
+          BASE = os.environ.get('GARMIN_BASE', 'https://personal.connectapi.garmin.com')
+          OUT = 'garmin-activities.json'
+          now = datetime.datetime.now(datetime.timezone.utc)
+          try: old = json.load(open(OUT))
+          except Exception: old = {}
+          new = {'app': 'CamsTrainingTracker', 'kind': 'garmin', 'fetchedAt': now.strftime('%Y-%m-%dT%H:%M:%SZ'), 'ok': True, 'status': 200, 'error': None, 'activities': old.get('activities', [])}
+          def call(path, auth, method='GET'):
+              req = urllib.request.Request(BASE + path, method=method, headers={'Authorization': auth, 'Accept': '*/*' if method == 'POST' else 'application/json', 'User-Agent': 'garmin-runs-job'})
+              return urllib.request.urlopen(req, timeout=30).read().decode()
+          def scrub(x):
+              if isinstance(x, dict): return {k: scrub(v) for k, v in x.items() if not any(w in k.lower() for w in ('latitude', 'longitude', 'location', 'polyline', 'owner', 'user'))}
+              if isinstance(x, list): return [scrub(v) for v in x]
+              return x
+          try:
+              key = os.environ.get('GARMIN_PERSONAL_API_KEY', '').strip()
+              if not key: raise RuntimeError('The secret GARMIN_PERSONAL_API_KEY is missing in this repo.')
+              token = call('/personalapitoken-service/personal-api/personal-api-key/token', 'ApiKey ' + key, 'POST').strip()
+              since = (now - datetime.timedelta(days=35)).strftime('%Y-%m-%d')
+              found, start = [], 0
+              while start < 300:
+                  page = json.loads(call('/activitylist-service/activities/search/activities?' + urllib.parse.urlencode({'start': start, 'limit': 50, 'startDate': since}), 'Bearer ' + token) or '[]')
+                  if isinstance(page, dict): page = next((v for v in page.values() if isinstance(v, list)), [])
+                  found += page
+                  if len(page) < 50: break
+                  start += 50
+              new['activities'] = scrub(found)
+          except urllib.error.HTTPError as e:
+              new.update(ok=False, status=e.code, error='Garmin answered %s.' % e.code)
+          except Exception as e:
+              new.update(ok=False, status=0, error=str(e)[:200])
+          same = all(old.get(k) == new[k] for k in ('ok', 'status', 'activities'))
+          if os.environ.get('ASKED') == 'true' or not same:
+              json.dump(new, open(OUT, 'w'), indent=1)
+          print('ok' if new['ok'] else new['error'], '-', len(new['activities']), 'activities')
+          PY
+      - name: Save the file
+        run: |
+          git config user.name "garmin-runs-job"
+          git config user.email "garmin-runs-job@users.noreply.github.com"
+          git add garmin-activities.json
+          git diff --cached --quiet && exit 0
+          git commit -q -m "Garmin activities $(date -u +%FT%TZ)"
+          git push -q || (git pull -q --rebase && git push -q)

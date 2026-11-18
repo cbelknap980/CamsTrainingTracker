@@ -268,9 +268,9 @@ with sync_playwright() as p:
 
     # ---- Runs ----
     page.click('#tabs button[data-view="runs"]'); page.click('button:has-text("Log a run")'); page.wait_for_selector('.modal')
-    page.fill('.modal input[type="number"] >> nth=0', '3.1'); page.fill('.modal input[type="number"] >> nth=1', '27.5')
-    page.click('.modal button:has-text("Save run")'); page.wait_for_selector('table')
-    check('run saved with pace', '8:52' in page.locator('table').inner_text(), page.locator('table').inner_text())
+    page.fill('#run-distance', '3.1'); page.fill('#run-time', '27.5')
+    page.click('.modal button:has-text("Save run")'); page.wait_for_selector('.run-item')
+    check('run saved with pace', '8:52/mi' in page.locator('.run-item').first.inner_text() and '27:30' in page.locator('.run-item').first.inner_text(), page.locator('.run-item').first.inner_text())
     page.screenshot(path=f'{SHOTS}/runs.png', full_page=True)
 
     # ---- v1.6 Progress tab ----
@@ -313,7 +313,7 @@ with sync_playwright() as p:
 
     # ---- Architecture tab + search ----
     page.click('#tabs button[data-view="architecture"]'); page.wait_for_selector('.arch-svg')
-    check('architecture draws 16 boxes', page.locator('.arch-svg g[data-part]').count() == 16, page.locator('.arch-svg g[data-part]').count())
+    check('architecture draws 18 boxes', page.locator('.arch-svg g[data-part]').count() == 18, page.locator('.arch-svg g[data-part]').count())
     page.fill('input[type="search"]', 'trim'); page.wait_for_timeout(100)
     check('search "trim" highlights Player and Rules', page.locator('.arch-svg .box.hit').count() >= 2, page.locator('.arch-svg .box.hit').count())
     check('search filters the part list', page.locator('.arch-part').count() <= 4, page.locator('.arch-part').count())

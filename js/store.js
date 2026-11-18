@@ -76,6 +76,12 @@ export async function getSessions() {
 // ---- runs ----
 export const putRun = r => tx('runs', 'readwrite', st => st.put(r)).then(changed);
 export const deleteRun = id => tx('runs', 'readwrite', st => st.delete(id)).then(changed);
+/** v1.10: Garmin ids that stay out of the log (runs Cameron deleted). */
+export const getGarminIgnored = async () => (await kvGet('garminIgnored')) || [];
+export async function ignoreGarmin(garminId) {
+  const list = await getGarminIgnored();
+  if (!list.includes(String(garminId))) await kvSet('garminIgnored', [...list, String(garminId)]);
+}
 export async function getRuns() {
   const all = await reqToPromise('runs', 'readonly', st => st.getAll());
   return all.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -173,7 +179,9 @@ export async function exportAll(appVersion, planVersion) {
     pairTotals: (await kvGet('pairTotals')) || null,
     // v1.9: coach check-ins and which coach changes the phone has applied
     checkins: (await kvGet('checkins')) || [],
-    coachApplied: (await kvGet('coachApplied')) || []
+    coachApplied: (await kvGet('coachApplied')) || [],
+    // v1.10: Garmin activities Cameron deleted from the log, so they are not added again
+    garminIgnored: (await kvGet('garminIgnored')) || []
   };
 }
 
@@ -192,6 +200,7 @@ export async function importAll(backup, opts = {}) {
     // v1.9: a backup from before check-ins existed leaves them as they are
     if (backup.checkins) t.objectStore('kv').put(backup.checkins, 'checkins');
     if (backup.coachApplied) t.objectStore('kv').put(backup.coachApplied, 'coachApplied');
+    if (backup.garminIgnored) t.objectStore('kv').put(backup.garminIgnored, 'garminIgnored');
     // a backup from before v1.5 has per-dumbbell numbers: clear the flag so the app asks again
     if (backup.pairTotals) t.objectStore('kv').put(backup.pairTotals, 'pairTotals'); else t.objectStore('kv').delete('pairTotals');
     t.oncomplete = resolve;
