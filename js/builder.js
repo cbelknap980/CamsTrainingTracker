@@ -4,6 +4,28 @@
 import { effortText, effortToRpe, roundTo, equipmentFor } from './data.js';
 
 /**
+ * v1.8: coach check-ins move rest times in small steps. restAdjust = { exerciseId | 'session:<id>': seconds }.
+ * An exercise's rests (or its finisher's round rest) move by its own number plus the session's. Returns a copy.
+ */
+export function applyRestAdjust(session, restAdjust) {
+  if (!restAdjust || !Object.keys(restAdjust).length) return session;
+  const s = JSON.parse(JSON.stringify(session));
+  const whole = restAdjust[`session:${s.id}`] || 0;
+  const move = v => Math.max(15, v);
+  for (const b of s.blocks) {
+    let roundDelta = null;
+    for (const it of b.items || []) {
+      if (!it.exercise) continue;
+      const d = (restAdjust[it.exercise] || 0) + whole;
+      if (it.restSeconds) it.restSeconds = move(it.restSeconds + d);
+      else if (b.roundRestSeconds && d && (roundDelta === null || Math.abs(d) > Math.abs(roundDelta))) roundDelta = d;
+    }
+    if (roundDelta) b.roundRestSeconds = move(b.roundRestSeconds + roundDelta);
+  }
+  return s;
+}
+
+/**
  * buildTimeline({ plan, rules, settings, sessionId, week, targets })
  * returns { session, week, phase, steps: [...], plannedSeconds }
  *
@@ -18,8 +40,9 @@ import { effortText, effortToRpe, roundTo, equipmentFor } from './data.js';
  *         setupSeconds / setupFor (on the rest or transition before an exercise's first set), lead (inserted set-up step) }
  */
 export function buildTimeline({ plan, rules, settings, sessionId, week, targets, history }) {
-  const session = plan.sessions.find(s => s.id === sessionId);
-  if (!session) throw new Error(`Unknown session ${sessionId}`);
+  const raw = plan.sessions.find(s => s.id === sessionId);
+  if (!raw) throw new Error(`Unknown session ${sessionId}`);
+  const session = applyRestAdjust(raw, settings && settings.restAdjust);
   const phase = phaseFor(plan, week);
   const t = rules.timing;
   const transitionSeconds = (settings && settings.transitionSeconds) || t.transitionSeconds;

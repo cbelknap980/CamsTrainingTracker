@@ -91,6 +91,31 @@ export function accessoryRows(sessions, plan) {
   return rows;
 }
 
+/**
+ * v1.8: work sets per muscle group. A main muscle counts a full set, a helper half. `planned` is what one normal week
+ * of the plan holds (sets, or rounds for finishers; if-time extras left out), so done can be read against it.
+ */
+export function muscleSets(sessions, plan, muscles, week) {
+  const credit = (id, n, into) => {
+    const m = muscles.exercises[id];
+    if (!m) return;
+    (m.main || []).forEach(g => { into[g] = (into[g] || 0) + n; });
+    (m.helper || []).forEach(g => { into[g] = (into[g] || 0) + n / 2; });
+  };
+  const planned = {};
+  for (const sess of plan.sessions) for (const b of sess.blocks) {
+    if (b.type === 'iftime') continue;
+    for (const it of b.items || []) if (it.exercise) credit(it.exercise, it.sets || b.rounds || 0, planned);
+  }
+  const done = {}, last = {};
+  for (const ss of sessions) {
+    const into = ss.week === week ? done : (ss.week === week - 1 ? last : null);
+    if (!into) continue;
+    for (const st of ss.sets || []) if (isWork(st)) credit(st.exerciseId, 1, into);
+  }
+  return muscles.groups.map(g => ({ id: g.id, name: g.name, arms: !!g.arms, done: done[g.id] || 0, lastWeek: last[g.id] || 0, planned: planned[g.id] || 0 }));
+}
+
 /** Personal records from saved sessions, newest first. */
 export function prList(sessions) {
   const out = [];
@@ -244,14 +269,52 @@ function statusCard(a, plan, runs) {
   ]);
 }
 
-function strengthCard(s) {
+function strengthCard(s, target, onOpen) {
   const up = s.delta > 0, flat = s.delta === 0;
-  const change = s.points.length < 2 ? 'first session logged' : (flat ? 'no change since the first session' : `${up ? '+' : '−'}${Math.abs(s.delta)} lb (${up ? '+' : '−'}${Math.abs(s.pct)}%) since ${shortDate(s.points[0].date)}`);
-  return el('div', { class: 'card strength-card', 'data-ex': s.id }, [
+  const one = s.points.length < 2;
+  const change = one ? `estimated 1RM from ${shortDate(s.points[0].date)}` : (flat ? 'no change since the first session' : `${up ? '+' : '−'}${Math.abs(s.delta)} lb (${up ? '+' : '−'}${Math.abs(s.pct)}%) since ${shortDate(s.points[0].date)}`);
+  // v1.8: with one session a chart is a lone dot, so show the set it came from and what is next instead
+  const p = s.points[0];
+  const baseline = one ? el('div', { class: 'baseline-box' }, [
+    el('div', {}, [el('div', { class: 'label' }, 'Best set'), el('div', { class: 'baseline-num' }, `${fmtWeight(p.weight)} × ${p.reps}`)]),
+    el('div', {}, [el('div', { class: 'label' }, 'Next time'), el('div', { class: 'baseline-num' }, target && target.weight != null ? `${fmtWeight(target.weight)} × ${target.reps != null ? target.reps : '–'}` : '–')])
+  ]) : null;
+  const card = el('div', { class: 'card strength-card' + (onOpen ? ' tappable' : ''), 'data-ex': s.id, ...(onOpen ? { tabindex: 0, role: 'button', 'aria-label': `${s.name}: every set` } : {}) }, [
     el('div', { class: 'row' }, [el('b', {}, s.name), el('span', { class: 'e1rm-now' }, [`${s.last}`, el('small', {}, ' lb')])]),
-    el('div', { class: 'muted change' + (s.points.length > 1 && !flat ? (up ? ' up' : ' down') : '') }, [s.points.length > 1 && !flat ? el('span', { class: 'arrow' }, up ? '↑ ' : '↓ ') : null, change]),
-    lineChart(s.points, `${s.name} estimated 1RM`),
-    s.points.length < 2 ? el('div', { class: 'muted', style: 'font-size:var(--t-small)' }, 'The trend line starts with the second session.') : null
+    el('div', { class: 'muted change' + (!one && !flat ? (up ? ' up' : ' down') : '') }, [!one && !flat ? el('span', { class: 'arrow' }, up ? '↑ ' : '↓ ') : null, change]),
+    one ? baseline : lineChart(s.points, `${s.name} estimated 1RM`),
+    el('div', { class: 'muted card-foot' }, one ? 'The trend line starts with the second session. Click or tap for every set.' : 'Click or tap for every set.')
+  ]);
+  if (onOpen) {
+    card.addEventListener('click', e => { if (!e.target.closest('.viz-hit')) onOpen(s.id); });
+    card.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === card) { e.preventDefault(); onOpen(s.id); } });
+  }
+  return card;
+}
+
+/** v1.8: sets per muscle group this week against what the plan holds, with the 10-set mark. */
+function muscleCard(rows, week, muscles) {
+  const mark = muscles.weeklyTarget.sets;
+  const max = Math.max(mark + 2, ...rows.map(r => Math.max(r.planned, r.done)));
+  const pct = v => `${(100 * v / max).toFixed(1)}%`;
+  const fmt = v => (Math.round(v * 2) / 2).toString();
+  return el('div', { class: 'card', id: 'muscle-sets' }, [
+    el('h3', {}, `Sets per muscle group, week ${week}`),
+    el('div', { class: 'muscle-list' }, rows.map(r => el('div', { class: 'muscle-row' + (r.arms ? ' arms' : ''), 'data-group': r.id, title: `${r.name}: ${fmt(r.done)} done this week, ${fmt(r.planned)} in the plan, ${fmt(r.lastWeek)} last week` }, [
+      el('span', { class: 'muscle-name' }, r.name),
+      el('span', { class: 'muscle-track' }, [
+        el('span', { class: 'muscle-plan', style: `width:${pct(r.planned)}` }),
+        el('span', { class: 'muscle-done', style: `width:${pct(r.done)}` }),
+        el('span', { class: 'muscle-mark', style: `left:${pct(mark)}` })
+      ]),
+      el('span', { class: 'muscle-num' }, [el('b', {}, fmt(r.done)), el('span', { class: 'muted' }, ` of ${fmt(r.planned)}`)])
+    ]))),
+    el('div', { class: 'muscle-key muted' }, [
+      el('span', {}, [el('span', { class: 'sw done' }), 'done this week']),
+      el('span', {}, [el('span', { class: 'sw plan' }), 'in the plan each week']),
+      el('span', {}, [el('span', { class: 'sw mark' }), `${mark} sets`])
+    ]),
+    el('div', { class: 'muted card-foot', title: muscles.weeklyTarget.source }, `Main muscle counts a set, a helper half (rows help biceps, presses help triceps). The line is ${mark} sets a week, a common mark for size (Schoenfeld 2017).`)
   ]);
 }
 
@@ -263,17 +326,11 @@ export function renderProgress(view, data, opts = {}) {
   const { plan, settings, sessions, runs } = data;
   const today = data.today || new Date();
   view.innerHTML = '';
-  view.appendChild(el('div', { class: 'row' }, [el('h1', {}, 'Progress')]));
+  view.appendChild(opts.header || el('div', { class: 'row' }, [el('h1', {}, 'Progress')]));
 
   const fileInput = el('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: e => { const f = e.target.files[0]; if (f && opts.onLoadBackup) opts.onLoadBackup(f); } });
-  // v1.7: when this device downloads from the phone's private repo, say how fresh the copy is
-  const sync = opts.sync;
-  const syncCard = sync ? el('div', { class: 'card', id: 'sync-card' }, [
-    el('h3', {}, 'From your phone'),
-    el('p', { class: 'muted', id: 'sync-status' }, sync.error ? `Could not reach the phone's copy: ${sync.error}` : (sync.at ? `Showing what the phone uploaded ${fmtDate(sync.at)} at ${new Date(sync.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.` : 'Nothing uploaded yet. Save a workout on the phone, then refresh.')),
-    el('button', { class: 'btn', id: 'sync-refresh', style: 'max-width:320px', onclick: () => sync.onRefresh() }, 'Refresh')
-  ]) : null;
-  if (syncCard) view.appendChild(syncCard);
+  // v1.8: sync status moved to the header; the load-backup card shows only when sync is off
+  const syncCard = opts.syncOn ? true : null;
   const loadCard = syncCard || !opts.onLoadBackup ? null : el('div', { class: 'card', id: 'load-backup' }, [
     el('h3', {}, 'On a computer'),
     el('p', { class: 'muted' }, sessions.length ? 'Workouts are logged on the phone. To refresh what you see here, load the newest backup file from the phone. It replaces the copy in this browser.' : 'Workouts are logged on the phone. To see them here, back up on the phone (Settings, Back up), then load that file.'),
@@ -294,12 +351,13 @@ export function renderProgress(view, data, opts = {}) {
   if (series.length) {
     view.appendChild(el('h2', { class: 'section-title' }, 'Strength: estimated 1RM'));
     view.appendChild(el('p', { class: 'muted section-note' }, `Your likely one-rep max, worked out from each session's best set (weight × (1 + reps ÷ 30)).${series.some(s => s.addsBodyweight) ? ' Weighted pull-up counts bodyweight plus the added weight.' : ''}`));
-    view.appendChild(el('div', { class: 'strength-grid', id: 'strength-grid' }, series.map(strengthCard)));
+    view.appendChild(el('div', { class: 'strength-grid', id: 'strength-grid' }, series.map(x => strengthCard(x, (data.targets || {})[x.id], opts.onExercise))));
   }
 
   const prs = prList(sessions);
   const acc = accessoryRows(sessions, plan);
   const lower = el('div', { class: 'progress-lower' });
+  if (data.muscles) lower.appendChild(muscleCard(muscleSets(sessions, plan, data.muscles, Math.max(1, Math.min(WEEKS, a.current))), Math.max(1, Math.min(WEEKS, a.current)), data.muscles));
   lower.appendChild(el('div', { class: 'card', id: 'weekly-sets' }, [
     el('h3', {}, 'Work sets per week'),
     weekBars(weeklySets(sessions), a.current),
@@ -325,6 +383,6 @@ export function renderProgress(view, data, opts = {}) {
     ]));
   }
   view.appendChild(lower);
-  view.appendChild(el('p', { class: 'muted', style: 'font-size:var(--t-small)' }, 'Every set behind these numbers is in the Log tab, under Exercises.'));
+  view.appendChild(el('p', { class: 'muted', style: 'font-size:var(--t-small)' }, 'Every set behind these numbers is under Exercises at the top of this page.'));
   if (loadCard) view.appendChild(loadCard);
 }

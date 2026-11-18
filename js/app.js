@@ -1,4 +1,4 @@
-// app.js - app shell: boot, tabs, Home, History, Runs, Settings, and the start/resume/summary flow.
+// app.js - app shell: boot, tabs, Home, Progress (with the log since v1.8), Plan, Runs, Settings, and the start/resume/summary flow.
 
 import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentFor, isPair, pairText, weightWithPair } from './data.js';
 import { buildTimeline, lastResults } from './builder.js';
@@ -6,11 +6,13 @@ import { icon } from './icons.js';
 import { Player } from './player.js';
 import { saveSession, renderSummary, renderReview, runForm, setsTable, fmtPace } from './logger.js';
 import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progression.js';
-import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights } from './store.js';
+import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
-import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
+import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
+import { renderPlan } from './plan-view.js';
+import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
 import { el, toast, showModal, closeModal, confirmDialog } from './ui.js';
 
 const view = document.getElementById('view');
@@ -34,9 +36,12 @@ async function boot() {
     return;
   }
   setSettingsDefaults(D.settingsDefaults);
+  // v1.8: a computer gets the sidebar layout and full-width pages
+  document.body.classList.toggle('computer', onComputer());
+  document.getElementById('sync-chip').addEventListener('click', onSyncChip);
   document.querySelectorAll('#tabs .tab').forEach(b => {
     b.prepend(icon(b.dataset.view));
-    b.addEventListener('click', () => showTab(b.dataset.view));
+    b.addEventListener('click', () => { if (b.dataset.view === 'progress' && currentTab !== 'progress') progressMode = 'overview'; showTab(b.dataset.view); });
   });
   const sb = document.getElementById('settings-btn'); sb.innerHTML = ''; sb.appendChild(icon('settings'));
   sb.addEventListener('click', () => renderSettings());
@@ -45,6 +50,8 @@ async function boot() {
   }
   await startSync();
   await updateWeekChip();
+  updateSyncChip();
+  syncCoach();
   if (await pairPrompt(() => openApp())) return;
   openApp();
 }
@@ -65,7 +72,74 @@ async function startSync() {
     const cfg = await getSync();
     if (cfg && cfg.role === 'viewer') await Promise.race([pullNow(), new Promise(r => setTimeout(r, 8000))]);
   } catch (e) { /* sync never stops the app from opening */ }
-  startAutoSync(() => ({ appVersion: APP_VERSION, planVersion: D.plan.planVersion }), r => { if (!r.ok) toast('Upload to the computer copy failed. It will retry.', 3500); });
+  startAutoSync(() => ({ appVersion: APP_VERSION, planVersion: D.plan.planVersion }), r => { if (!r.ok) toast('Upload to the computer copy failed. It will retry.', 3500); updateSyncChip(); });
+}
+
+// ---- v1.8: sync status in the header ----
+const clock = iso => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const dayClock = iso => (toISODate(new Date(iso)) === toISODate(new Date()) ? clock(iso) : `${fmtDate(iso)} ${clock(iso)}`);
+async function updateSyncChip() {
+  const chip = document.getElementById('sync-chip');
+  const cfg = await getSync();
+  if (!cfg || !cfg.repo) { chip.hidden = true; return; }
+  chip.hidden = false;
+  let text, bad = !!cfg.lastError;
+  if (cfg.role === 'viewer') text = bad ? 'Could not reach the phone copy' : (cfg.lastPulledExport ? `From phone · ${dayClock(cfg.lastPulledExport)}` : 'Nothing from the phone yet');
+  else text = bad || cfg.dirty ? 'Upload waiting' : (cfg.lastPushedAt ? `Synced · ${dayClock(cfg.lastPushedAt)}` : 'Sync on');
+  chip.className = 'sync-chip' + (bad ? ' bad' : '');
+  chip.title = (cfg.lastError || '') + (cfg.role === 'viewer' ? ' Click to load the newest copy from the phone.' : ' Tap to upload now.');
+  chip.innerHTML = '';
+  chip.append(el('span', { id: 'sync-chip-text' }, text), icon('refresh'));
+}
+async function onSyncChip() {
+  const chip = document.getElementById('sync-chip');
+  const cfg = await getSync();
+  if (!cfg || !cfg.repo) return;
+  chip.classList.add('busy');
+  if (cfg.role === 'viewer') {
+    const r = await pullNow();
+    toast(r.ok ? (r.empty ? 'Nothing uploaded yet' : (r.changed ? `Loaded ${r.sessions} sessions, ${r.runs} runs` : 'Already up to date')) : r.error, 3500);
+    await updateWeekChip();
+    await syncCoach(true);
+    if (r.ok && r.changed && !(await pairPrompt(() => showTab(currentTab)))) showTab(currentTab);
+  } else {
+    const r = await pushNow(APP_VERSION, D.plan.planVersion);
+    toast(r.ok ? 'Uploaded' : r.error, 3500);
+    await syncCoach(true);
+  }
+  updateSyncChip();
+}
+
+/**
+ * v1.8: read the coach's file. On the phone, apply adjustments it has not applied yet (a target, or a rest offset
+ * from the plan, kept inside the check-in limits). The computer only shows the replies.
+ */
+async function syncCoach(rerender) {
+  try {
+    const cfg = await getSync();
+    const r = await pullCoach();
+    let applied = 0;
+    if (r.file && (!cfg || cfg.role !== 'viewer')) {
+      const done = await getCoachApplied();
+      const todo = pendingAdjustments(r.file, done, D.plan);
+      for (const a of todo) {
+        if (a.exerciseId && (a.weight != null || a.reps != null)) {
+          const patch = { source: 'coach', updated: new Date().toISOString() };
+          if (a.weight != null) patch.weight = Number(a.weight);
+          if (a.reps != null) patch.reps = Number(a.reps);
+          await setTarget(a.exerciseId, patch);
+        }
+        if (a.restDelta != null) {
+          const key = a.exerciseId || `session:${a.sessionId}`;
+          const cur = (await getSettings()).restAdjust || {};
+          await saveSettings({ restAdjust: { [key]: withRest(cur, key, Number(a.restDelta))[key] || 0 } });
+        }
+        done.push(a.id); applied++;
+      }
+      if (applied) { await setCoachApplied(done); toast(`Coach updated ${applied} ${applied === 1 ? 'thing' : 'things'}. See Plan.`, 3500); }
+    }
+    if ((rerender || applied) && (currentTab === 'plan' || currentTab === 'home')) showTab(currentTab);
+  } catch (e) { /* the coach file never stops the app */ }
 }
 
 async function openApp() {
@@ -136,13 +210,15 @@ async function updateWeekChip() {
 }
 
 function showTab(name) {
+  if (name === 'history') { progressMode = 'sessions'; name = 'progress'; } // v1.8: the log lives in Progress
   currentTab = name;
   document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   window.scrollTo(0, 0);
-  view.classList.toggle('wide', name === 'progress');
+  view.classList.toggle('wide', name === 'progress' || name === 'plan' || document.body.classList.contains('computer'));
+  view.classList.toggle('home-cols', name === 'home' && document.body.classList.contains('computer'));
   if (name === 'home') renderHome();
-  else if (name === 'history') renderHistory();
   else if (name === 'progress') renderProgressTab();
+  else if (name === 'plan') renderPlanTab();
   else if (name === 'runs') renderRuns();
   else if (name === 'architecture') renderArchitecture(view, D.architecture, D.plan);
 }
@@ -198,12 +274,12 @@ async function renderHome() {
   const rows = Object.entries(D.plan.exercises).filter(([id]) => targets[id] && targets[id].weight != null).map(([id, ex]) => {
     const t = targets[id];
     return el('tr', { class: 'tappable', onclick: () => editTarget(id, ex, t) }, [
-      el('td', {}, [ex.name, ' ', t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : null]),
+      el('td', {}, [ex.name, ' ', t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : null)]),
       el('td', { class: 'num' }, `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}`),
       el('td', { class: 'num muted' }, t.e1rm ? `e1RM ${t.e1rm}` : '')
     ]);
   });
-  view.appendChild(el('div', { class: 'card' }, [
+  view.appendChild(el('div', { class: 'card', id: 'next-targets' }, [
     el('h3', {}, 'Next targets'),
     rows.length ? el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, '')]), ...rows]) : el('p', { class: 'muted' }, 'No targets yet. Week 1 sessions work up to a baseline set on each main lift; accessories take the weight you log the first time.'),
     el('p', { class: 'muted', style: 'margin-top:8px' }, 'Tap a row to change a target by hand.')
@@ -220,6 +296,14 @@ async function renderHome() {
   }
 
   if (installCard && onComputer()) view.appendChild(installCard);
+  // v1.8: on a computer, the today card across the top, then two columns: next targets on the right
+  if (document.body.classList.contains('computer')) {
+    const [first, ...rest] = [...view.children];
+    const right = rest.filter(c => c.id === 'next-targets');
+    const left = rest.filter(c => c.id !== 'next-targets');
+    view.innerHTML = '';
+    view.append(first, el('div', { class: 'home-col' }, left), el('div', { class: 'home-col' }, right));
+  }
 }
 
 // ---- Benchmarks (v1.3) ----
@@ -452,20 +536,19 @@ async function onSessionFinished(draft) {
   }
 }
 
-// ---- History ----
-let historyMode = 'sessions';
+// ---- Progress: overview, sessions and exercises (v1.8: the Log tab merged in) ----
+let progressMode = 'overview';
+function progressHeader() {
+  const b = (k, label) => el('button', { class: progressMode === k ? 'on' : '', 'data-mode': k, onclick: () => { progressMode = k; window.scrollTo(0, 0); renderProgressTab(); } }, label);
+  return el('div', { class: 'row page-head' }, [el('h1', {}, 'Progress'), el('div', { class: 'segmented', id: 'progress-mode' }, [b('overview', 'Overview'), b('sessions', 'Sessions'), b('exercises', 'Exercises')])]);
+}
 async function renderHistory() {
   const sessions = await getSessions();
+  if (currentTab !== 'progress') return;
   view.innerHTML = '';
-  view.appendChild(el('div', { class: 'row' }, [
-    el('h1', {}, 'Log'),
-    el('div', { class: 'segmented' }, [
-      el('button', { class: historyMode === 'sessions' ? 'on' : '', onclick: () => { historyMode = 'sessions'; renderHistory(); } }, 'Sessions'),
-      el('button', { class: historyMode === 'exercises' ? 'on' : '', onclick: () => { historyMode = 'exercises'; renderHistory(); } }, 'Exercises')
-    ])
-  ]));
+  view.appendChild(progressHeader());
   if (!sessions.length) { view.appendChild(el('p', { class: 'muted' }, 'No sessions yet.')); return; }
-  if (historyMode === 'exercises') { renderExerciseLog(sessions); return; }
+  if (progressMode === 'exercises') { renderExerciseLog(sessions); return; }
   const list = el('div', { class: 'card' });
   sessions.forEach(s => {
     const done = s.sets.filter(x => x.done && !x.ramp).length;
@@ -551,15 +634,16 @@ function showSession(s) {
     setsTable(s.sets),
     el('div', { class: 'btn-row', style: 'margin-top:12px' }, [
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close'),
-      el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Delete this session?', 'Targets already set from it are kept.', 'Delete', true)) { await deleteSession(s.id); toast('Deleted'); renderHistory(); } } }, 'Delete')
+      el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Delete this session?', 'Targets already set from it are kept.', 'Delete', true)) { await deleteSession(s.id); toast('Deleted'); renderProgressTab(); } } }, 'Delete')
     ])
   ]));
 }
 
 // ---- Progress (v1.6) ----
 async function renderProgressTab() {
-  const [settings, sessions, runs] = await Promise.all([getSettings(), getSessions(), getRuns()]);
-  if (currentTab !== 'progress') return;
+  if (progressMode !== 'overview') return renderHistory();
+  const [settings, sessions, runs, targets] = await Promise.all([getSettings(), getSessions(), getRuns(), getTargets()]);
+  if (currentTab !== 'progress' || progressMode !== 'overview') return;
   const onLoadBackup = async file => {
     if (sessions.length && !(await confirmDialog('Load this backup?', 'It replaces the workouts stored in this browser with the ones in the file.', 'Load'))) return;
     try {
@@ -570,11 +654,32 @@ async function renderProgressTab() {
     } catch (err) { toast('Could not load that file: ' + err.message, 4000); }
   };
   const cfg = await getSync();
-  const sync = cfg && cfg.role === 'viewer' ? {
-    at: cfg.lastPulledExport, error: cfg.lastError,
-    onRefresh: async () => { const r = await pullNow(); toast(r.ok ? (r.empty ? 'Nothing uploaded yet' : (r.changed ? `Loaded ${r.sessions} sessions, ${r.runs} runs` : 'Already up to date')) : r.error, 3500); await updateWeekChip(); if (currentTab === 'progress') renderProgressTab(); }
-  } : null;
-  renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, today: new Date() }, { ...(onComputer() ? { onLoadBackup } : {}), ...(sync ? { sync } : {}) });
+  renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, targets, muscles: D.muscles, today: new Date() }, {
+    header: progressHeader(), syncOn: !!(cfg && cfg.repo), onExercise: id => showExercise(id, sessions), ...(onComputer() ? { onLoadBackup } : {})
+  });
+}
+
+// ---- Plan and coach check-ins (v1.8) ----
+async function renderPlanTab() {
+  const [settings, targets, sessions, runs, checkins, coachFile, cfg] = await Promise.all([getSettings(), getTargets(), getSessions(), getRuns(), getCheckins(), kvGet('coach'), getSync()]);
+  if (currentTab !== 'plan') return;
+  const canWrite = !(cfg && cfg.role === 'viewer');
+  renderPlan(view, { plan: D.plan, goals: D.goals, settings, targets, sessions, runs, checkins, coachFile, today: new Date() }, { canWrite, onSend: sendCheckin });
+}
+async function sendCheckin(input) {
+  const settings = await getSettings();
+  const targets = await getTargets();
+  const c = { id: newId('chk'), at: new Date().toISOString(), ...input };
+  const changes = changesFor(c, { plan: D.plan, rules: D.rules, targets, restAdjust: settings.restAdjust });
+  for (const ch of changes) {
+    if (ch.kind === 'weight') await setTarget(ch.exerciseId, { weight: ch.to, source: 'coach', updated: c.at });
+    else await saveSettings({ restAdjust: { [ch.key]: ch.to } });
+  }
+  c.changes = changes;
+  c.reply = replyFor(c, changes, D.plan);
+  await addCheckin(c);
+  toast(changes.length ? 'Sent. Plan nudged.' : 'Sent');
+  renderPlanTab();
 }
 
 // ---- Sync sheet (v1.7) ----

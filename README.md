@@ -56,3 +56,21 @@ Edit `data/plan.json` or `data/rules.json`, bump `VERSION` in `sw.js`, add a lin
 ## Spec
 
 The spec doc (purpose, block diagram, data model, player logic, progression rules, storage, roadmap, change log) lives in Claude Docs: "General - Cam's Training Tracker: Spec".
+
+## Coach file (v1.8)
+
+The coach review writes `coach.json` to the same private repo as `tracker-data.json`. The app reads it on open and when the sync button in the header is pressed. Only the phone applies adjustments, each one once (ids kept in kv `coachApplied`).
+
+```json
+{
+  "updatedAt": "2026-11-19T03:00:00Z",
+  "messages": [{ "id": "m1", "at": "2026-11-19T03:00:00Z", "replyTo": "chk_...", "text": "Reply shown in Plan > Coach check-ins." }],
+  "adjustments": [
+    { "id": "a1", "exerciseId": "incline_db_press", "weight": 80, "reps": 8, "reason": "..." },
+    { "id": "a2", "exerciseId": "cs_row", "restDelta": -15 },
+    { "id": "a3", "sessionId": "lift2", "restDelta": 15 }
+  ]
+}
+```
+
+`weight` and `reps` set the next target. `restDelta` sets that lift's (or the whole session's) rest offset from the plan in seconds, held to ±45. Adjustments only nudge; changes to exercises, sets or sessions go through a plan revision in `data/plan.json`.
