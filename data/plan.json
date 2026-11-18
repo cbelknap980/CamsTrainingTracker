@@ -70,7 +70,17 @@
       "mainLift": true,
       "benchmark": true,
       "cue": "Box, 3-s lowering while the knee settles. Add a 4th set once the knee is quiet.",
-      "short": "Squat"
+      "short": "Squat",
+      "tempo": [
+        3,
+        0,
+        1,
+        2
+      ],
+      "tips": [
+        "Big breath and brace before every rep.",
+        "Control the way down, drive up fast."
+      ]
     },
     "rdl": {
       "name": "Romanian deadlift",
@@ -78,14 +88,34 @@
       "mainLift": false,
       "benchmark": true,
       "cue": "Hinge, soft knees, bar close.",
-      "short": "RDL"
+      "short": "RDL",
+      "tempo": [
+        3,
+        0,
+        1,
+        1
+      ],
+      "tips": [
+        "Push the hips back until the hamstrings stretch.",
+        "Bar stays against the legs; back flat."
+      ]
     },
     "calf_raise": {
       "name": "Standing calf raise",
       "equipment": "machine",
       "mainLift": false,
       "cue": "Pause at the bottom.",
-      "short": "Calf"
+      "short": "Calf",
+      "tempo": [
+        2,
+        2,
+        1,
+        1
+      ],
+      "tips": [
+        "Full stretch and a 2-second pause at the bottom.",
+        "Squeeze at the top; no bouncing."
+      ]
     },
     "bss": {
       "name": "Bulgarian split squat",
@@ -93,32 +123,83 @@
       "mainLift": false,
       "perSide": true,
       "cue": "Tuck the pelvis on the back leg.",
-      "short": "Split sq"
+      "short": "Split sq",
+      "tempo": [
+        3,
+        0,
+        1,
+        0.5
+      ],
+      "tips": [
+        "Slow down, front foot flat, knee tracks over toes.",
+        "Lean slightly forward and drive through the front heel."
+      ]
     },
     "leg_curl": {
       "name": "Seated leg curl",
       "equipment": "machine",
       "mainLift": false,
-      "short": "Leg curl"
+      "short": "Leg curl",
+      "tempo": [
+        3,
+        0,
+        1,
+        1
+      ],
+      "tips": [
+        "Squeeze hard at the bottom of the curl.",
+        "Take 3 seconds letting the pad back up."
+      ]
     },
     "curl": {
-      "name": "Curl",
+      "name": "Standing dumbbell curl",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "Curl"
+      "short": "DB curl",
+      "tempo": [
+        2,
+        0,
+        1,
+        0.5
+      ],
+      "tips": [
+        "Elbows pinned to your sides; no swing.",
+        "Lower all the way to straight arms."
+      ],
+      "logName": "Curl"
     },
     "oh_tri_ext": {
       "name": "Overhead triceps extension",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "Tri ext"
+      "short": "Tri ext",
+      "tempo": [
+        2,
+        1,
+        1,
+        0
+      ],
+      "tips": [
+        "Let the weight sink for a deep stretch behind the head.",
+        "Elbows point up and stay in."
+      ]
     },
     "ab_wheel": {
       "name": "Ab wheel",
       "equipment": "bodyweight",
       "mainLift": false,
       "cue": "Pelvis tucked.",
-      "short": "Ab wheel"
+      "short": "Ab wheel",
+      "tempo": [
+        3,
+        0,
+        2,
+        0
+      ],
+      "tips": [
+        "Ribs down, glutes tight; hips must not sag.",
+        "Only roll out as far as you can hold that shape."
+      ]
     },
     "strict_press": {
       "name": "Strict press",
@@ -126,7 +207,17 @@
       "mainLift": true,
       "benchmark": true,
       "cue": "Couch stretch during the rests.",
-      "short": "Press"
+      "short": "Press",
+      "tempo": [
+        2,
+        0,
+        1,
+        1.5
+      ],
+      "tips": [
+        "Squeeze glutes and abs; no lean back.",
+        "Bar travels straight up, head through at the top."
+      ]
     },
     "weighted_pullup": {
       "name": "Weighted pull-up",
@@ -134,43 +225,113 @@
       "mainLift": true,
       "benchmark": true,
       "cue": "30-45 s dead hang after the last set.",
-      "short": "Pull-up"
+      "short": "Pull-up",
+      "tempo": [
+        2,
+        0,
+        1,
+        1
+      ],
+      "tips": [
+        "Start every rep from a dead hang.",
+        "Chest to the bar, then lower under control."
+      ]
     },
     "db_bench": {
       "name": "Dumbbell bench press",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "DB bench"
+      "short": "DB bench",
+      "tempo": [
+        2,
+        1,
+        1,
+        0
+      ],
+      "tips": [
+        "Lower until you feel the chest stretch, pause, press.",
+        "Shoulder blades pinned back and down."
+      ]
     },
     "cs_row": {
       "name": "Chest-supported row",
       "equipment": "machine",
       "mainLift": false,
-      "short": "Row"
+      "short": "Row",
+      "tempo": [
+        2,
+        0,
+        1,
+        1
+      ],
+      "tips": [
+        "Pull the elbows back and squeeze for a second.",
+        "Chest stays on the pad; let the shoulders reach forward at the bottom."
+      ]
     },
     "lateral_raise": {
       "name": "Lateral raise",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "Lat raise"
+      "short": "Lat raise",
+      "tempo": [
+        2,
+        0,
+        1,
+        0.5
+      ],
+      "tips": [
+        "Lead with the elbows, raise out and slightly forward.",
+        "Lower slowly; no shrugging or swinging."
+      ]
     },
     "incline_curl": {
       "name": "Incline curl",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "Inc curl"
+      "short": "Inc curl",
+      "tempo": [
+        3,
+        1,
+        1,
+        0
+      ],
+      "tips": [
+        "Arms hang straight down behind the body; feel the stretch.",
+        "Shoulders stay back on the bench."
+      ]
     },
     "t2b": {
       "name": "Toes-to-bar",
       "equipment": "bodyweight",
       "mainLift": false,
-      "short": "T2B"
+      "short": "T2B",
+      "tempo": [
+        1,
+        0,
+        1,
+        0.5
+      ],
+      "tips": [
+        "Start each rep by pressing down on the bar with straight arms.",
+        "Control the swing down; no wild kip."
+      ]
     },
     "face_pull": {
       "name": "Face pull",
       "equipment": "cable",
       "mainLift": false,
-      "short": "Face pull"
+      "short": "Face pull",
+      "tempo": [
+        2,
+        0,
+        1,
+        1
+      ],
+      "tips": [
+        "Pull to eye level, hands apart, thumbs back.",
+        "Hold the squeeze for a second."
+      ]
     },
     "power_clean": {
       "name": "Power clean",
@@ -179,14 +340,34 @@
       "benchmark": true,
       "autoProgress": false,
       "cue": "Fast. Hang power clean if the catch bothers the knee.",
-      "short": "Clean"
+      "short": "Clean",
+      "tempo": [
+        1,
+        0,
+        1,
+        5
+      ],
+      "tips": [
+        "Patient off the floor, then jump hard.",
+        "Fast elbows; reset fully between reps."
+      ]
     },
     "front_squat": {
       "name": "Front squat",
       "equipment": "barbell",
       "mainLift": true,
       "benchmark": true,
-      "short": "Front sq"
+      "short": "Front sq",
+      "tempo": [
+        3,
+        0,
+        1,
+        2
+      ],
+      "tips": [
+        "Elbows high the whole rep.",
+        "Sit straight down, chest tall, drive up fast."
+      ]
     },
     "push_press": {
       "name": "Push press",
@@ -194,26 +375,66 @@
       "mainLift": true,
       "benchmark": true,
       "cue": "Or seated DB press.",
-      "short": "Push press"
+      "short": "Push press",
+      "tempo": [
+        1,
+        0,
+        1,
+        2.5
+      ],
+      "tips": [
+        "Short, straight dip with heels down.",
+        "Drive hard with the legs, then punch to lockout."
+      ]
     },
     "db_row": {
       "name": "Dumbbell row",
       "equipment": "dumbbell",
       "mainLift": false,
       "cue": "Or chest-supported row.",
-      "short": "DB row"
+      "short": "DB row",
+      "tempo": [
+        2,
+        0,
+        1,
+        1
+      ],
+      "tips": [
+        "Pull the elbow toward the hip, not straight up.",
+        "Full stretch at the bottom; no torso twist."
+      ]
     },
     "preacher_curl": {
       "name": "Preacher curl",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "Preacher"
+      "short": "Preacher",
+      "tempo": [
+        3,
+        1,
+        1,
+        0
+      ],
+      "tips": [
+        "Lower to nearly straight and pause in the stretch.",
+        "Upper arm stays glued to the pad."
+      ]
     },
     "rope_pushdown": {
       "name": "Rope pushdown",
       "equipment": "cable",
       "mainLift": false,
-      "short": "Pushdown"
+      "short": "Pushdown",
+      "tempo": [
+        2,
+        0,
+        1,
+        1
+      ],
+      "tips": [
+        "Elbows stay at your sides.",
+        "Spread the rope and squeeze at the bottom."
+      ]
     },
     "side_plank": {
       "name": "Side plank",
@@ -222,7 +443,10 @@
       "perSide": true,
       "timed": true,
       "cue": "Pelvis tucked. Copenhagen plank once this is easy.",
-      "short": "Side plank"
+      "short": "Side plank",
+      "tips": [
+        "Straight line from head to heels, hips pushed forward."
+      ]
     }
   },
   "stretchBlock": {
@@ -429,7 +653,8 @@
           "name": "Stretch",
           "minutes": 5
         }
-      ]
+      ],
+      "goal": "Leg strength and size. The squat is the priority: hit your reps with 2-3 left in the tank. Then hamstrings, calves and single-leg work, with arms and abs to finish."
     },
     {
       "id": "lift2",
@@ -638,7 +863,8 @@
           "name": "Stretch",
           "minutes": 5
         }
-      ]
+      ],
+      "goal": "Upper-body strength. Press and weighted pull-up are the priority, then chest and back, then arm and shoulder size work taken close to failure."
     },
     {
       "id": "lift3",
@@ -838,7 +1064,8 @@
             }
           ]
         }
-      ]
+      ],
+      "goal": "Full-body power and strength. Fast, crisp cleans first, then front squat and push press, with arms and core to finish."
     }
   ],
   "runs": [

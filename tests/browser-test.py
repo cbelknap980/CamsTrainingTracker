@@ -25,9 +25,23 @@ def pass_review(page, prefix, override=None):
     page.click('button:has-text("Save session")')
     page.wait_for_selector('h1:has-text("Session")')
 
-def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests=True, go_behind_at=None):
+def timer_secs(page):
+    m, s = page.locator('#timer').inner_text().split(':')
+    return int(m) * 60 + int(s)
+
+def start_from_preview(page, start_selector, shot=None):
+    """v1.4: Start opens the pre-session overview; Start workout begins the session."""
     page.click(start_selector)
+    page.wait_for_selector('#start-workout')
+    if shot: page.screenshot(path=f'{SHOTS}/{shot}.png', full_page=True)
+    page.click('#start-workout')
     page.wait_for_selector('.player')
+
+IS_SET = ('work', 'ramp', 'hold')
+IS_LEAD = ('rest', 'set up', 'switch', 'get ready')
+
+def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests=True, go_behind_at=None):
+    start_from_preview(page, start_selector, shot=f'{shots_prefix}-preview')
     steps = 0
     kinds = []
     trimmed = False
@@ -55,22 +69,23 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
                 trimmed = True
         if kind.startswith('baseline') or kind.startswith('retest'):
             w = baseline_weights.get(name, 135)
-            page.fill('#in-weight', str(w)); page.fill('#in-rpe', '8')
+            page.fill('#in-weight', str(w))
             page.click('button.btn.primary:has-text("Done")')
-        elif kind.startswith('work set') or kind.startswith('ramp') or kind.startswith('hold'):
-            # first-time accessories need a weight
+        elif kind.startswith(IS_SET):
+            # first-time machine and cable accessories have no weight yet: the edit panel is open for it
             wv = page.locator('#in-weight')
-            if wv.count() and wv.input_value() == '':
+            if wv.count() and wv.is_visible() and wv.input_value() == '':
                 page.fill('#in-weight', '30')
-            page.click('button.btn.primary')
-        elif kind == 'rest':
-            if skip_rests: page.click('button.btn.primary:has-text("Skip rest")')
+                page.click('button.btn.primary')
+            elif skip_rests or kind.startswith('hold'):
+                page.click('button.btn.primary')
             else:
-                secs = int(page.locator('#timer').inner_text().split(':')[0]) * 60 + int(page.locator('#timer').inner_text().split(':')[1])
-                page.clock.run_for((secs + 1) * 1000)
-        elif kind in ('timed', 'stretch', 'transition'):
-            t = page.locator('#timer').inner_text(); m, s = t.split(':')
-            page.clock.run_for((int(m) * 60 + int(s) + 1) * 1000)  # let it auto-advance
+                page.clock.run_for((timer_secs(page) + 1) * 1000)  # v1.4: the set ends on its own timer
+        elif kind.startswith(IS_LEAD):
+            if skip_rests: page.click('.player-actions button.btn.primary')
+            else: page.clock.run_for((timer_secs(page) + 1) * 1000)
+        elif kind in ('timed', 'stretch', 'set up'):
+            page.clock.run_for((timer_secs(page) + 1) * 1000)  # let it auto-advance
         elif kind == 'your call':
             page.click('button.btn.primary:has-text("Do it")')
         else:
@@ -82,13 +97,18 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
     return steps, kinds
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(executable_path='/usr/bin/google-chrome', headless=True, args=['--no-sandbox'])
+    chrome = os.environ.get('CHROME_PATH') or next((c for c in ('/usr/bin/google-chrome', '/opt/pw-browsers/chromium') if os.path.exists(c)), None)
+    browser = p.chromium.launch(executable_path=chrome, headless=True, args=['--no-sandbox'])
     ctx = browser.new_context(viewport={'width': 393, 'height': 851}, device_scale_factor=2, is_mobile=True, has_touch=True, accept_downloads=True)
     ctx.grant_permissions(['notifications'], origin='http://localhost:8080')
     page = ctx.new_page()
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
+    # v1.4: capture what the app says out loud
+    page.add_init_script("""window.__said = [];
+      window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+      Object.defineProperty(window, 'speechSynthesis', { value: { cancel() {}, speak(u) { window.__said.push(u.text); } }, configurable: true });""")
     # Pretend it is Monday Nov 16, 2026, 6:00 am local
     page.clock.install(time='2026-11-16T06:00:00')
     page.goto('http://localhost:8080/')
@@ -96,10 +116,18 @@ with sync_playwright() as p:
     page.screenshot(path=f'{SHOTS}/home-week1.png', full_page=True)
     check('home shows Lift 1 on Monday week 1', 'Lift 1' in page.locator('.card.accent h1').inner_text())
     check('week chip says Week 1', 'week 1' in page.locator('#week-chip').inner_text().lower())
+    check('v1.4 home offers install while in a browser tab', page.locator('#install-card').count() == 1)
 
     # ---- Lift 1 end to end (week 1, baseline), go behind during block B to test trim ----
     print('Lift 1')
+    # v1.4: Lift 1 runs with auto-advance switched off in Settings (sets wait for Done, as before v1.4)
+    page.click('#settings-btn'); page.wait_for_selector('.modal')
+    page.locator('.toggle', has_text='End each set on its own timer').locator('input').uncheck(); page.wait_for_timeout(150)
+    page.click('.modal button:has-text("Close")')
     steps, kinds = run_session(page, '.card.accent .btn.primary', {'Box squat': 185}, 'lift1', skip_rests=True, go_behind_at=14)
+    page.click('#settings-btn'); page.wait_for_selector('.modal')
+    page.locator('.toggle', has_text='End each set on its own timer').locator('input').check(); page.wait_for_timeout(150)
+    page.click('.modal button:has-text("Close")')
     check('lift1 reached summary', page.locator('h1', has_text='Session').count() == 1)
     lines = page.locator('.card .lines li').all_inner_texts()
     check('lift1 what-changed has a baseline line for box squat at 165', any('Box squat baseline' in l and '165' in l for l in lines), lines)
@@ -122,6 +150,17 @@ with sync_playwright() as p:
     # ---- Lift 2 with resume mid-way ----
     print('Lift 2 (with reload + resume)')
     page.click('button:has-text("Lift 2")')
+    page.wait_for_selector('#start-workout')
+    pre = page.locator('#view').inner_text()
+    check('v1.4 preview shows the session goal and time', 'Upper-body strength' in pre and 'About' in pre and 'min' in pre, pre[:200])
+    check('v1.4 preview: strict press prefilled from the benchmark target', page.locator('input[data-ex="strict_press"]').input_value() == '90', page.locator('input[data-ex="strict_press"]').input_value())
+    check('v1.4 preview: pull-up has no weight yet, works up today', 'Work up today' in pre)
+    check('v1.4 preview: dumbbell bench shows an estimate (50)', page.locator('input[data-ex="db_bench"]').input_value() == '50' and page.locator('.pre-ex .est').count() >= 1, page.locator('input[data-ex="db_bench"]').input_value())
+    check('v1.4 preview: machine row has no estimate', page.locator('input[data-ex="cs_row"]').input_value() == '')
+    page.fill('input[data-ex="db_bench"]', '55'); page.locator('input[data-ex="db_bench"]').dispatch_event('change'); page.wait_for_timeout(100)
+    check('v1.4 preview: a typed weight sticks and loses the estimate tag', page.locator('input[data-ex="db_bench"]').input_value() == '55')
+    page.screenshot(path=f'{SHOTS}/lift2-preview.png', full_page=True)
+    page.click('#start-workout')
     page.wait_for_selector('.player')
     for _ in range(3):
         k = page.locator('.step-kind').inner_text().lower()
@@ -140,17 +179,21 @@ with sync_playwright() as p:
     check('resume returns to the same block', page.locator('.player-head .block').inner_text() == before_idx, (before_idx, page.locator('.player-head .block').inner_text()))
     # finish lift 2 from here using the same loop (reuse by faking start selector = no click): emulate
     steps2 = 0
+    saw_bench = False
     while steps2 < 400 and page.locator('.player').count():
         kind = page.locator('.step-kind').inner_text().strip().lower(); name = page.locator('.step-name').inner_text().strip()
         if kind.startswith('baseline'):
             page.fill('#in-weight', '95' if 'press' in name.lower() else '25'); page.click('button.btn.primary:has-text("Done")')
-        elif kind.startswith('work set') or kind.startswith('ramp') or kind.startswith('hold'):
+        elif kind.startswith(IS_SET):
             wv = page.locator('#in-weight')
-            if wv.count() and wv.input_value() == '': page.fill('#in-weight', '40')
+            if wv.count() and wv.is_visible() and wv.input_value() == '': page.fill('#in-weight', '40')
+            if 'bench' in name.lower() and not saw_bench:
+                saw_bench = True
+                check('v1.4 typed preview weight (55) is the set target', '55' in page.locator('.tile-weight').inner_text(), page.locator('.tile-weight').inner_text())
             page.click('button.btn.primary')
-        elif kind == 'rest': page.click('button.btn.primary:has-text("Skip rest")')
-        elif kind in ('timed', 'stretch', 'transition'):
-            t = page.locator('#timer').inner_text(); m, s = t.split(':'); page.clock.run_for((int(m) * 60 + int(s) + 1) * 1000)
+        elif kind.startswith(IS_LEAD): page.click('.player-actions button.btn.primary')
+        elif kind in ('timed', 'stretch', 'set up'):
+            page.clock.run_for((timer_secs(page) + 1) * 1000)
         else: page.click('button.btn.primary')
         page.wait_for_timeout(60); steps2 += 1
     pass_review(page, 'lift2')
@@ -214,27 +257,49 @@ with sync_playwright() as p:
 
     # ---- Week 3 home with targets: ramp-ups appear ----
     page.click('.modal button:has-text("Close")')
-    page.clock.set_system_time('2026-11-30T06:00:00'); page.clock.set_fixed_time('2026-11-30T06:00:00')
+    page.clock.set_system_time('2026-11-30T06:00:00')
     page.click('#tabs button[data-view="home"]'); page.wait_for_selector('.card.accent h1')
     check('week 3 chip', 'week 3' in page.locator('#week-chip').inner_text().lower(), page.locator('#week-chip').inner_text())
-    page.click('.card.accent .btn.primary'); page.wait_for_selector('.player')
+    start_from_preview(page, '.card.accent .btn.primary', shot='week3-preview')
+    said_from = page.evaluate('window.__said.length')
     # skip warmup to reach the first squat step
     for _ in range(12):
         k = page.locator('.step-kind').inner_text().lower()
         if k.startswith('ramp'): break
-        if k == 'timed' or k == 'transition':
-            page.click('button.btn.primary')
-        elif k == 'rest': page.click('button.btn.primary')
+        if k.startswith('set up') and 'box squat' in page.locator('.step-main').inner_text().lower():
+            # v1.4: the set-up before the first barbell set, then the get-ready count
+            check('v1.4 barbell set-up step is 60 s and shows what is next', timer_secs(page) in (59, 60) and 'up next' in page.locator('.step-main').inner_text().lower(), page.locator('.step-main').inner_text()[:120])
+            check('v1.4 set-up screen is the rest color', page.evaluate("document.body.getAttribute('data-kind')") == 'rest')
+            page.clock.run_for((timer_secs(page) - 4) * 1000); page.wait_for_timeout(120)
+            check('v1.4 get-ready: screen turns amber for the last 5 s', page.evaluate("document.body.getAttribute('data-kind')") == 'ready' and 'get ready' in page.locator('.step-kind').inner_text().lower(), page.locator('.step-kind').inner_text())
+            page.screenshot(path=f'{SHOTS}/v14-get-ready.png')
+            page.clock.run_for(6000); page.wait_for_timeout(120)
+            continue
+        page.click('.player-actions button.btn.primary')
         page.wait_for_timeout(50)
     check('week 3 squat starts with a ramp-up set at 45 lb', page.locator('.step-kind').inner_text().lower().startswith('ramp') and '45 lb' in page.locator('.step-target').inner_text(), page.locator('.step-target').inner_text())
     page.screenshot(path=f'{SHOTS}/week3-ramp.png')
+    said = page.evaluate('window.__said.slice(%d)' % said_from)
+    check('v1.4 voice: set-up, the coming set with weight and reps, then Go', any(x.startswith('Set up for Box squat') for x in said) and any('Box squat, ramp-up, 45 pounds, 5 reps' in x for x in said) and said[-1] == 'Go.', said[-6:])
+    check('v1.4 work screen: green, pace bar, where-you-are line', page.evaluate("document.body.getAttribute('data-kind')") == 'work' and page.locator('#pace-fill').count() == 1 and 'Barbell' in page.locator('.step-where').inner_text(), page.locator('.step-where').inner_text())
+    page.clock.run_for(8000); page.wait_for_timeout(120)
+    check('v1.4 pace bar counts reps', 'rep 1 of 5' in page.locator('#pace-text').inner_text().lower(), page.locator('#pace-text').inner_text())
+    # let this ramp-up set end on its own timer
+    page.clock.run_for((timer_secs(page) + 1) * 1000); page.wait_for_timeout(150)
+    check('v1.4 set ended by itself and rest started', page.locator('.step-kind').inner_text().lower().startswith('rest') and page.evaluate("document.body.getAttribute('data-kind')") == 'rest', page.locator('.step-kind').inner_text())
+    check('v1.4 voice says rest and its length', page.evaluate('window.__said.slice(-1)[0]') == 'Rest. 1 minute.', page.evaluate('window.__said.slice(-1)[0]'))
+    check('v1.4 back button returns to the set', page.locator('#back-btn').count() == 1)
+    page.click('#back-btn'); page.wait_for_timeout(100)
+    check('v1.4 back reopened the ramp-up set', page.locator('.step-kind').inner_text().lower().startswith('ramp'))
     # v1.1 checks: last-time line, PR on a heavier set, menu sheet, tint attribute
     check('week 3 body has work tint attr', page.evaluate("document.body.getAttribute('data-kind')") in ('work', 'calm'), page.evaluate("document.body.getAttribute('data-kind')"))
     # advance through the ramp-ups to the first work set
-    for _ in range(12):
+    for _ in range(14):
         k = page.locator('.step-kind').inner_text().lower()
-        if k.startswith('work set'): break
-        page.click('button.btn.primary'); page.wait_for_timeout(60)
+        if k == 'work': break
+        page.click('.player-actions button.btn.primary'); page.wait_for_timeout(60)
+    check('v1.4 work set: large name, set n of N, focus cues, plain effort', 'Set 1 of 3' in page.locator('.step-where').inner_text() and page.locator('.tips .tip').count() >= 2 and 'Leave 2-3' in page.locator('.tile-effort').inner_text() and 'in the tank' in page.locator('.tile-effort').inner_text(), page.locator('.step-main').inner_text()[:200])
+    page.screenshot(path=f'{SHOTS}/v14-work-set.png')
     check('week 3 first work set shows Last time', page.locator('.last-time').count() == 1 and '165' in page.locator('.last-time').inner_text(), page.locator('.last-time').inner_text() if page.locator('.last-time').count() else 'none')
     page.screenshot(path=f'{SHOTS}/week3-workset.png')
     check('v1.2 strip has one segment per block (6 on Lift 1)', page.locator('.strip-bar .seg').count() == 6, page.locator('.seg-label').all_inner_texts())
@@ -245,15 +310,29 @@ with sync_playwright() as p:
     check('v1.2 overview lists blocks with set ticks', page.locator('.ov-block').count() == 6 and page.locator('.tick.current').count() == 1, page.locator('.ov-block').count())
     page.screenshot(path=f'{SHOTS}/overview.png', full_page=True)
     page.click('.overview button:has-text("Close")')
-    page.click('button:has-text("Edit")'); page.fill('#in-weight', '195'); page.fill('#in-reps', '5'); page.click('button.btn.primary')
+    page.click('button:has-text("Edit")'); page.fill('#in-weight', '195'); page.fill('#in-reps', '5')
+    page.clock.run_for(120 * 1000); page.wait_for_timeout(100)
+    check('v1.4 a set with the edit panel open waits for Done', page.locator('.step-kind').inner_text().lower() == 'work')
+    page.click('.player-actions button.btn.primary')
     page.wait_for_timeout(200)
     check('heavier set triggers PR toast', page.locator('#toast').is_visible() and 'PR' in page.locator('#toast').inner_text(), page.locator('#toast').inner_text())
     check('rest screen shows ring and up-next', page.locator('.ring-fg').count() == 1 and 'up next' in page.locator('.step-main').inner_text().lower(), page.locator('.step-main').inner_text()[:80])
+    # v1.4: fix the set that just ended from the rest screen
+    check('v1.4 rest shows the set just done with Solid selected', '195 lb × 5' in page.locator('#jd-fix').inner_text() and page.locator('#just-done .effort-chip.on').get_attribute('data-key') == 'solid', page.locator('#just-done').inner_text())
     page.screenshot(path=f'{SHOTS}/week3-rest.png')
-    page.click('.player-head .icon-btn'); page.wait_for_selector('.menu')
+    page.click('#just-done .effort-chip[data-key="hard"]'); page.wait_for_timeout(100)
+    check('v1.4 effort chip changes the logged effort', page.locator('#just-done .effort-chip.on').get_attribute('data-key') == 'hard')
+    page.click('#jd-fix'); page.wait_for_selector('#fix-weight')
+    page.fill('#fix-weight', '190'); page.fill('#fix-reps', '4'); page.click('.modal button:has-text("Save")'); page.wait_for_timeout(150)
+    check('v1.4 fixing weight on the rest screen updates the record and the next set', '190 lb × 4' in page.locator('#jd-fix').inner_text() and '190' in page.locator('.tile-weight').inner_text(), (page.locator('#jd-fix').inner_text(), page.locator('.tile-weight').inner_text()))
+    page.screenshot(path=f'{SHOTS}/v14-rest-fixed.png')
+    page.click('.head-right .icon-btn'); page.wait_for_selector('.menu')
     check('menu lists pause, back, end', page.locator('.menu-item').count() >= 3, page.locator('.menu-item').all_inner_texts())
     page.screenshot(path=f'{SHOTS}/menu.png')
     page.click('.menu-item:has-text("End session")'); page.click('.modal button:has-text("End session")')
+    page.wait_for_selector('h1:has-text("Review and save")')
+    rev = page.locator('.review-card', has_text='Box squat').inner_text()
+    check('v1.4 review shows the corrected set with its effort word', '190 lb × 4' in rev and 'Hard' in rev, rev)
     pass_review(page, 'week3')
     check('summary shows PR card', page.locator('.pr-card').count() == 1, page.locator('.pr-card').inner_text() if page.locator('.pr-card').count() else 'none')
     page.screenshot(path=f'{SHOTS}/week3-summary.png', full_page=True)

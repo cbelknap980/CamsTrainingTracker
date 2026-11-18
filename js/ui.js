@@ -56,3 +56,16 @@ export function confirmDialog(title, text, okLabel = 'OK', danger = false) {
     ]));
   });
 }
+
+/**
+ * v1.4: the four effort buttons (levels come from rules.effortScale). `rpe` picks the one that is on;
+ * onPick gets the level that was tapped.
+ */
+export function effortChips(rules, rpe, onPick) {
+  const levels = (rules && rules.effortScale && rules.effortScale.levels) || [];
+  const cur = rpe == null ? null : (levels.find(l => rpe <= l.upTo) || levels[levels.length - 1]);
+  return el('div', { class: 'effort-chips' }, levels.map(l => el('button', {
+    type: 'button', class: 'effort-chip effort-' + l.key + (cur && cur.key === l.key ? ' on' : ''), 'data-key': l.key,
+    onclick: () => onPick(l)
+  }, [el('span', { class: 'ec-label' }, l.label), el('span', { class: 'ec-hint' }, l.hint)])));
+}

@@ -1,11 +1,11 @@
 // app.js - app shell: boot, tabs, Home, History, Runs, Settings, and the start/resume/summary flow.
 
-import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, toISODate } from './data.js';
+import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentLabel } from './data.js';
 import { buildTimeline, lastResults } from './builder.js';
 import { icon } from './icons.js';
 import { Player } from './player.js';
 import { saveSession, renderSummary, renderReview, runForm, setsTable, fmtPace } from './logger.js';
-import { epley, targetFromBenchmark } from './progression.js';
+import { epley, targetFromBenchmark, estimateStart } from './progression.js';
 import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
@@ -15,6 +15,10 @@ const view = document.getElementById('view');
 let D = null; // { plan, rules, settingsDefaults, architecture }
 let player = null;
 let currentTab = 'home';
+let installPrompt = null; // Chrome's deferred install prompt, when the app is not installed yet
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; if (currentTab === 'home' && !player && D) renderHome(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; if (currentTab === 'home' && !player && D) renderHome(); });
+const isInstalled = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 
 async function boot() {
   try {
@@ -80,7 +84,7 @@ async function renderHome() {
     const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets });
     todayCard.appendChild(el('h1', {}, session.name));
     todayCard.appendChild(el('p', { class: 'muted' }, `${tl.steps.length} steps · about ${fmtMinutes(tl.plannedSeconds)} · ${phase.note || ''}`));
-    todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => startSession(session.id, week) }, 'Start'));
+    todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => previewSession(session.id, week) }, 'Start'));
   } else if (run) {
     todayCard.appendChild(el('h1', {}, run.name));
     todayCard.appendChild(el('p', { class: 'muted' }, run.note));
@@ -93,7 +97,7 @@ async function renderHome() {
 
   const other = el('div', { class: 'card' }, [
     el('h3', {}, 'Start a different session'),
-    el('div', { class: 'grid3' }, D.plan.sessions.map(s => el('button', { class: 'btn small', style: 'width:100%', onclick: () => startSession(s.id, week) }, s.name.replace(': ', '\n'))))
+    el('div', { class: 'grid3' }, D.plan.sessions.map(s => el('button', { class: 'btn small', style: 'width:100%', onclick: () => previewSession(s.id, week) }, s.name.replace(': ', '\n'))))
   ]);
   view.appendChild(other);
 
@@ -119,6 +123,17 @@ async function renderHome() {
     view.appendChild(el('div', { class: 'card' }, [
       el('h3', {}, `What changed after ${last.sessionName}, ${fmtDate(last.date)}`),
       el('ul', { class: 'lines' }, last.whatChanged.map(l => el('li', {}, l.text)))
+    ]));
+  }
+
+  // v1.4: install card, only while the app is running in a browser tab
+  if (!isInstalled()) {
+    view.appendChild(el('div', { class: 'card', id: 'install-card' }, [
+      el('h3', {}, 'Install the app'),
+      el('p', { class: 'muted' }, 'Installed, it opens full screen from its own icon, with no address bar, and works without signal.'),
+      installPrompt
+        ? el('button', { class: 'btn', onclick: async () => { const p = installPrompt; installPrompt = null; try { p.prompt(); await p.userChoice; } catch (e) { /* ignore */ } renderHome(); } }, 'Install')
+        : el('p', { class: 'muted', style: 'margin:0' }, 'In Chrome, open the three-dot menu and tap "Add to Home screen", then "Install".')
     ]));
   }
 }
@@ -165,7 +180,7 @@ function editBenchmark(id, ex, t, settings) {
   w.addEventListener('input', upd); upd();
   showModal(el('div', {}, [
     el('h2', {}, ex.name),
-    el('p', { class: 'muted' }, ex.equipment === 'weighted_bw' ? 'Added weight for a set of 5 with 2 reps left.' : (id === 'power_clean' ? 'A crisp, fast double. The app trains at 90% of it.' : 'Weight for a set of 5 with 2 reps left (RPE 8).')),
+    el('p', { class: 'muted' }, ex.equipment === 'weighted_bw' ? 'Added weight for a set of 5 with 2 reps left.' : (id === 'power_clean' ? 'A crisp, fast double. The app trains at 90% of it.' : 'Weight for a set of 5 with 2 reps left.')),
     el('div', { class: 'field' }, [el('label', {}, 'Benchmark (lb)'), w]),
     preview,
     el('div', { class: 'btn-row' }, [
@@ -197,10 +212,102 @@ function editTarget(id, ex, t) {
   ]));
 }
 
-// ---- Session flow ----
-async function startSession(sessionId, week) {
+// ---- Pre-session overview (v1.4) ----
+// What the session is for, every exercise with sets x reps and a weight you can change, and the time it should take.
+async function previewSession(sessionId, week) {
   const settings = await getSettings();
   const targets = await getTargets();
+  const session = sessionById(D.plan, sessionId);
+  const phase = phaseForWeek(D.plan, week);
+  const weights = {};   // exerciseId -> weight for today (typed, saved target, or estimate)
+  const estimated = {}; // exerciseId -> true while the number is still the app's estimate
+  const withWeights = () => {
+    const t = { ...targets };
+    for (const [id, w] of Object.entries(weights)) if (w != null) t[id] = { ...(t[id] || {}), weight: w };
+    return t;
+  };
+  let tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId, week, targets });
+  for (const st of tl.steps) {
+    if (st.kind !== 'set' || st.ramp || !st.exerciseId || st.exerciseId in weights) continue;
+    const ex = D.plan.exercises[st.exerciseId];
+    if (!ex || ex.equipment === 'bodyweight' || st.holdSeconds) continue;
+    if (st.target && st.target.weight != null) weights[st.exerciseId] = st.target.weight;
+    else if (st.baseline || st.fillFromBaseline) weights[st.exerciseId] = null;
+    else { const est = estimateStart(D.rules, st.exerciseId, targets, settings); weights[st.exerciseId] = est; if (est != null) estimated[st.exerciseId] = true; }
+  }
+
+  const paint = () => {
+    tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId, week, targets: withWeights() });
+    view.innerHTML = '';
+    window.scrollTo(0, 0);
+    const finish = Date.now() + tl.plannedSeconds * 1000;
+    view.appendChild(el('div', { class: 'card accent' }, [
+      el('h3', {}, `Week ${week}${phase.name ? ' · ' + phase.name : ''}`),
+      el('h1', {}, session.name),
+      session.goal ? el('p', {}, session.goal) : null,
+      phase.note ? el('p', { class: 'muted' }, phase.note) : null,
+      el('p', { class: 'muted', style: 'margin:0' }, `About ${fmtMinutes(tl.plannedSeconds)} · done around ${fmtTime(finish)} if you start now`)
+    ]));
+
+    const blocks = [];
+    for (const st of tl.steps) {
+      let b = blocks[blocks.length - 1];
+      if (!b || b.id !== st.blockId) { b = { id: st.blockId, name: st.blockName, type: st.blockType, seconds: 0, ex: [] }; blocks.push(b); }
+      b.seconds += st.seconds || 0;
+      if (st.kind === 'set' && !st.ramp && st.exerciseId) {
+        // a baseline work-up comes before the block's sets; list exercises in the order their work sets run
+        if (st.baseline) { (b.base = b.base || {})[st.exerciseId] = true; continue; }
+        let e = b.ex.find(x => x.id === st.exerciseId);
+        if (!e) { e = { id: st.exerciseId, name: st.name, sets: 0, step: st, baseline: !!(b.base && b.base[st.exerciseId]) }; b.ex.push(e); }
+        e.sets += 1;
+      }
+    }
+    const card = el('div', { class: 'card' }, [el('h3', {}, 'Today')]);
+    for (const b of blocks) {
+      const title = b.type === 'warmup' ? 'Warm-up' : (b.type === 'stretch' ? 'Stretch' : (b.type === 'iftime' ? 'If time' : (/^[A-Z]$/.test(b.name) ? `Block ${b.name}` : b.name)));
+      const rows = b.ex.map(e => {
+        const ex = D.plan.exercises[e.id] || {};
+        const st = e.step;
+        const reps = st.holdSeconds ? `${st.holdSeconds} s${st.perSide ? '/side' : ''}` : `${st.repRange ? repsText(st.repRange) : (st.target && st.target.reps) || ''}${st.perSide ? '/side' : ''}`;
+        const unit = b.type === 'finisher' ? 'rounds' : 'sets';
+        const sub = [equipmentLabel(ex.equipment), `${e.sets} ${unit} × ${reps}`, st.effort ? effortPlain(st.effort) : ''].filter(Boolean).join(' · ');
+        let right;
+        if (ex.equipment === 'bodyweight' || st.holdSeconds) right = el('div', { class: 'pre-fixed' }, st.holdSeconds ? 'Timed' : 'Bodyweight');
+        else if (e.baseline && weights[e.id] == null) right = el('div', { class: 'pre-fixed' }, 'Work up today');
+        else {
+          const input = el('input', { type: 'number', step: '2.5', inputmode: 'decimal', placeholder: 'lb', 'data-ex': e.id, 'aria-label': `${e.name} weight`, value: weights[e.id] == null ? '' : weights[e.id],
+            onchange: ev => { weights[e.id] = ev.target.value === '' ? null : Number(ev.target.value); delete estimated[e.id]; paint(); } });
+          right = el('div', {}, [input, estimated[e.id] ? el('div', { class: 'est' }, 'Estimate') : null]);
+        }
+        return el('div', { class: 'pre-ex' }, [el('div', {}, [el('div', { class: 'pre-name' }, e.name), el('div', { class: 'pre-sub' }, sub)]), right]);
+      });
+      card.appendChild(el('div', { class: 'pre-block' }, [
+        el('div', { class: 'row' }, [el('b', {}, title), el('span', { class: 'muted' }, fmtMinutes(b.seconds))]),
+        ...rows
+      ]));
+    }
+    card.appendChild(el('p', { class: 'muted', style: 'margin:10px 0 0' }, 'Weights are in lb; dumbbell numbers are per dumbbell. Change any of them here. A number marked Estimate is a rough guess from your main lifts and bodyweight, so set it to what you know. Blank ones get filled in after the first set.'));
+    view.appendChild(card);
+    view.appendChild(el('div', { class: 'stack' }, [
+      el('button', { class: 'btn primary', id: 'start-workout', onclick: async () => {
+        // a weight typed here becomes the saved target, tagged 'set by you'
+        for (const [id, w] of Object.entries(weights)) {
+          if (w == null || estimated[id]) continue;
+          const t = targets[id];
+          if (t && t.weight != null && t.weight !== w) await setTarget(id, { weight: w, source: 'you', updated: new Date().toISOString() });
+        }
+        startSession(sessionId, week, withWeights());
+      } }, 'Start workout'),
+      el('button', { class: 'btn ghost', onclick: () => showTab('home') }, 'Back')
+    ]));
+  };
+  paint();
+}
+
+// ---- Session flow ----
+async function startSession(sessionId, week, targetsForToday) {
+  const settings = await getSettings();
+  const targets = targetsForToday || await getTargets();
   const history = lastResults(await getSessions());
   const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId, week, targets, history });
   await askNotificationPermission(settings);
@@ -334,12 +441,12 @@ function showExercise(id, sessions) {
     if (best) perSession.push({ date: s.date, best });
   });
   const table = el('table', {}, [
-    el('tr', {}, [el('th', {}, 'Date'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'RPE'), el('th', { class: 'num' }, 'e1RM')]),
+    el('tr', {}, [el('th', {}, 'Date'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'Effort'), el('th', { class: 'num' }, 'e1RM')]),
     ...rows.map(r => el('tr', {}, [
       el('td', {}, fmtDate(r.date)),
       el('td', { class: 'num' }, r.baseline ? 'Base' : (r.round ? `R${r.round}` : `${r.setIndex || ''}`)),
       el('td', { class: 'num' }, `${r.weight != null ? fmtWeight(r.weight) + ' lb' : 'bw'} × ${r.reps}${r.holdSeconds ? ' s' : ''}`),
-      el('td', { class: 'num' }, r.rpe != null ? r.rpe : ''),
+      el('td', { class: 'num' }, r.rpe != null ? effortLabel(D.rules, r.rpe) : ''),
       el('td', { class: 'num' }, [r.weight != null && r.reps && !r.holdSeconds ? `${epley(r.weight + bw, r.reps)}` : '', r.pr && r.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null])
     ]))
   ]);
@@ -406,9 +513,11 @@ async function renderSettings() {
   } });
   showModal(el('div', {}, [
     el('h2', {}, 'Settings'),
-    toggle('Vibrate when a rest ends', 'cues.vibrate', s.cues.vibrate),
-    toggle('Beep when a rest ends', 'cues.beep', s.cues.beep),
-    toggle('3-second warning tick', 'cues.warningTick', s.cues.warningTick),
+    toggle('Vibrate when a set or rest ends', 'cues.vibrate', s.cues.vibrate),
+    toggle('Beep when a set or rest ends', 'cues.beep', s.cues.beep),
+    toggle('Countdown ticks before a set starts', 'cues.warningTick', s.cues.warningTick),
+    toggle('Say each exercise and rest out loud', 'cues.voice', s.cues.voice !== false),
+    toggle('End each set on its own timer', 'autoAdvance', s.autoAdvance !== false),
     toggle('Notify when a rest ends while in another app', 'cues.notify', s.cues.notify !== false),
     ('Notification' in window && Notification.permission === 'denied') ? el('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Notifications are blocked for this site in Android settings; allow them there to get the rest-end alert.') : null,
     toggle('Keep the screen on during a session', 'keepScreenOn', s.keepScreenOn !== false),

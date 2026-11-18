@@ -199,7 +199,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
       if (allTop && rpeOk) {
         cur.weight = roundTo(baseWeight + inc, inc);
         cur.reps = bottom; cur.stall = 0;
-        say(`${name}: ${detail}, every set at ${top} with RPE ${rules.mainLiftTest.maxRpe} or under. Next time ${fmtWeight(cur.weight)} lb x ${bottom}.`, 'up', `all sets at ${top}, RPE ≤ ${rules.mainLiftTest.maxRpe}`);
+        say(`${name}: ${detail}, every set at ${top} at Solid effort or easier. Next time ${fmtWeight(cur.weight)} lb x ${bottom}.`, 'up', `all sets at ${top}, Solid or easier`);
       } else {
         cur.stall = (cur.stall || 0) + 1;
         if (cur.stall >= rules.stall.sessionsBeforeDrop) {
@@ -209,7 +209,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
         } else {
           cur.weight = baseWeight;
           cur.reps = rpeOk ? clampReps(minReps(done) + rules.mainLiftTest.repNudge, repRange) : clampReps(minReps(done), repRange);
-          const why = !allDone ? 'a set was skipped' : (!rpeOk ? 'RPE went over ' + rules.mainLiftTest.maxRpe : `not every set reached ${top}`);
+          const why = !allDone ? 'a set was skipped' : (!rpeOk ? 'a set was Hard or Maxed' : `not every set reached ${top}`);
           say(`${name}: ${detail}, ${why}. Same weight next time, aim for ${cur.reps} on every set.`, 'hold', why);
         }
       }
@@ -265,4 +265,19 @@ function summarizeReps(done) {
   const reps = done.map(s => s.reps == null ? '?' : s.reps);
   const uniq = [...new Set(reps)];
   return uniq.length === 1 ? `${uniq[0]}` : reps.join('/');
+}
+
+/**
+ * v1.4: a rough first-session weight for an exercise with no target, from rules.startingEstimates
+ * (a fraction of a main lift's training weight, or of bodyweight). Returns null when there is no rule
+ * or nothing to base it on.
+ */
+export function estimateStart(rules, exerciseId, targets, settings) {
+  const se = rules.startingEstimates;
+  const r = se && se.byExercise && se.byExercise[exerciseId];
+  if (!r) return null;
+  const base = r.of === 'bodyweight' ? (settings && settings.bodyweightLb) : (targets && targets[r.of] && targets[r.of].weight);
+  if (!base) return null;
+  const step = se.roundTo || 5;
+  return Math.max(step, roundTo(base * r.fraction, step));
 }
