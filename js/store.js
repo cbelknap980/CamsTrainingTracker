@@ -43,6 +43,11 @@ function reqToPromise(storeName, mode, fn) {
   }));
 }
 
+// ---- v1.7: tell listeners (the sync) when saved data changes ----
+const listeners = [];
+export function onDataChange(fn) { listeners.push(fn); }
+function changed(result) { listeners.forEach(fn => { try { fn(); } catch (e) { /* a listener must not break a save */ } }); return result; }
+
 // ---- key/value ----
 export const kvGet = key => reqToPromise('kv', 'readonly', s => s.get(key));
 export const kvSet = (key, value) => tx('kv', 'readwrite', s => s.put(value, key));
@@ -51,7 +56,7 @@ export const kvDel = key => tx('kv', 'readwrite', s => s.delete(key));
 // ---- targets ----
 // { exerciseId: { weight, reps, e1rm, stall, source: 'engine'|'you'|'baseline', updated, sessionId } }
 export async function getTargets() { return (await kvGet('targets')) || {}; }
-export async function setTargets(targets) { return kvSet('targets', targets); }
+export async function setTargets(targets) { return kvSet('targets', targets).then(changed); }
 export async function setTarget(exerciseId, target) {
   const all = await getTargets();
   all[exerciseId] = { ...(all[exerciseId] || {}), ...target };
@@ -60,17 +65,17 @@ export async function setTarget(exerciseId, target) {
 }
 
 // ---- sessions ----
-export const putSession = s => tx('sessions', 'readwrite', st => st.put(s));
+export const putSession = s => tx('sessions', 'readwrite', st => st.put(s)).then(changed);
 export const getSession = id => reqToPromise('sessions', 'readonly', st => st.get(id));
-export const deleteSession = id => tx('sessions', 'readwrite', st => st.delete(id));
+export const deleteSession = id => tx('sessions', 'readwrite', st => st.delete(id)).then(changed);
 export async function getSessions() {
   const all = await reqToPromise('sessions', 'readonly', st => st.getAll());
   return all.sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
 }
 
 // ---- runs ----
-export const putRun = r => tx('runs', 'readwrite', st => st.put(r));
-export const deleteRun = id => tx('runs', 'readwrite', st => st.delete(id));
+export const putRun = r => tx('runs', 'readwrite', st => st.put(r)).then(changed);
+export const deleteRun = id => tx('runs', 'readwrite', st => st.delete(id)).then(changed);
 export async function getRuns() {
   const all = await reqToPromise('runs', 'readonly', st => st.getAll());
   return all.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -93,6 +98,7 @@ export async function saveSettings(partial) {
   const overrides = (await kvGet('settings')) || {};
   const next = deepMerge(overrides, partial);
   await kvSet('settings', next);
+  changed();
   return getSettings();
 }
 
@@ -161,7 +167,7 @@ export async function exportAll(appVersion, planVersion) {
   };
 }
 
-export async function importAll(backup) {
+export async function importAll(backup, opts = {}) {
   if (!backup || backup.app !== 'CamsTrainingTracker') throw new Error('Not a Cam\'s Training Tracker backup file.');
   const db = await openDB();
   await new Promise((resolve, reject) => {
@@ -178,6 +184,7 @@ export async function importAll(backup) {
     t.oncomplete = resolve;
     t.onerror = () => reject(t.error);
   });
+  if (!opts.quiet) changed();
   return { sessions: (backup.sessions || []).length, runs: (backup.runs || []).length };
 }
 

@@ -165,6 +165,17 @@
       ],
       "file": "js/export.js",
       "description": "Back up opens the Android share sheet with the backup JSON so Cameron can save it to Drive > Training in one tap; Download saves it on a PC. Export builds an .xlsx with a Log sheet and a Runs sheet in the same columns as the Excel log, using SheetJS vendored in the repo."
+    },
+    {
+      "id": "sync",
+      "column": "outputs",
+      "name": "Sync to your private repo",
+      "lines": [
+        "phone uploads after each save,",
+        "computer loads it on open"
+      ],
+      "file": "js/sync.js",
+      "description": "Optional, off until set up in Settings. Keeps one file (tracker-data.json, the same content as a backup) in a private GitHub repo that belongs to Cameron. The phone uploads a few seconds after every saved session, run, target or settings change, and retries when signal returns. A device set to Only views downloads the file when the app opens and never uploads. The repo name and token are stored on the device only and are not part of a backup. The app refuses a public repo, and an empty phone loads the existing copy instead of overwriting it. Nothing is written to the app's own repo."
     }
   ],
   "flows": [
@@ -232,6 +243,11 @@
       "from": "storage",
       "to": "backup",
       "label": "backup JSON, export"
+    },
+    {
+      "from": "storage",
+      "to": "sync",
+      "label": "backup JSON after each save"
     },
     {
       "from": "app",
