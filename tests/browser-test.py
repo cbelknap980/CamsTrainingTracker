@@ -240,9 +240,15 @@ with sync_playwright() as p:
     page.reload(); page.wait_for_selector('#pair-prompt')
     check('v1.5 old dumbbell numbers: the app asks once and lists them', 'Lateral raise' in page.locator('#pair-prompt').inner_text() and 'Incline dumbbell press' in page.locator('#pair-prompt').inner_text(), page.locator('#pair-prompt').inner_text()[:300])
     page.screenshot(path=f'{SHOTS}/v15-pair-prompt.png', full_page=True)
-    page.click('#pair-double'); page.wait_for_selector('.card.accent h1')
+    check('v1.7.1 Save is locked until every lift has an answer', page.locator('#pair-save').is_disabled())
+    for row in page.locator('.pair-row').all():
+        row.locator('[data-pick="total"]' if row.get_attribute('data-ex') == 'curl' else '[data-pick="one"]').click()
+    check('v1.7.1 each row shows what the answer does', 'Becomes' in page.locator('.pair-row[data-ex="lateral_raise"] .pair-result').inner_text() and 'Stays' in page.locator('.pair-row[data-ex="curl"] .pair-result').inner_text(), page.locator('#pair-prompt').inner_text()[:400])
+    page.screenshot(path=f'{SHOTS}/v171-pair-prompt.png', full_page=True)
+    page.click('#pair-save'); page.wait_for_selector('#pair-prompt', state='detached'); page.wait_for_selector('.card.accent h1')
     after = page.evaluate(f"({KV})('targets')")
     check('v1.5 doubling: two-dumbbell targets doubled, others untouched', after['lateral_raise']['weight'] == 2 * before['lateral_raise']['weight'] and after['incline_db_press']['weight'] == 2 * before['incline_db_press']['weight'] and after['back_squat']['weight'] == before['back_squat']['weight'] and after['db_row']['weight'] == before['db_row']['weight'], (before.get('lateral_raise'), after.get('lateral_raise')))
+    check('v1.7.1 a lift answered Both together is left alone', after['curl']['weight'] == before['curl']['weight'] and page.evaluate(f"({KV})('pairTotals')") == 'mixed', (before.get('curl'), after.get('curl')))
     page.reload(); page.wait_for_selector('.card.accent h1')
     check('v1.5 the question is not asked twice', page.locator('#pair-prompt').count() == 0)
 

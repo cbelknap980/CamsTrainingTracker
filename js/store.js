@@ -112,7 +112,8 @@ function deepMerge(a, b) {
 }
 
 // ---- v1.5: two-dumbbell lifts are stored as totals ----
-// kv 'pairTotals': 'none' (nothing to convert), 'doubled' (old per-dumbbell numbers were doubled), 'kept' (left as they were).
+// kv 'pairTotals': 'none' (nothing to convert), 'doubled' (old per-dumbbell numbers were doubled), 'kept' (left as they were),
+// 'mixed' (v1.7.1: some lifts doubled, some kept, answered per lift).
 export const getPairTotals = () => kvGet('pairTotals');
 export const setPairTotals = v => kvSet('pairTotals', v);
 

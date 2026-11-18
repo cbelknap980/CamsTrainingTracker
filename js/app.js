@@ -22,7 +22,8 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); instal
 window.addEventListener('appinstalled', () => { installPrompt = null; if (currentTab === 'home' && !player && D) renderHome(); });
 const isInstalled = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 // a computer browser: not the installed app, and a wide window or a mouse
-const onComputer = () => !isInstalled() && window.matchMedia('(min-width: 800px), (pointer: fine)').matches;
+// (a phone in Chrome's Desktop site mode has a wide window but still a touch pointer, so width alone is not enough)
+const onComputer = () => !isInstalled() && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 async function boot() {
   try {
@@ -88,22 +89,41 @@ async function pairPrompt(then) {
   if (!found.length) { await setPairTotals('none'); return false; }
   view.innerHTML = '';
   window.scrollTo(0, 0);
-  const answer = async double => {
-    if (double) await doublePairWeights(ids);
-    await setPairTotals(double ? 'doubled' : 'kept');
-    toast(double ? 'Doubled. Dumbbell weights are totals now.' : 'Left as they were.');
+  // v1.7.1: one answer per lift, because the saved numbers can be a mix of one-dumbbell weights and totals
+  const picks = {};
+  const save = async () => {
+    const toDouble = found.filter(f => picks[f.id] === 'one').map(f => f.id);
+    if (toDouble.length) await doublePairWeights(toDouble);
+    await setPairTotals(toDouble.length === found.length ? 'doubled' : (toDouble.length ? 'mixed' : 'kept'));
+    toast(toDouble.length ? `Doubled ${toDouble.length} of ${found.length}. Dumbbell weights are totals now.` : 'Left as they were.');
     then();
   };
+  const saveBtn = el('button', { class: 'btn primary', id: 'pair-save', disabled: true, onclick: save }, 'Save');
+  const rows = found.map(f => {
+    const w = f.weight;
+    const result = el('div', { class: 'pair-result muted' }, 'Pick one');
+    const seg = el('div', { class: 'segmented' });
+    const draw = () => {
+      seg.innerHTML = '';
+      [['one', 'One dumbbell'], ['total', 'Both together']].forEach(([k, label]) => seg.appendChild(el('button', { type: 'button', class: picks[f.id] === k ? 'on' : '', 'data-pick': k, onclick: () => {
+        picks[f.id] = k; draw();
+        result.textContent = k === 'one' ? `Becomes ${fmtWeight(w * 2)} lb total (2 × ${fmtWeight(w)})` : `Stays ${fmtWeight(w)} lb total (2 × ${fmtWeight(w / 2)})`;
+        result.classList.remove('muted');
+        saveBtn.disabled = !found.every(x => picks[x.id]);
+      } }, label)));
+    };
+    draw();
+    return el('div', { class: 'pair-row', 'data-ex': f.id }, [
+      el('div', { class: 'row' }, [el('b', {}, D.plan.exercises[f.id].name), el('span', { class: 'pair-saved' }, `${fmtWeight(w)} lb`)]),
+      seg, result
+    ]);
+  });
   view.appendChild(el('div', { class: 'card accent', id: 'pair-prompt' }, [
     el('h1', {}, 'Dumbbell weights are now totals'),
-    el('p', {}, 'Lifts that use two dumbbells now show the total of both, so two 40s read as 80 lb (2 × 40). Before this update the app asked for the weight of one dumbbell.'),
-    el('p', { class: 'muted' }, 'Your saved numbers for these lifts:'),
-    el('table', {}, found.map(f => el('tr', {}, [el('td', {}, D.plan.exercises[f.id].name), el('td', { class: 'num' }, `${fmtWeight(f.weight)} lb`)]))),
-    el('p', { class: 'muted' }, 'Were those the weight of one dumbbell?'),
-    el('div', { class: 'stack' }, [
-      el('button', { class: 'btn primary', id: 'pair-double', onclick: () => answer(true) }, 'Yes, one dumbbell: double them'),
-      el('button', { class: 'btn', id: 'pair-keep', onclick: () => answer(false) }, 'No, they were already totals')
-    ])
+    el('p', {}, 'Lifts that use two dumbbells now show the total of both, so two 40s read as 80 lb (2 × 40).'),
+    el('p', { class: 'muted' }, 'For each saved number below, was it the weight of one dumbbell, or both together?'),
+    ...rows,
+    saveBtn
   ]));
   return true;
 }
