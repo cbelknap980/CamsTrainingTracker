@@ -1,5 +1,5 @@
 {
-  "planVersion": "1.0",
+  "planVersion": "1.1",
   "planName": "12-Week Strength Block",
   "source": "2026-11-15 General 12-Week Training Plan.md",
   "startDate": "2026-11-16",
@@ -237,11 +237,12 @@
         "Chest to the bar, then lower under control."
       ]
     },
-    "db_bench": {
-      "name": "Dumbbell bench press",
+    "incline_db_press": {
+      "name": "Incline dumbbell press",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "DB bench",
+      "short": "Inc press",
+      "cue": "Bench at about 30 degrees.",
       "tempo": [
         2,
         1,
@@ -249,8 +250,8 @@
         0
       ],
       "tips": [
-        "Lower until you feel the chest stretch, pause, press.",
-        "Shoulder blades pinned back and down."
+        "Lower until you feel the upper chest stretch, pause, press.",
+        "Shoulder blades pinned back and down; a steeper bench turns this into a shoulder press."
       ]
     },
     "cs_row": {
@@ -731,8 +732,8 @@
           "minutes": 9,
           "items": [
             {
-              "exercise": "db_bench",
-              "sets": 2,
+              "exercise": "incline_db_press",
+              "sets": 3,
               "reps": [
                 6,
                 10

@@ -205,10 +205,6 @@
         "of": "bodyweight",
         "fraction": 0.25
       },
-      "db_bench": {
-        "of": "bodyweight",
-        "fraction": 0.3
-      },
       "lateral_raise": {
         "of": "bodyweight",
         "fraction": 0.08
@@ -224,6 +220,10 @@
       "preacher_curl": {
         "of": "bodyweight",
         "fraction": 0.12
+      },
+      "incline_db_press": {
+        "of": "bodyweight",
+        "fraction": 0.26
       }
     }
   }
