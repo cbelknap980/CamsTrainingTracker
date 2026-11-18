@@ -266,9 +266,23 @@ with sync_playwright() as p:
     check('run saved with pace', '8:52' in page.locator('table').inner_text(), page.locator('table').inner_text())
     page.screenshot(path=f'{SHOTS}/runs.png', full_page=True)
 
+    # ---- v1.6 Progress tab ----
+    page.click('#tabs button[data-view="progress"]'); page.wait_for_selector('#progress-status')
+    check('v1.6 progress: week 1 status with three lifts done', 'Week 1 of 12' in page.locator('#progress-status h1').inner_text() and page.locator('#progress-status .adh-cell.done').count() == 4, [page.locator('#progress-status h1').inner_text(), page.locator('#progress-status .adh-cell.done').count()])
+    check('v1.6 progress: a strength card for each of the 7 benchmark lifts', page.locator('.strength-card').count() == 7, page.locator('.strength-card').count())
+    sq_card = page.locator('.strength-card[data-ex="back_squat"]')
+    check('v1.6 progress: box squat card shows an estimated 1RM', sq_card.locator('.e1rm-now').inner_text().strip().endswith('lb') and sq_card.locator('.viz-dot').count() == 1, sq_card.inner_text())
+    sq_card.locator('.viz-hit').first.focus(); page.wait_for_timeout(80)
+    check('v1.6 progress: a chart point shows its best set', 'best set' in sq_card.locator('.viz-tip').inner_text() and sq_card.locator('.viz-tip').is_visible(), sq_card.locator('.viz-tip').inner_text())
+    check('v1.6 progress: work sets per week has one bar, in week 1', page.locator('#weekly-sets .viz-bar').count() == 1 and 'Week 1' in page.locator('#weekly-sets .viz-bar').get_attribute('aria-label'), page.locator('#weekly-sets .viz-bar').count())
+    check('v1.6 progress: accessories table lists logged accessories', page.locator('#accessories tr').count() >= 8, page.locator('#accessories tr').count())
+    check('v1.6 progress: no load-backup card on the phone', page.locator('#load-backup').count() == 0)
+    check('v1.6 progress: page fits the phone width', page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), page.evaluate('[document.documentElement.scrollWidth, window.innerWidth]'))
+    page.screenshot(path=f'{SHOTS}/progress-phone.png', full_page=True)
+
     # ---- Architecture tab + search ----
     page.click('#tabs button[data-view="architecture"]'); page.wait_for_selector('.arch-svg')
-    check('architecture draws 13 boxes', page.locator('.arch-svg g[data-part]').count() == 13, page.locator('.arch-svg g[data-part]').count())
+    check('architecture draws 14 boxes', page.locator('.arch-svg g[data-part]').count() == 14, page.locator('.arch-svg g[data-part]').count())
     page.fill('input[type="search"]', 'trim'); page.wait_for_timeout(100)
     check('search "trim" highlights Player and Rules', page.locator('.arch-svg .box.hit').count() >= 2, page.locator('.arch-svg .box.hit').count())
     check('search filters the part list', page.locator('.arch-part').count() <= 4, page.locator('.arch-part').count())

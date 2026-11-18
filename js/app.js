@@ -9,6 +9,7 @@ import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progr
 import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
+import { renderProgress } from './progress.js';
 import { el, toast, showModal, closeModal, confirmDialog } from './ui.js';
 
 const view = document.getElementById('view');
@@ -19,6 +20,8 @@ let installPrompt = null; // Chrome's deferred install prompt, when the app is n
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; if (currentTab === 'home' && !player && D) renderHome(); });
 window.addEventListener('appinstalled', () => { installPrompt = null; if (currentTab === 'home' && !player && D) renderHome(); });
 const isInstalled = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+// a computer browser: not the installed app, and a wide window or a mouse
+const onComputer = () => !isInstalled() && window.matchMedia('(min-width: 800px), (pointer: fine)').matches;
 
 async function boot() {
   try {
@@ -95,8 +98,10 @@ function showTab(name) {
   currentTab = name;
   document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   window.scrollTo(0, 0);
+  view.classList.toggle('wide', name === 'progress');
   if (name === 'home') renderHome();
   else if (name === 'history') renderHistory();
+  else if (name === 'progress') renderProgressTab();
   else if (name === 'runs') renderRuns();
   else if (name === 'architecture') renderArchitecture(view, D.architecture, D.plan);
 }
@@ -130,6 +135,17 @@ async function renderHome() {
     todayCard.appendChild(el('p', { class: 'muted' }, 'Make-up day. Pick a session below if you missed one, or rest.'));
   }
   view.appendChild(todayCard);
+  // v1.4: install card, only while the app is running in a browser tab. v1.6: on a phone it sits right under
+  // the today card so it is not missed; on a computer it stays at the bottom.
+  const installCard = isInstalled() ? null : el('div', { class: 'card', id: 'install-card' }, [
+    el('h3', {}, 'Install the app'),
+    el('p', { class: 'muted' }, 'Installed, it opens full screen from its own icon, with no address bar, and works without signal.'),
+    installPrompt
+      ? el('button', { class: 'btn', onclick: async () => { const p = installPrompt; installPrompt = null; try { p.prompt(); await p.userChoice; } catch (e) { /* ignore */ } renderHome(); } }, 'Install')
+      : el('p', { class: 'muted', style: 'margin:0' }, 'In Chrome, open the three-dot menu and tap "Add to Home screen", then "Install".')
+  ]);
+  if (installCard && !onComputer()) view.appendChild(installCard);
+
 
   const other = el('div', { class: 'card' }, [
     el('h3', {}, 'Start a different session'),
@@ -162,16 +178,7 @@ async function renderHome() {
     ]));
   }
 
-  // v1.4: install card, only while the app is running in a browser tab
-  if (!isInstalled()) {
-    view.appendChild(el('div', { class: 'card', id: 'install-card' }, [
-      el('h3', {}, 'Install the app'),
-      el('p', { class: 'muted' }, 'Installed, it opens full screen from its own icon, with no address bar, and works without signal.'),
-      installPrompt
-        ? el('button', { class: 'btn', onclick: async () => { const p = installPrompt; installPrompt = null; try { p.prompt(); await p.userChoice; } catch (e) { /* ignore */ } renderHome(); } }, 'Install')
-        : el('p', { class: 'muted', style: 'margin:0' }, 'In Chrome, open the three-dot menu and tap "Add to Home screen", then "Install".')
-    ]));
-  }
+  if (installCard && onComputer()) view.appendChild(installCard);
 }
 
 // ---- Benchmarks (v1.3) ----
@@ -506,6 +513,22 @@ function showSession(s) {
       el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Delete this session?', 'Targets already set from it are kept.', 'Delete', true)) { await deleteSession(s.id); toast('Deleted'); renderHistory(); } } }, 'Delete')
     ])
   ]));
+}
+
+// ---- Progress (v1.6) ----
+async function renderProgressTab() {
+  const [settings, sessions, runs] = await Promise.all([getSettings(), getSessions(), getRuns()]);
+  if (currentTab !== 'progress') return;
+  const onLoadBackup = async file => {
+    if (sessions.length && !(await confirmDialog('Load this backup?', 'It replaces the workouts stored in this browser with the ones in the file.', 'Load'))) return;
+    try {
+      const r = await restoreFromFile(file);
+      toast(`Loaded ${r.sessions} sessions, ${r.runs} runs`);
+      await updateWeekChip();
+      if (!(await pairPrompt(() => showTab('progress')))) showTab('progress');
+    } catch (err) { toast('Could not load that file: ' + err.message, 4000); }
+  };
+  renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, today: new Date() }, onComputer() ? { onLoadBackup } : {});
 }
 
 // ---- Runs ----

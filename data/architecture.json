@@ -145,6 +145,17 @@
       "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it."
     },
     {
+      "id": "progress",
+      "column": "outputs",
+      "name": "Progress page",
+      "lines": [
+        "12-week status, strength trend,",
+        "PRs, sets per week (big screen)"
+      ],
+      "file": "js/progress.js",
+      "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser."
+    },
+    {
       "id": "backup",
       "column": "outputs",
       "name": "Backup and export",
@@ -211,6 +222,11 @@
       "from": "progression",
       "to": "history",
       "label": "what changed"
+    },
+    {
+      "from": "storage",
+      "to": "progress",
+      "label": "saved sessions and runs"
     },
     {
       "from": "storage",

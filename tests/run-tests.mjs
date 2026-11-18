@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { buildTimeline, trimToFit, remainingSeconds, lastResults, setTiming } from '../js/builder.js';
 import { applyProgression, epley, checkPR, estimateStart } from '../js/progression.js';
 import { effortPlain, effortLevel, spokenDuration } from '../js/data.js';
+import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks } from '../js/progress.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -193,6 +194,36 @@ check('v1.5 pair lifts are marked in the plan', ['bss', 'curl', 'incline_db_pres
 check('v1.5 every curl is named by type', ['Standing dumbbell curl', 'Incline dumbbell curl', 'Dumbbell preacher curl'].join() === [plan.exercises.curl.name, plan.exercises.incline_curl.name, plan.exercises.preacher_curl.name].join());
 check('estimate: none for machines, none without a base lift', estimateStart(rules, 'leg_curl', {}, settings) === null && estimateStart(rules, 'rdl', {}, settings) === null);
 check('spoken duration', spokenDuration(165) === '2 minutes 45 seconds' && spokenDuration(60) === '1 minute' && spokenDuration(30) === '30 seconds');
+
+// ---- v1.6 Progress page helpers ----
+{
+  const set = (exerciseId, weight, reps, extra = {}) => ({ exerciseId, weight, reps, done: true, ...extra });
+  const sess = [
+    { id: 'b', sessionId: 'lift1', week: 2, date: '2026-11-24', startedAt: '2026-11-24T06:00:00', status: 'complete', sets: [set('back_squat', 135, 5, { ramp: true }), set('back_squat', 190, 5), set('back_squat', 190, 4), set('leg_curl', 80, 12), set('back_squat', 250, 1, { skipped: true })], prs: [{ exerciseId: 'back_squat', name: 'Box squat', kind: 'e1rm', value: 222, prev: 216 }] },
+    { id: 'a', sessionId: 'lift1', week: 1, date: '2026-11-17', startedAt: '2026-11-17T06:00:00', status: 'complete', sets: [set('back_squat', 185, 5), set('back_squat', 185, 5), set('leg_curl', 70, 12), set('leg_curl', 70, 10)], prs: [] },
+    { id: 'c', sessionId: 'lift2', week: 1, date: '2026-11-18', startedAt: '2026-11-18T06:00:00', status: 'ended_early', sets: [set('weighted_pullup', 25, 5), set('curl', 50, 10)], prs: [] }
+  ];
+  const st = { ...settings, startDate: '2026-11-16', bodyweightLb: 165 };
+  const series = strengthSeries(sess, plan, st);
+  const sq = series.find(x => x.id === 'back_squat');
+  check('v1.6 strength: one point per session, oldest first, best work set only', sq.points.length === 2 && sq.points[0].date === '2026-11-17' && sq.points[0].e1rm === epley(185, 5) && sq.points[1].e1rm === epley(190, 5), sq.points);
+  check('v1.6 strength: change since the first session', sq.delta === epley(190, 5) - epley(185, 5) && sq.pct > 0, [sq.delta, sq.pct]);
+  const pu = series.find(x => x.id === 'weighted_pullup');
+  check('v1.6 strength: weighted pull-up counts bodyweight', pu.addsBodyweight && pu.points[0].e1rm === epley(190, 5), pu.points);
+  check('v1.6 strength: lifts with nothing logged are left out', !series.some(x => x.id === 'power_clean'));
+  const a = adherence(sess, plan, st, new Date(2026, 10, 30, 8));
+  const row = id => a.rows.find(r => r.id === id).cells.map(c => c.status).join(',');
+  check('v1.6 status: week 3, lift 1 done twice then open', a.current === 3 && row('lift1').startsWith('done,done,open,later'), row('lift1'));
+  check('v1.6 status: ended-early counts as partial, an empty past week as missed', row('lift2').startsWith('partial,missed,open,later') && row('lift3').startsWith('missed,missed,open'), [row('lift2'), row('lift3')]);
+  check('v1.6 status: totals', a.logged === 3 && a.missed === 3, [a.logged, a.missed]);
+  const wk = weeklySets(sess);
+  check('v1.6 weekly sets: ramp-ups and skipped sets do not count', wk.length === 12 && wk[0].sets === 6 && wk[0].sessions === 2 && wk[1].sets === 3 && wk[2].sets === 0, wk.slice(0, 3));
+  const acc = accessoryRows(sess, plan);
+  const lc = acc.find(r => r.id === 'leg_curl');
+  check('v1.6 accessories: first and latest top set', lc.sessions === 2 && lc.first.weight === 70 && lc.first.reps === 12 && lc.last.weight === 80 && !acc.some(r => r.id === 'back_squat'), lc);
+  check('v1.6 PR list: newest first with the date', prList(sess).length === 1 && prList(sess)[0].date === '2026-11-24');
+  check('v1.6 chart ticks: three clean numbers that hold every value', yTicks([216, 222]).join() === '215,220,225' && yTicks([200]).join() === '195,200,205' && yTicks([201, 214]).join() === '200,210,220', [yTicks([216, 222]), yTicks([200]), yTicks([201, 214])]);
+}
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
