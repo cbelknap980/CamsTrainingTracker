@@ -266,12 +266,20 @@ export function renderProgress(view, data, opts = {}) {
   view.appendChild(el('div', { class: 'row' }, [el('h1', {}, 'Progress')]));
 
   const fileInput = el('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: e => { const f = e.target.files[0]; if (f && opts.onLoadBackup) opts.onLoadBackup(f); } });
-  const loadCard = opts.onLoadBackup ? el('div', { class: 'card', id: 'load-backup' }, [
+  // v1.7: when this device downloads from the phone's private repo, say how fresh the copy is
+  const sync = opts.sync;
+  const syncCard = sync ? el('div', { class: 'card', id: 'sync-card' }, [
+    el('h3', {}, 'From your phone'),
+    el('p', { class: 'muted', id: 'sync-status' }, sync.error ? `Could not reach the phone's copy: ${sync.error}` : (sync.at ? `Showing what the phone uploaded ${fmtDate(sync.at)} at ${new Date(sync.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.` : 'Nothing uploaded yet. Save a workout on the phone, then refresh.')),
+    el('button', { class: 'btn', id: 'sync-refresh', style: 'max-width:320px', onclick: () => sync.onRefresh() }, 'Refresh')
+  ]) : null;
+  if (syncCard) view.appendChild(syncCard);
+  const loadCard = syncCard || !opts.onLoadBackup ? null : el('div', { class: 'card', id: 'load-backup' }, [
     el('h3', {}, 'On a computer'),
     el('p', { class: 'muted' }, sessions.length ? 'Workouts are logged on the phone. To refresh what you see here, load the newest backup file from the phone. It replaces the copy in this browser.' : 'Workouts are logged on the phone. To see them here, back up on the phone (Settings, Back up), then load that file.'),
     el('button', { class: 'btn', style: 'max-width:320px', onclick: () => fileInput.click() }, 'Load backup file'),
     fileInput
-  ]) : null;
+  ]);
 
   if (!sessions.length) {
     view.appendChild(el('div', { class: 'card' }, [el('h2', {}, 'No workouts logged yet'), el('p', { class: 'muted', style: 'margin:0' }, 'After the first saved session this page shows your 12-week status, strength trend per lift and personal records.')]));

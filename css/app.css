@@ -384,7 +384,10 @@ body[data-kind="ready"] .rest-top .timer { font-size: 3.4rem; }
 .adh-key { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--t-label); color: var(--muted); }
 .adh-key > span { display: inline-flex; align-items: center; gap: 6px; }
 .adh-key .adh-cell { width: 20px; height: 20px; font-size: 11px; }
-#load-backup p { max-width: 72ch; }
+#load-backup p, #sync-card p { max-width: 72ch; }
+/* v1.7: sync sheet */
+.sync-status { font-size: var(--t-small); margin: 4px 0 12px; }
+.sync-status.bad { color: var(--bad); font-weight: 600; }
 .acc-table { table-layout: fixed; }
 .acc-table th:first-child { width: 52%; }
 .acc-table td, .acc-table th { overflow-wrap: break-word; }

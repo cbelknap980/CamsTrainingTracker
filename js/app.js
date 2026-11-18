@@ -10,6 +10,7 @@ import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, 
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
+import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
 import { el, toast, showModal, closeModal, confirmDialog } from './ui.js';
 
 const view = document.getElementById('view');
@@ -41,9 +42,29 @@ async function boot() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+  await startSync();
   await updateWeekChip();
   if (await pairPrompt(() => openApp())) return;
   openApp();
+}
+
+/**
+ * v1.7 sync. A set-up link (#sync=...) turns this device into one that only views. A viewing device downloads
+ * the phone's copy before the first screen (8 s limit, so a bad connection never blocks the app). The phone
+ * uploads on its own after each saved change.
+ */
+async function startSync() {
+  try {
+    const link = readSetupLink(location.hash);
+    if (link) {
+      history.replaceState(null, '', location.pathname + location.search);
+      await saveSync({ repo: link.repo, token: link.token, role: 'viewer', lastPulledExport: null, lastError: null });
+      toast('Sync set up on this device');
+    }
+    const cfg = await getSync();
+    if (cfg && cfg.role === 'viewer') await Promise.race([pullNow(), new Promise(r => setTimeout(r, 8000))]);
+  } catch (e) { /* sync never stops the app from opening */ }
+  startAutoSync(() => ({ appVersion: APP_VERSION, planVersion: D.plan.planVersion }), r => { if (!r.ok) toast('Upload to the computer copy failed. It will retry.', 3500); });
 }
 
 async function openApp() {
@@ -528,7 +549,81 @@ async function renderProgressTab() {
       if (!(await pairPrompt(() => showTab('progress')))) showTab('progress');
     } catch (err) { toast('Could not load that file: ' + err.message, 4000); }
   };
-  renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, today: new Date() }, onComputer() ? { onLoadBackup } : {});
+  const cfg = await getSync();
+  const sync = cfg && cfg.role === 'viewer' ? {
+    at: cfg.lastPulledExport, error: cfg.lastError,
+    onRefresh: async () => { const r = await pullNow(); toast(r.ok ? (r.empty ? 'Nothing uploaded yet' : (r.changed ? `Loaded ${r.sessions} sessions, ${r.runs} runs` : 'Already up to date')) : r.error, 3500); await updateWeekChip(); if (currentTab === 'progress') renderProgressTab(); }
+  } : null;
+  renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, today: new Date() }, { ...(onComputer() ? { onLoadBackup } : {}), ...(sync ? { sync } : {}) });
+}
+
+// ---- Sync sheet (v1.7) ----
+async function renderSyncSheet(note) {
+  const cfg = (await getSync()) || {};
+  let role = cfg.role || (onComputer() ? 'viewer' : 'phone');
+  const when = iso => `${fmtDate(iso)} at ${new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  const statusText = () => {
+    if (!cfg.repo) return 'Off. Nothing leaves this device.';
+    if (cfg.lastError) return cfg.lastError;
+    if (cfg.role === 'viewer') return cfg.lastPulledExport ? `Showing the phone's upload from ${when(cfg.lastPulledExport)}.` : 'On. Nothing downloaded yet.';
+    return cfg.lastPushedAt ? `On. Last upload ${when(cfg.lastPushedAt)}.` : 'On. Nothing uploaded yet.';
+  };
+  const repoIn = el('input', { type: 'text', id: 'sync-repo', value: cfg.repo || '', placeholder: 'yourname/training-data', autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
+  const tokenIn = el('input', { type: 'password', id: 'sync-token', value: cfg.token || '', placeholder: 'github_pat_...', autocomplete: 'off' });
+  const status = el('p', { class: cfg.lastError && !note ? 'sync-status bad' : 'sync-status muted', id: 'sync-state' }, note || statusText());
+  const say = (text, bad) => { status.textContent = text; status.className = 'sync-status ' + (bad ? 'bad' : 'muted'); };
+  const roleBtns = el('div', { class: 'segmented', id: 'sync-role' });
+  const drawRole = () => { roleBtns.innerHTML = ''; [['phone', 'Logs workouts'], ['viewer', 'Only views']].forEach(([k, label]) => roleBtns.appendChild(el('button', { type: 'button', class: role === k ? 'on' : '', 'data-role': k, onclick: () => { role = k; drawRole(); } }, label))); };
+  drawRole();
+  const run = async () => {
+    const r = role === 'phone' ? await pushNow(APP_VERSION, D.plan.planVersion) : await pullNow();
+    Object.assign(cfg, await getSync());
+    if (!r.ok) { say(r.error, true); return false; }
+    say(statusText());
+    if (role === 'viewer') { await updateWeekChip(); if (r.changed && !(await pairPrompt(() => showTab(currentTab)))) showTab(currentTab); }
+    return true;
+  };
+  const save = async () => {
+    const repo = parseRepo(repoIn.value);
+    const token = tokenIn.value.trim();
+    if (!repo) { say('Type the repo as owner/name, for example yourname/training-data.', true); return; }
+    if (!token) { say('Paste the token from GitHub.', true); return; }
+    say('Checking with GitHub...');
+    try { await checkAccess({ repo, token }, role === 'phone'); } catch (e) { say(String(e.message || e), true); return; }
+    Object.assign(cfg, await saveSync({ repo, token, role, lastError: null, ...(repo !== cfg.repo ? { lastPulledExport: null, lastPushedAt: null } : {}) }));
+    // an empty phone must not wipe the copy on GitHub: if there is one, load it here instead of uploading nothing
+    if (role === 'phone' && !(await getSessions()).length && !(await getRuns()).length) {
+      const got = await pullNow();
+      Object.assign(cfg, await getSync());
+      if (got.ok && !got.empty && (got.sessions || got.runs)) {
+        toast('Sync is on. Loaded your log.'); await updateWeekChip();
+        renderSyncSheet(`This device had no workouts, so it loaded ${got.sessions} sessions and ${got.runs} runs from GitHub.`);
+        return;
+      }
+    }
+    if (await run()) { toast(role === 'phone' ? 'Sync is on. Uploaded.' : 'Sync is on.'); renderSyncSheet(); }
+  };
+  const copyLink = async () => {
+    if (!cfg.repo || !cfg.token) { say('Save and test first.', true); return; }
+    const link = setupLink(location.href, cfg);
+    try { await navigator.clipboard.writeText(link); toast('Link copied. Open it once on the computer.', 3500); }
+    catch (e) { showModal(el('div', {}, [el('h2', {}, 'Link for the computer'), el('p', { class: 'muted' }, 'Copy this and open it once on the computer.'), el('textarea', { readonly: 'readonly', rows: '5', style: 'width:100%' }, link), el('button', { class: 'btn', onclick: () => renderSyncSheet() }, 'Back')])); }
+  };
+  showModal(el('div', {}, [
+    el('h2', {}, 'Sync with the computer'),
+    el('p', { class: 'muted' }, `Keeps a copy of your log (${SYNC_FILE}) in a private GitHub repo of yours. The phone uploads after every saved workout or run. A computer set to "Only views" loads it when the app opens. The token is stored on this device only.`),
+    el('div', { class: 'field' }, [el('label', {}, 'Private repo'), repoIn]),
+    el('div', { class: 'field' }, [el('label', {}, 'Token'), tokenIn]),
+    el('div', { class: 'field' }, [el('label', {}, 'This device'), roleBtns]),
+    status,
+    el('div', { class: 'stack' }, [
+      el('button', { class: 'btn primary', id: 'sync-save', onclick: save }, 'Save and test'),
+      cfg.repo ? el('button', { class: 'btn', id: 'sync-now', onclick: async () => { say('Working...'); if (await run()) toast(role === 'phone' ? 'Uploaded' : 'Up to date'); } }, 'Sync now') : null,
+      cfg.repo ? el('button', { class: 'btn', id: 'sync-link', onclick: copyLink }, 'Copy set-up link for the computer') : null,
+      cfg.repo ? el('button', { class: 'btn danger', id: 'sync-off', onclick: async () => { if (await confirmDialog('Turn sync off on this device?', 'The repo name and token are removed from this device. The copy on GitHub stays.', 'Turn off', true)) { await clearSync(); toast('Sync is off'); renderSyncSheet(); } else renderSyncSheet(); } }, 'Turn off') : null,
+      el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close')
+    ])
+  ]));
 }
 
 // ---- Runs ----
@@ -589,6 +684,7 @@ async function renderSettings() {
       el('button', { class: 'btn', onclick: () => backupNow(s, D.plan.planVersion) }, 'Back up (share to Drive)'),
       el('button', { class: 'btn', onclick: () => downloadBackup(s, D.plan.planVersion) }, 'Download backup file'),
       el('button', { class: 'btn', onclick: async () => { const r = await exportExcel(s, D.plan); if (r) toast(`Exported ${r.sets} sets, ${r.runs} runs`); } }, 'Export to Excel'),
+      el('button', { class: 'btn', id: 'sync-open', onclick: () => renderSyncSheet() }, 'Sync with the computer'),
       el('button', { class: 'btn', onclick: () => fileInput.click() }, 'Restore from backup file'),
       fileInput,
       el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Wipe all data on this phone?', 'Back up first. This cannot be undone.', 'Wipe', true)) { await wipeAll(); await setPairTotals('none'); toast('Wiped'); closeModal(); showTab('home'); } } }, 'Wipe all data')
