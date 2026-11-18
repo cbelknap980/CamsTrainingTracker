@@ -1,7 +1,8 @@
 // Node tests for the Session Builder and Progression Engine. Run: node tests/run-tests.mjs
 import { readFileSync } from 'node:fs';
-import { buildTimeline, trimToFit, remainingSeconds, lastResults } from '../js/builder.js';
-import { applyProgression, epley, checkPR } from '../js/progression.js';
+import { buildTimeline, trimToFit, remainingSeconds, lastResults, setTiming } from '../js/builder.js';
+import { applyProgression, epley, checkPR, estimateStart } from '../js/progression.js';
+import { effortPlain, effortLevel, spokenDuration } from '../js/data.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -19,7 +20,7 @@ for (const sid of ['lift1', 'lift2', 'lift3']) {
   const tl = buildTimeline({ plan, rules, settings, sessionId: sid, week: 1, targets: {} });
   const kinds = tl.steps.map(s => s.kind);
   const minutes = tl.plannedSeconds / 60;
-  check(`${sid}: planned ${minutes.toFixed(1)} min is within 63 (week 1 has baseline work-ups)`, minutes <= 63 && minutes >= 45, { minutes });
+  check(`${sid}: planned ${minutes.toFixed(1)} min is within 67 (week 1 has baseline work-ups)`, minutes <= 67 && minutes >= 45, { minutes });
   check(`${sid}: has a baseline top set for each main lift`, tl.steps.filter(s => s.baseline).length >= 1);
   check(`${sid}: ends with stretch steps (or if-time)`, ['stretch', 'decision', 'set', 'rest'].includes(kinds.at(-1)));
   check(`${sid}: stretch block is 6 steps = 300 s`, tl.steps.filter(s => s.kind === 'stretch').length === 6 && tl.steps.filter(s => s.kind === 'stretch').reduce((a, s) => a + s.seconds, 0) === 300);
@@ -30,9 +31,10 @@ const l1 = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 1, t
 const sqSets = l1.steps.filter(s => s.exerciseId === 'back_squat' && s.kind === 'set');
 check('lift1: squat = 1 baseline + 3 work sets, work sets fill from baseline', sqSets.length === 4 && sqSets.slice(1).every(s => s.fillFromBaseline), sqSets.map(s => [s.baseline, s.fillFromBaseline]));
 const bSteps = l1.steps.filter(s => s.blockId === 'B' && s.kind !== 'transition');
-check('lift1: superset B alternates RDL/calf with 30 s then 75 s rests', bSteps.map(s => s.kind === 'set' ? s.exerciseId : s.seconds).join(',') === 'rdl,30,calf_raise,75,rdl,30,calf_raise,75,rdl,30,calf_raise', bSteps.map(s => s.kind === 'set' ? s.exerciseId : s.seconds).join(','));
+check('lift1: superset B alternates RDL/calf with 30 s then 75 s rests (first calf rest carries 35 s machine set-up)', bSteps.map(s => s.kind === 'set' ? s.exerciseId : s.seconds).join(',') === 'rdl,65,calf_raise,75,rdl,30,calf_raise,75,rdl,30,calf_raise', bSteps.map(s => s.kind === 'set' ? s.exerciseId : s.seconds).join(','));
 const fin = l1.steps.filter(s => s.blockType === 'finisher');
 check('lift1: finisher = 3 rounds x 3 items + 2 round rests', fin.filter(s => s.kind === 'set').length === 9 && fin.filter(s => s.kind === 'rest').length === 2);
+check('lift1: finisher items after the first get a set-up or switch step', fin.filter(s => s.kind === 'transition' && s.lead).length === 6, fin.filter(s => s.lead).map(s => s.name));
 
 const l2 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 1, targets: {} });
 const a = l2.steps.filter(s => s.blockId === 'A');
@@ -53,10 +55,10 @@ const w3 = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, t
 const ramps = w3.steps.filter(s => s.ramp);
 check('week 3 lift1: 4 ramp-up sets (45, 95, 130, 155)', ramps.map(s => s.target.weight).join(',') === '45,95,130,155', ramps.map(s => s.target.weight));
 check('week 3 lift1: work sets pre-filled 185 x 4', w3.steps.filter(s => s.exerciseId === 'back_squat' && !s.ramp).every(s => s.target.weight === 185 && s.target.reps === 4));
-check('week 3 lift1: planned within 60 min', w3.plannedSeconds / 60 <= 60, { min: w3.plannedSeconds / 60 });
+check('week 3 lift1: planned within 61 min', w3.plannedSeconds / 60 <= 61, { min: w3.plannedSeconds / 60 });
 const w3l2 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 3, targets });
 check('week 3 lift2: press ramps (95 lb target: 45, 50, 65, 80)', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight).join(',') === '45,50,65,80', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight));
-check('week 3 lift2: planned within 60 min', w3l2.plannedSeconds / 60 <= 60, { min: w3l2.plannedSeconds / 60 });
+check('week 3 lift2: planned within 61 min', w3l2.plannedSeconds / 60 <= 61, { min: w3l2.plannedSeconds / 60 });
 const w3l3 = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 3, targets });
 check('week 3 lift3: planned within 60 min incl. if-time', w3l3.plannedSeconds / 60 <= 61, { min: w3l3.plannedSeconds / 60 });
 
@@ -154,6 +156,38 @@ check('no PR reported when there was no previous best', r.prs.length === 0 && r.
 check('checkPR live: 190x5 beats e1RM 216', checkPR({ bestE1rm: 216, bestWeight: 185 }, 190, 5, 0).join(',') === 'e1rm,weight');
 check('checkPR live: nothing without prior bests', checkPR({}, 190, 5, 0).length === 0);
 check('checkPR live: pull-up adds bodyweight', checkPR({ bestE1rm: 228 }, 27.5, 6, 165).join(',') === 'e1rm');
+
+// ---- v1.4: set timing, lead-ins, effort words, starting estimates ----
+console.log('v1.4: timing, lead-ins, effort, estimates');
+for (const [sid, wk, tg] of [['lift1', 1, {}], ['lift2', 1, {}], ['lift3', 1, {}], ['lift1', 3, targets], ['lift2', 3, targets], ['lift3', 3, targets], ['lift1', 7, targets], ['lift2', 12, targets]]) {
+  const tl = buildTimeline({ plan, rules, settings, sessionId: sid, week: wk, targets: tg });
+  const bad = tl.steps.filter((s, i) => s.kind === 'set' && !(i > 0 && ['rest', 'transition'].includes(tl.steps[i - 1].kind) && tl.steps[i - 1].countdown && tl.steps[i - 1].seconds >= rules.timing.getReadySeconds + 3));
+  check(`${sid} week ${wk}: every set follows a countdown long enough for the get-ready count`, bad.length === 0, bad.map(s => s.name));
+  check(`${sid} week ${wk}: idx matches position`, tl.steps.every((s, i) => s.idx === i));
+}
+const sqT = setTiming(rules, plan.exercises.back_squat, 5, false);
+check('squat 5 reps at 6 s per rep = 6 + 30 x 1.1 = 39 s', sqT.seconds === 39 && sqT.repSeconds === 6, sqT);
+const bssT = setTiming(rules, plan.exercises.bss, 8, true);
+check('split squat 8/side: both sides and the switch are counted', bssT.seconds === Math.round(4 + (8 * 4.5 * 2 + 8) * 1.1), bssT);
+const w3sets = w3.steps.filter(s => s.kind === 'set' && !s.holdSeconds);
+check('work and ramp-up sets carry auto, repSeconds and equipment', w3sets.every(s => s.auto && s.repSeconds > 0 && s.equipment), w3sets.filter(s => !s.auto).map(s => s.name));
+check('baseline sets stay manual', l1.steps.filter(s => s.baseline).every(s => !s.auto));
+const firstSq = w3.steps.findIndex(s => s.exerciseId === 'back_squat');
+check('barbell first set: the transition before it is the barbell set-up time', w3.steps[firstSq - 1].kind === 'transition' && w3.steps[firstSq - 1].seconds === rules.timing.firstSetSetupSeconds.barbell, w3.steps[firstSq - 1]);
+check('work sets carry focus tips', w3.steps.filter(s => s.kind === 'set' && !s.ramp).every(s => s.tips && s.tips.length >= 1));
+check('every exercise has tips; every non-timed one has a 4-part tempo', Object.values(plan.exercises).every(e => e.tips && e.tips.length && (e.timed || (e.tempo && e.tempo.length === 4))));
+check('curl has a specific name', plan.exercises.curl.name === 'Standing dumbbell curl');
+const trimmed = trimToFit({ steps: base.steps, fromIdx, overBySeconds: 600, rules });
+check('trim drops a finisher round together with its switch steps', trimmed.steps.every((s, i) => s.kind !== 'set' || ['rest', 'transition'].includes(trimmed.steps[i - 1].kind)) && !trimmed.steps.some((s, i) => s.kind === 'transition' && s.lead && (!trimmed.steps[i + 1] || trimmed.steps[i + 1].kind !== 'set')), trimmed.notes);
+check('effort words: RPE 7-8 -> leave 2-3', effortPlain({ kind: 'rpe', min: 7, max: 8 }) === 'Leave 2-3 in the tank');
+check('effort words: 0-1 left -> push close', effortPlain({ kind: 'rir', min: 0, max: 1 }) === 'Push close: 0-1 left');
+check('effort words: 2 left', effortPlain({ kind: 'rir', min: 2, max: 2 }) === 'Leave 2 in the tank');
+check('effort levels: 6 easy, 7.5 and 8 and 8.5 solid, 9 and 9.5 hard, 10 maxed', [6, 7.5, 8, 8.5, 9, 9.5, 10].map(x => effortLevel(rules, x).key).join(',') === 'easy,solid,solid,solid,hard,hard,maxed');
+check('effort buttons store RPE 6, 8, 9, 10; Solid passes the main-lift test', rules.effortScale.levels.map(l => l.rpe).join(',') === '6,8,9,10' && rules.effortScale.levels[1].rpe <= rules.mainLiftTest.maxRpe);
+check('estimate: RDL from squat 185 -> 140', estimateStart(rules, 'rdl', { back_squat: { weight: 185 } }, settings) === 140, estimateStart(rules, 'rdl', { back_squat: { weight: 185 } }, settings));
+check('estimate: curl from bodyweight 165 -> 25', estimateStart(rules, 'curl', {}, settings) === 25);
+check('estimate: none for machines, none without a base lift', estimateStart(rules, 'leg_curl', {}, settings) === null && estimateStart(rules, 'rdl', {}, settings) === null);
+check('spoken duration', spokenDuration(165) === '2 minutes 45 seconds' && spokenDuration(60) === '1 minute' && spokenDuration(30) === '30 seconds');
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

@@ -1,8 +1,12 @@
 {
-  "rulesVersion": "1.0",
+  "rulesVersion": "1.1",
   "increments": {
     "default": 5,
-    "byExercise": { "strict_press": 2.5, "push_press": 2.5, "weighted_pullup": 2.5 }
+    "byExercise": {
+      "strict_press": 2.5,
+      "push_press": 2.5,
+      "weighted_pullup": 2.5
+    }
   },
   "smallestJump": {
     "barbell": 5,
@@ -13,7 +17,7 @@
     "bodyweight": 0
   },
   "mainLiftTest": {
-    "description": "Add weight when every set reaches the top of the rep range at RPE 8 or lower.",
+    "description": "Add weight when every set reaches the top of the rep range at Solid effort or easier (RPE 8 or lower).",
     "allSetsAtTopOfRange": true,
     "maxRpe": 8,
     "repNudge": 1
@@ -25,29 +29,69 @@
   "stall": {
     "description": "Two consecutive sessions that fail the test: drop 10% and rebuild.",
     "sessionsBeforeDrop": 2,
-    "dropFraction": 0.10,
+    "dropFraction": 0.1,
     "message": "Second miss in a row. Check sleep, food and ski load."
   },
   "baseline": {
-    "weeks": [1, 2],
+    "weeks": [
+      1,
+      2
+    ],
     "topSetReps": 5,
     "topSetRir": 2,
-    "trainingFraction": 0.90,
+    "trainingFraction": 0.9,
     "cleanTopSetReps": 2,
     "description": "Week 1: work up to a set of 5 with 2 reps left on each main lift; train at about 90% of it for weeks 1-2. Clean: work up in doubles to a crisp, fast weight."
   },
   "phases": {
-    "light": { "weeks": [7], "setFactor": 0.5, "keepWeights": true },
-    "heavy": { "weeks": [8, 9, 10, 11], "mainLiftReps": [3, 5], "startWeightFactor": 1.05, "description": "Main lifts move to 3-5 reps. First heavy-week target = last 4-6 target plus 5%, rounded to the increment (assumption, editable)." },
-    "retest": { "weeks": [12], "description": "Main lifts: work up to a 5-rep set at RPE 8-9. Also max strict pull-ups, max unbroken toes-to-bar, 5K time." }
+    "light": {
+      "weeks": [
+        7
+      ],
+      "setFactor": 0.5,
+      "keepWeights": true
+    },
+    "heavy": {
+      "weeks": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "mainLiftReps": [
+        3,
+        5
+      ],
+      "startWeightFactor": 1.05,
+      "description": "Main lifts move to 3-5 reps. First heavy-week target = last 4-6 target plus 5%, rounded to the increment (assumption, editable)."
+    },
+    "retest": {
+      "weeks": [
+        12
+      ],
+      "description": "Main lifts: work up to a 5-rep set at RPE 8-9. Also max strict pull-ups, max unbroken toes-to-bar, 5K time."
+    }
   },
   "rampUp": {
     "description": "Ramp-up sets before a main lift. Fractions of the target weight; empty bar first.",
     "steps": [
-      { "fraction": 0, "reps": 5, "label": "Empty bar" },
-      { "fraction": 0.5, "reps": 5 },
-      { "fraction": 0.7, "reps": 3 },
-      { "fraction": 0.85, "reps": 2 }
+      {
+        "fraction": 0,
+        "reps": 5,
+        "label": "Empty bar"
+      },
+      {
+        "fraction": 0.5,
+        "reps": 5
+      },
+      {
+        "fraction": 0.7,
+        "reps": 3
+      },
+      {
+        "fraction": 0.85,
+        "reps": 2
+      }
     ],
     "restSeconds": 60,
     "skipBelowLb": 95,
@@ -55,20 +99,132 @@
   },
   "trim": {
     "description": "Trim to fit, applied in order when the projected finish is past the cap. Cameron confirms before it applies.",
-    "order": ["rests", "finisherRounds", "ifTime"],
+    "order": [
+      "rests",
+      "finisherRounds",
+      "ifTime"
+    ],
     "restCutFraction": 0.25,
     "minRestSeconds": 30,
     "minFinisherRounds": 1,
-    "neverTrim": ["stretch", "warmup"]
+    "neverTrim": [
+      "stretch",
+      "warmup"
+    ]
   },
   "timing": {
     "transitionSeconds": 30,
-    "mainSetSeconds": 45,
-    "accessorySetSeconds": 40,
-    "finisherItemSeconds": 35,
     "resumeWindowHours": 3,
-    "restWarningSeconds": 3
+    "restWarningSeconds": 3,
+    "description": "Set time = start-of-set seconds + reps x tempo (seconds per rep, from the exercise in plan.json), plus a margin. Setup seconds are added to the rest or transition before the first set of each exercise.",
+    "defaultTempo": [
+      2,
+      0,
+      1,
+      0.5
+    ],
+    "setMarginFraction": 0.1,
+    "setStartSeconds": {
+      "barbell": 6,
+      "dumbbell": 4,
+      "machine": 3,
+      "cable": 3,
+      "weighted_bw": 4,
+      "bodyweight": 2
+    },
+    "sideSwitchSeconds": 8,
+    "firstSetSetupSeconds": {
+      "barbell": 60,
+      "dumbbell": 30,
+      "machine": 35,
+      "cable": 30,
+      "weighted_bw": 40,
+      "bodyweight": 15
+    },
+    "switchSeconds": 12,
+    "getReadySeconds": 5,
+    "extendSeconds": 15,
+    "rampSetSeconds": 30
   },
-  "e1rm": { "formula": "epley" },
-  "excludeFromAutoProgression": ["power_clean"]
+  "e1rm": {
+    "formula": "epley"
+  },
+  "excludeFromAutoProgression": [
+    "power_clean"
+  ],
+  "effortScale": {
+    "description": "The four effort buttons. Each stores an RPE number so the progression rules read the same as before.",
+    "levels": [
+      {
+        "key": "easy",
+        "label": "Easy",
+        "hint": "4+ left",
+        "rpe": 6,
+        "upTo": 6.9
+      },
+      {
+        "key": "solid",
+        "label": "Solid",
+        "hint": "2-3 left",
+        "rpe": 8,
+        "upTo": 8.7
+      },
+      {
+        "key": "hard",
+        "label": "Hard",
+        "hint": "1 left",
+        "rpe": 9,
+        "upTo": 9.9
+      },
+      {
+        "key": "maxed",
+        "label": "Maxed",
+        "hint": "0 left",
+        "rpe": 10,
+        "upTo": 10
+      }
+    ]
+  },
+  "startingEstimates": {
+    "description": "Rough first-session weights for free-weight accessories with no history, as a fraction of a main lift training weight or of bodyweight. Dumbbell numbers are per dumbbell. Machines and cables are left blank because stacks differ. Shown as estimates; the first logged session replaces them.",
+    "roundTo": 5,
+    "byExercise": {
+      "rdl": {
+        "of": "back_squat",
+        "fraction": 0.75
+      },
+      "bss": {
+        "of": "back_squat",
+        "fraction": 0.15
+      },
+      "curl": {
+        "of": "bodyweight",
+        "fraction": 0.15
+      },
+      "oh_tri_ext": {
+        "of": "bodyweight",
+        "fraction": 0.25
+      },
+      "db_bench": {
+        "of": "bodyweight",
+        "fraction": 0.3
+      },
+      "lateral_raise": {
+        "of": "bodyweight",
+        "fraction": 0.08
+      },
+      "incline_curl": {
+        "of": "bodyweight",
+        "fraction": 0.12
+      },
+      "db_row": {
+        "of": "bodyweight",
+        "fraction": 0.33
+      },
+      "preacher_curl": {
+        "of": "bodyweight",
+        "fraction": 0.12
+      }
+    }
+  }
 }

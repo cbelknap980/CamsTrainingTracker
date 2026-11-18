@@ -3,8 +3,8 @@
 
 import { applyProgression } from './progression.js';
 import { getTargets, setTargets, putSession, putRun, newId, getSettings } from './store.js';
-import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, weekNumber } from './data.js';
-import { el, toast, closeModal, showModal } from './ui.js';
+import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, weekNumber, effortLabel, getData } from './data.js';
+import { el, toast, closeModal, showModal, effortChips } from './ui.js';
 
 /** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
 export async function previewSession(draft, { plan, rules }) {
@@ -112,7 +112,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
       const rows = sets.map((st, i) => el('div', { class: 'review-set' + (st.skipped ? ' skipped' : ''), onclick: () => editSet(st, ex) }, [
         el('span', { class: 'muted' }, st.baseline ? 'Base' : (st.retest ? 'Test' : (st.round ? `R${st.round}` : `${st.setIndex || i + 1}`))),
         el('span', {}, st.skipped ? 'skipped' : `${st.weight != null ? fmtWeight(st.weight) + ' lb' : (st.holdSeconds ? '' : 'bw')} × ${st.reps != null ? st.reps : '?'}${st.holdSeconds ? ' s' : ''}`),
-        el('span', { class: 'muted' }, st.rpe != null && !st.skipped ? `RPE ${st.rpe}` : ''),
+        el('span', { class: 'muted' }, st.rpe != null && !st.skipped ? effortLabel(rules, st.rpe) : ''),
         st.pr && st.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : el('span', { class: 'muted' }, '›')
       ]));
       card.appendChild(el('div', { class: 'review-sets' }, rows));
@@ -139,18 +139,19 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     const isBw = ex && ex.equipment === 'bodyweight';
     const w = el('input', { type: 'number', step: '2.5', value: st.weight == null ? '' : st.weight, inputmode: 'decimal' });
     const r = el('input', { type: 'number', step: '1', value: st.reps == null ? '' : st.reps, inputmode: 'numeric' });
-    const p = el('input', { type: 'number', step: '0.5', value: st.rpe == null ? '' : st.rpe, inputmode: 'decimal' });
+    let rpe = st.rpe;
+    const chips = effortChips(rules, rpe, lvl => { rpe = lvl.rpe; chips.querySelectorAll('.effort-chip').forEach(b => b.classList.toggle('on', b.dataset.key === lvl.key)); });
     showModal(el('div', {}, [
       el('h2', {}, `${st.name}${st.setIndex ? ', set ' + st.setIndex : ''}`),
-      el('div', { class: 'grid3' }, [
+      el('div', { class: 'grid2' }, [
         isBw ? el('div') : el('div', { class: 'field' }, [el('label', {}, ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight'), w]),
-        el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r]),
-        el('div', { class: 'field' }, [el('label', {}, 'RPE'), p])
+        el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r])
       ]),
+      st.holdSeconds ? null : el('div', { class: 'field' }, [el('label', {}, 'Effort'), chips]),
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
-        st.skipped ? el('button', { class: 'btn', onclick: () => { st.skipped = false; st.done = true; st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = p.value === '' ? null : Number(p.value); closeModal(); paint(); } }, 'Mark done') : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.done = false; closeModal(); paint(); } }, 'Mark skipped'),
-        el('button', { class: 'btn primary', onclick: () => { st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = p.value === '' ? null : Number(p.value); st.done = true; st.skipped = false; closeModal(); paint(); } }, 'Save')
+        st.skipped ? el('button', { class: 'btn', onclick: () => { st.skipped = false; st.done = true; st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = rpe; closeModal(); paint(); } }, 'Mark done') : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.done = false; closeModal(); paint(); } }, 'Mark skipped'),
+        el('button', { class: 'btn primary', onclick: () => { st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = rpe; st.done = true; st.skipped = false; closeModal(); paint(); } }, 'Save')
       ])
     ]));
   }
@@ -201,9 +202,9 @@ export function setsTable(sets) {
     el('td', {}, [`${s.name}${s.baseline ? ' (baseline)' : ''}${s.retest ? ' (retest)' : ''}`, s.pr && s.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null]),
     el('td', { class: 'num' }, s.setIndex != null ? (s.round ? `R${s.round}` : `${s.setIndex || ''}`) : ''),
     el('td', { class: 'num' }, s.skipped ? 'skipped' : `${s.weight != null ? fmtWeight(s.weight) + ' lb' : (s.holdSeconds ? '' : 'bw')} × ${s.reps != null ? s.reps : '?'}${s.holdSeconds ? ' s' : ''}`),
-    el('td', { class: 'num' }, s.rpe != null && !s.skipped ? `RPE ${s.rpe}` : '')
+    el('td', { class: 'num' }, s.rpe != null && !s.skipped ? effortLabel(getData().rules, s.rpe) : '')
   ]));
-  return el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'RPE')]), ...rows]);
+  return el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'Effort')]), ...rows]);
 }
 
 // ---- run log form ----

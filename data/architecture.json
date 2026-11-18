@@ -24,7 +24,7 @@
         "sets, reps, rest, minutes"
       ],
       "file": "data/plan.json",
-      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes."
+      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes. v1.4 adds a tempo and focus cues to every exercise and a goal sentence to every session."
     },
     {
       "id": "settings",
@@ -56,7 +56,7 @@
         "week 7, weeks 8-11 overrides"
       ],
       "file": "data/rules.json",
-      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates."
+      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates. v1.4 adds set timing (tempo default, margin, set-up seconds by equipment, get-ready seconds), the effort scale behind the four effort buttons (stored as RPE 6, 8, 9, 10), and rough starting-weight estimates for free-weight accessories."
     },
     {
       "id": "builder",
@@ -67,18 +67,18 @@
         "a timeline of timed steps"
       ],
       "file": "js/builder.js",
-      "description": "Expands a session from plan.json into a flat, ordered list of steps: warm-up holds, ramp-up sets, work sets, rests, superset alternation (B1 set, short rest, B2 set, longer rest), finisher rounds, dead hangs, transitions, stretches. Fills each set's target weight and reps from the saved targets, applies the week's phase (baseline, light, heavy, retest) and estimates each step's planned seconds for the clock."
+      "description": "Expands a session from plan.json into a flat, ordered list of steps: warm-up holds, ramp-up sets, work sets, rests, superset alternation (B1 set, short rest, B2 set, longer rest), finisher rounds, dead hangs, transitions, stretches. Fills each set's target weight and reps from the saved targets, applies the week's phase (baseline, light, heavy, retest) and estimates each step's planned seconds for the clock. Since v1.4 a set's seconds come from its reps and the exercise's tempo (plan.json) plus a margin, and every set has a countdown in front of it: the rest before it, a set-up step sized by equipment before an exercise's first set, or a short switch step inside finisher rounds."
     },
     {
       "id": "player",
       "column": "app",
       "name": "Player",
       "lines": [
-        "timestamp timers, cues, wake lock",
-        "clock, trim, last time, live PRs"
+        "timers, voice, cues, wake lock",
+        "auto-advance, pace, trim, PRs"
       ],
       "file": "js/player.js",
-      "description": "Walks the timeline one step at a time. Timers are computed from timestamps so they stay right when the screen locks. Vibrates and beeps when a rest ends, keeps the screen awake, shows planned vs projected finish and how far ahead or behind the session is, and offers Trim to fit (preview, then confirm). Each work set shows last session's result for that exercise. Logging a set runs a live PR check against the stored bests (estimated 1RM, heaviest weight) and gives a haptic tap. When the app is in the background during a rest, it asks the service worker to fire a notification at the end time. Pause, back and end early live behind the menu button; the in-progress session is saved on every step so it can be resumed."
+      "description": "Walks the timeline one step at a time. Timers are computed from timestamps so they stay right when the screen locks. Vibrates and beeps when a rest ends, keeps the screen awake, shows planned vs projected finish and how far ahead or behind the session is, and offers Trim to fit (preview, then confirm). Each work set shows last session's result for that exercise. Logging a set runs a live PR check against the stored bests (estimated 1RM, heaviest weight) and gives a haptic tap. When the app is in the background during a rest, it asks the service worker to fire a notification at the end time. Pause, back and end early live behind the menu button; the in-progress session is saved on every step so it can be resumed. Since v1.4 a work set ends on its own timer and is logged at its target; the rest screen that follows shows the set just done with four effort buttons and a tap-to-fix weight and reps. The last 5 seconds before every set are a get-ready count (amber screen, ticks, the coming set spoken aloud). A pace bar shows which rep the tempo puts you on. The screen is green for work, blue for rest. Back and Pause are on the screen. Voice and auto-advance can be switched off in Settings."
     },
     {
       "id": "logger",

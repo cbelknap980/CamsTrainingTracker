@@ -1,7 +1,7 @@
 // builder.js - Session Builder: expands a plan session into a flat timeline of timed steps.
 // Pure functions, no DOM, no storage. Tested in tests/builder.test.mjs.
 
-import { effortText, effortToRpe, roundTo } from './data.js';
+import { effortText, effortToRpe, roundTo, equipmentLabel } from './data.js';
 
 /**
  * buildTimeline({ plan, rules, settings, sessionId, week, targets })
@@ -13,7 +13,9 @@ import { effortText, effortToRpe, roundTo } from './data.js';
  *   target: { weight, reps } | null, repRange, effort, effortText, rpeDefault,
  *   seconds, countdown, perSide, holdSeconds,
  *   ramp, baseline, retest, fillFromBaseline, iftime,
- *   trimKind: 'rest' | 'finisherRound' | 'iftime' | null, protectedBlock }
+ *   trimKind: 'rest' | 'finisherRound' | 'iftime' | null, protectedBlock,
+ *   v1.4: auto (the set ends on its own timer), startSeconds, repSeconds, tips, equipment,
+ *         setupSeconds / setupFor (on the rest or transition before an exercise's first set), lead (inserted set-up step) }
  */
 export function buildTimeline({ plan, rules, settings, sessionId, week, targets, history }) {
   const session = plan.sessions.find(s => s.id === sessionId);
@@ -49,6 +51,8 @@ export function buildTimeline({ plan, rules, settings, sessionId, week, targets,
     }
   });
 
+  const withLeads = addLeadIns(ctx, steps);
+  steps.length = 0; steps.push(...withLeads);
   steps.forEach((s, i) => { s.idx = i; });
   const plannedSeconds = steps.reduce((a, s) => a + (s.seconds || 0), 0);
   return { sessionId: session.id, sessionName: session.name, logName: session.logName, week, phase, planVersion: plan.planVersion,
@@ -57,6 +61,13 @@ export function buildTimeline({ plan, rules, settings, sessionId, week, targets,
 
 export function phaseFor(plan, week) {
   return plan.phases.find(p => p.weeks.includes(week)) || { id: week > 12 ? 'after' : 'before', name: week > 12 ? 'After the block' : 'Before the block' };
+}
+
+function blankStep() {
+  return { target: null, repRange: null, effort: null, effortText: '', rpeDefault: null, cue: '', exerciseId: null, last: null,
+    setIndex: null, setCount: null, round: null, roundCount: null, perSide: false, holdSeconds: null,
+    ramp: false, baseline: false, retest: false, fillFromBaseline: false, iftime: false, trimKind: null, protectedBlock: false,
+    countdown: false, seconds: 0 };
 }
 
 function push(ctx, step) {
@@ -95,10 +106,62 @@ function targetFor(ctx, exerciseId, repRange) {
   return { weight, reps };
 }
 
-function secondsForSet(ctx, ex, finisher) {
+// ---- v1.4 set timing: start-of-set seconds + reps x tempo, plus a margin ----
+export function repSecondsFor(rules, ex) {
+  const tempo = (ex && ex.tempo) || rules.timing.defaultTempo;
+  return tempo.reduce((a, b) => a + b, 0);
+}
+
+export function setTiming(rules, ex, reps, perSide) {
+  const t = rules.timing;
+  const repSeconds = repSecondsFor(rules, ex);
+  const startSeconds = (t.setStartSeconds && t.setStartSeconds[ex && ex.equipment]) || 3;
+  const sides = perSide ? 2 : 1;
+  const work = (reps || 8) * repSeconds * sides + (perSide ? t.sideSwitchSeconds : 0);
+  const seconds = Math.round(startSeconds + work * (1 + t.setMarginFraction));
+  return { seconds, repSeconds, startSeconds };
+}
+
+function timedSet(ctx, ex, reps, perSide) {
+  const tm = setTiming(ctx.rules, ex, reps, perSide);
+  return { seconds: tm.seconds, repSeconds: tm.repSeconds, startSeconds: tm.startSeconds, auto: true,
+    tips: (ex && ex.tips) || [], equipment: equipmentLabel(ex && ex.equipment) };
+}
+
+/**
+ * Every set gets a countdown step in front of it, so there is always a get-ready count and room to set up.
+ * The first set of each exercise gets set-up time by equipment: added to the rest before it, or used as the
+ * length of the transition before it. A set that follows another set directly (finisher rounds) gets a short
+ * switch step.
+ */
+function addLeadIns(ctx, steps) {
   const t = ctx.rules.timing;
-  if (finisher) return t.finisherItemSeconds;
-  return ex && ex.mainLift ? t.mainSetSeconds : t.accessorySetSeconds;
+  const out = [];
+  const seen = new Set();
+  for (const s of steps) {
+    if (s.kind === 'set' && s.exerciseId) {
+      const ex = ctx.plan.exercises[s.exerciseId];
+      const first = !seen.has(s.exerciseId);
+      seen.add(s.exerciseId);
+      const setup = first ? ((t.firstSetSetupSeconds && t.firstSetSetupSeconds[ex && ex.equipment]) || t.switchSeconds) : 0;
+      const prev = out[out.length - 1];
+      const label = `${s.name}${ex && equipmentLabel(ex.equipment) ? ' (' + equipmentLabel(ex.equipment).toLowerCase() + ')' : ''}`;
+      if (prev && (prev.kind === 'rest' || prev.kind === 'transition') && !prev.lead) {
+        if (first) {
+          if (prev.kind === 'transition') prev.seconds = Math.max(prev.seconds, setup);
+          else { prev.seconds += setup; prev.setupSeconds = setup; }
+          prev.setupFor = label;
+        }
+      } else {
+        out.push({ ...blankStep(), kind: 'transition', blockId: s.blockId, blockName: s.blockName, blockType: s.blockType,
+          name: first ? `Set up: ${label}` : `Switch to ${s.name}`, seconds: first ? Math.max(setup, t.switchSeconds) : t.switchSeconds,
+          countdown: true, lead: true, setupFor: first ? label : null, round: s.round, roundCount: s.roundCount,
+          iftime: s.iftime, trimKind: s.iftime ? 'iftime' : null, protectedBlock: s.protectedBlock });
+      }
+    }
+    out.push(s);
+  }
+  return out;
 }
 
 // ---- warm-up ----
@@ -130,7 +193,8 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
     push(ctx, { kind: 'set', blockId: block.id, blockName: block.name, blockType: block.type, name: ex.name,
       exerciseId: item.exercise, setIndex: 0, setCount: null, baseline: true,
       target: { weight: null, reps }, repRange: [reps, reps], effort: { kind: 'rir', min: r.baseline.topSetRir, max: r.baseline.topSetRir },
-      effortText: label, rpeDefault: 10 - r.baseline.topSetRir, seconds: item.rampUp ? 240 : 150, cue: ex.cue || '' });
+      effortText: label, rpeDefault: 10 - r.baseline.topSetRir, seconds: item.rampUp ? 240 : 150, cue: ex.cue || '',
+      tips: ex.tips || [], equipment: equipmentLabel(ex.equipment) });
     push(ctx, { kind: 'rest', blockId: block.id, blockName: block.name, blockType: block.type, name: 'Rest',
       seconds: item.restSeconds, countdown: true, trimKind: 'rest' });
     return { derived: true };
@@ -139,7 +203,8 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
     push(ctx, { kind: 'set', blockId: block.id, blockName: block.name, blockType: block.type, name: ex.name,
       exerciseId: item.exercise, setIndex: 0, setCount: null, retest: true,
       target: { weight: target.weight, reps: 5 }, repRange: [5, 5], effort: { kind: 'rpe', min: 8, max: 9 },
-      effortText: 'Retest: work up to a 5-rep set at RPE 8-9', rpeDefault: 8.5, seconds: item.rampUp ? 240 : 150, cue: ex.cue || '' });
+      effortText: 'Retest: work up to a 5-rep set with 1-2 reps left', rpeDefault: 8.5, seconds: item.rampUp ? 240 : 150, cue: ex.cue || '',
+      tips: ex.tips || [], equipment: equipmentLabel(ex.equipment) });
     push(ctx, { kind: 'rest', blockId: block.id, blockName: block.name, blockType: block.type, name: 'Rest',
       seconds: item.restSeconds, countdown: true, trimKind: 'rest' });
     return { derived: false };
@@ -152,7 +217,7 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
         exerciseId: item.exercise, setIndex: null, setCount: null, ramp: true,
         target: { weight: w, reps: rs.reps }, repRange: [rs.reps, rs.reps], effort: null,
         effortText: rs.label ? `Ramp-up: ${rs.label.toLowerCase()}` : `Ramp-up ${i} of ${r.rampUp.steps.length - 1}`, rpeDefault: null,
-        seconds: 30, cue: '' });
+        cue: '', ...timedSet(ctx, ex, rs.reps, false), tips: [] });
       push(ctx, { kind: 'rest', blockId: block.id, blockName: block.name, blockType: block.type, name: 'Rest',
         seconds: r.rampUp.restSeconds, countdown: true, trimKind: 'rest' });
     });
@@ -168,7 +233,7 @@ function workSet(ctx, block, item, ex, k, sets, target, repRange, derived, extra
     exerciseId: item.exercise, setIndex: k + 1, setCount: sets,
     target: { weight: derived ? null : target.weight, reps: target.reps }, repRange,
     effort: item.effort, effortText: effortText(item.effort), rpeDefault: effortToRpe(item.effort),
-    seconds: secondsForSet(ctx, ex, false), perSide: !!ex.perSide, fillFromBaseline: derived,
+    ...timedSet(ctx, ex, target.reps, !!ex.perSide), perSide: !!ex.perSide, fillFromBaseline: derived,
     cue: ex.cue || '', protectedBlock: !!block.protected, ...(extra || {})
   });
 }
@@ -244,7 +309,9 @@ function addFinisher(ctx, block) {
         target, repRange: item.seconds ? [item.seconds, item.seconds] : repRange,
         effort: item.effort, effortText: effortText(item.effort), rpeDefault: effortToRpe(item.effort),
         holdSeconds: item.seconds || null, perSide: !!(item.perSide || (ex && ex.perSide)),
-        seconds: item.seconds ? item.seconds * ((item.perSide || (ex && ex.perSide)) ? 2 : 1) + 10 : secondsForSet(ctx, ex, true),
+        ...(item.seconds
+          ? { seconds: item.seconds * ((item.perSide || (ex && ex.perSide)) ? 2 : 1) + 10, tips: (ex && ex.tips) || [], equipment: equipmentLabel(ex && ex.equipment) }
+          : timedSet(ctx, ex, target.reps, !!(item.perSide || (ex && ex.perSide)))),
         countdown: !!item.seconds, cue: ex.cue || '', protectedBlock: !!block.protected
       });
     });

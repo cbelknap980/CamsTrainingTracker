@@ -1,6 +1,6 @@
 // data.js - loads the data files and provides plan helpers (week number, phase, today's session).
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.4.0';
 
 let cache = null;
 
@@ -85,6 +85,50 @@ export function effortToRpe(effort) {
   if (effort.kind === 'rpe') return effort.max;
   if (effort.kind === 'rir') return 10 - (effort.min + effort.max) / 2;
   return 8;
+}
+
+// ---- v1.4 effort in plain words ----
+// Reps left in the tank for an effort target: RPE converts as 10 - RPE.
+export function effortRir(effort) {
+  if (!effort) return null;
+  if (effort.kind === 'rir') return [effort.min, effort.max];
+  if (effort.kind === 'rpe') return [10 - effort.max, 10 - effort.min];
+  return null;
+}
+
+export function effortPlain(effort) {
+  const r = effortRir(effort);
+  if (!r) return '';
+  const n = r[0] === r[1] ? `${r[0]}` : `${r[0]}-${r[1]}`;
+  const lead = effort.label && /fast/i.test(effort.label) ? 'Fast. ' : '';
+  if (r[1] <= 1) return `${lead}Push close: ${n} left`;
+  return `${lead}Leave ${n} in the tank`;
+}
+
+/** The effort level (from rules.effortScale) a stored RPE number falls in. */
+export function effortLevel(rules, rpe) {
+  if (rpe == null || !rules || !rules.effortScale) return null;
+  const levels = rules.effortScale.levels;
+  return levels.find(l => rpe <= l.upTo) || levels[levels.length - 1];
+}
+
+export function effortLabel(rules, rpe) {
+  const l = effortLevel(rules, rpe);
+  return l ? l.label : '';
+}
+
+const EQUIPMENT = { barbell: 'Barbell', dumbbell: 'Dumbbells', machine: 'Machine', cable: 'Cable', weighted_bw: 'Weighted', bodyweight: 'Bodyweight' };
+export function equipmentLabel(eq) { return EQUIPMENT[eq] || ''; }
+
+/** "2 minutes 45 seconds" for the voice prompts. */
+export function spokenDuration(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  const parts = [];
+  if (m) parts.push(`${m} minute${m === 1 ? '' : 's'}`);
+  if (r || !m) parts.push(`${r} second${r === 1 ? '' : 's'}`);
+  return parts.join(' ');
 }
 
 export function repsText(reps) {

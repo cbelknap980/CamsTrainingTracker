@@ -1,12 +1,14 @@
 // player.js - Player: walks the timeline, timestamp timers, cues, wake lock, session clock, trim to fit,
 // rest-end notifications when the app is in the background, live PR check, haptics.
+// v1.4: sets end on their own timer (logged at target, fixed on the rest screen), a get-ready countdown before
+// every set, voice prompts, a pace bar, effort buttons, work/rest colors.
 // State lives in `this.s` and is saved to IndexedDB on every change so a session can be resumed.
 
 import { trimToFit, remainingSeconds } from './builder.js';
 import { setInProgress, clearInProgress } from './store.js';
-import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo } from './data.js';
+import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration } from './data.js';
 import { incrementFor, checkPR } from './progression.js';
-import { el, showModal, closeModal, toast } from './ui.js';
+import { el, showModal, closeModal, toast, effortChips } from './ui.js';
 import { icon } from './icons.js';
 
 const RING_R = 92;
@@ -22,6 +24,7 @@ export class Player {
       trims: [], warned: false, fired: false, status: 'running', startedISO: null, prs: []
     };
     this.audio = null; this.wakeLock = null; this.timer = null; this.editOpen = false; this.swReg = null;
+    this.pendingRpe = null; this.said = [];
     this._onVis = () => this.onVisibility();
   }
 
@@ -31,6 +34,7 @@ export class Player {
     this.s.sessionStart = now; this.s.startedISO = new Date(now).toISOString();
     this.s.stepStart = now;
     this.boot();
+    this.announce();
   }
 
   resume(saved) {
@@ -60,6 +64,7 @@ export class Player {
     document.body.classList.remove('in-session');
     document.body.removeAttribute('data-kind');
     this.cancelScheduledNotification();
+    try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
     if (this.wakeLock) { try { this.wakeLock.release(); } catch (e) { /* ignore */ } this.wakeLock = null; }
   }
 
@@ -113,7 +118,43 @@ export class Player {
     if (kind === 'warn') { this.tone([[880, 0, 0.08]]); this.buzz(60); }
     else if (kind === 'pr') { this.tone([[660, 0, 0.12], [880, 0.14, 0.12], [1320, 0.28, 0.3]]); this.buzz([40, 60, 40, 60, 120]); }
     else if (kind === 'tap') { this.buzz(15); }
+    else if (kind === 'tick') { this.tone([[880, 0, 0.09]]); this.buzz(40); }
+    else if (kind === 'go') { this.tone([[1320, 0, 0.35]]); this.buzz(250); }
+    else if (kind === 'setEnd') { this.tone([[880, 0, 0.14], [587, 0.17, 0.3]]); this.buzz([200, 100, 200]); }
     else { this.tone([[880, 0, 0.15], [1320, 0.18, 0.25]]); this.buzz([200, 100, 200]); }
+  }
+
+  // ---- voice (v1.4) ----
+  say(text) {
+    if (!text) return;
+    this.said.push(text); if (this.said.length > 40) this.said.shift();
+    if (!this.settings.cues || this.settings.cues.voice === false || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-US'; u.rate = 1.05;
+      window.speechSynthesis.speak(u);
+    } catch (e) { /* ignore */ }
+  }
+  setSpeech(x) {
+    if (x.baseline || x.retest) return `${x.name}. ${x.effortText}.`;
+    const parts = [x.name];
+    if (x.ramp) parts.push('ramp-up');
+    else if (x.round) parts.push(`round ${x.round} of ${x.roundCount}`);
+    else if (x.setIndex && x.setCount) parts.push(`set ${x.setIndex} of ${x.setCount}`);
+    if (x.target && x.target.weight != null) parts.push(`${fmtWeight(x.target.weight)} pounds`);
+    if (x.holdSeconds) parts.push(`${x.holdSeconds} seconds${x.perSide ? ' each side' : ''}`);
+    else if (x.target && x.target.reps != null) parts.push(`${x.target.reps} reps${x.perSide ? ' each side' : ''}`);
+    return parts.join(', ') + '.';
+  }
+  announce() {
+    const s = this.step; if (!s) return;
+    const prev = this.steps[this.s.idx - 1];
+    if (s.kind === 'rest') this.say(`Rest. ${spokenDuration(s.seconds)}.`);
+    else if (s.kind === 'transition') this.say(`${s.name.replace(/\s*\+\s*/g, ' and ').replace(/[()]/g, ',')}. ${spokenDuration(s.seconds)}.`);
+    else if (s.kind === 'set') this.say(prev && this.leadsIntoSet(this.s.idx - 1) && !s.baseline && !s.retest ? 'Go.' : this.setSpeech(s));
+    else if (s.kind === 'timed' || s.kind === 'stretch') this.say(`${s.name}. ${spokenDuration(s.seconds)}.`);
+    else if (s.kind === 'decision') this.say(s.name);
   }
 
   // ---- background notifications (F1) ----
@@ -152,6 +193,19 @@ export class Player {
     return Math.max(0, this.stepSeconds(step) - this.elapsedInStep());
   }
   isCountdown(step = this.step) { return !!(step && (step.countdown || step.holdSeconds)); }
+  autoOn() { return this.settings.autoAdvance !== false; }
+  /** A set that ends on its own timer: a normal work or ramp-up set, with auto-advance on. */
+  isAutoSet(step = this.step) { return !!(step && step.kind === 'set' && step.auto && !step.holdSeconds && this.autoOn()); }
+  /** A rest or set-up countdown whose next step is a set: it ends with the get-ready count. */
+  leadsIntoSet(idx = this.s.idx) {
+    const a = this.steps[idx]; const b = this.steps[idx + 1];
+    return !!(a && b && (a.kind === 'rest' || a.kind === 'transition') && b.kind === 'set');
+  }
+  isReady() {
+    if (!this.leadsIntoSet() || this.s.pausedAt != null) return false;
+    const rem = this.remainingInStep();
+    return rem > 0 && rem <= this.rules.timing.getReadySeconds && this.stepSeconds(this.step) > this.rules.timing.getReadySeconds;
+  }
 
   projection() {
     const tl = this.s.timeline;
@@ -172,15 +226,31 @@ export class Player {
     if (!this.step || this.s.status !== 'running') return;
     if (this.s.pausedAt != null && !force) { this.updateTimerDom(); return; }
     const step = this.step;
+    if (this.isAutoSet(step)) {
+      // once the edit panel has been opened the set waits for a Done tap, so typed numbers are not lost
+      if (step.seconds - this.elapsedInStep() <= 0 && !this.s.fired && !this.s.manual && !modalOpen()) {
+        this.s.fired = true;
+        this.cue('setEnd');
+        this.logSet({ auto: true });
+        return;
+      }
+    }
     if (this.isCountdown(step)) {
       const rem = this.remainingInStep(step);
       const warnAt = this.rules.timing.restWarningSeconds;
-      if (!this.s.warned && rem <= warnAt && rem > 0 && this.settings.cues && this.settings.cues.warningTick && this.stepSeconds(step) > warnAt + 2) {
+      const lead = this.leadsIntoSet();
+      const ticks = this.settings.cues && this.settings.cues.warningTick;
+      if (lead && this.isReady()) {
+        // get-ready count: say what is coming, then a tick on each of the last 3 seconds
+        if (!this.s.readySaid) { this.s.readySaid = true; this.say(this.setSpeech(this.steps[this.s.idx + 1])); this.renderStep(); }
+        const sec = Math.ceil(rem);
+        if (ticks && sec <= warnAt && sec !== this.s.lastTickSec) { this.s.lastTickSec = sec; this.cue('tick'); }
+      } else if (!lead && !this.s.warned && rem <= warnAt && rem > 0 && ticks && this.stepSeconds(step) > warnAt + 2) {
         this.s.warned = true; this.cue('warn');
       }
       if (rem <= 0 && !this.s.fired) {
         this.s.fired = true;
-        this.cue('end');
+        this.cue(lead ? 'go' : 'end');
         if (document.hidden) this.showNotificationNow(); else this.cancelScheduledNotification();
         if (step.holdSeconds && step.perSide && this.s.side === 0) {
           this.s.side = 1; this.s.stepStart = Date.now(); this.s.warned = false; this.s.fired = false;
@@ -199,9 +269,12 @@ export class Player {
   // ---- navigation ----
   goTo(idx) {
     this.s.idx = idx; this.s.stepStart = Date.now(); this.s.side = 0; this.s.warned = false; this.s.fired = false; this.editOpen = false;
+    this.s.readySaid = false; this.s.lastTickSec = null; this.s.manual = false; this.pendingRpe = null;
     this.cancelScheduledNotification();
     if (idx >= this.steps.length) { this.finish('complete'); return; }
     this.renderStep();
+    try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+    this.announce();
     this.persist();
     if (document.hidden) this.scheduleNotification();
   }
@@ -234,7 +307,9 @@ export class Player {
   }
   addSeconds(n) {
     const s = this.step; if (!s) return;
-    s.seconds = (s.seconds || 0) + n; this.s.fired = false; this.s.warned = false; this.updateTimerDom(); this.persist();
+    s.seconds = (s.seconds || 0) + n; this.s.fired = false; this.s.warned = false;
+    if (this.s.readySaid && !this.isReady()) { this.s.readySaid = false; this.s.lastTickSec = null; this.renderStep(); }
+    this.updateTimerDom(); this.persist();
     if (document.hidden) this.scheduleNotification();
   }
   decide(doIt) {
@@ -254,17 +329,43 @@ export class Player {
   readInputs() {
     const w = this.container.querySelector('#in-weight');
     const r = this.container.querySelector('#in-reps');
-    const p = this.container.querySelector('#in-rpe');
     const num = x => (x && x.value !== '' ? Number(x.value) : null);
-    return { weight: num(w), reps: num(r), rpe: num(p) };
+    return { weight: num(w), reps: num(r), rpe: this.pendingRpe != null ? this.pendingRpe : this.defaultRpe(this.step) };
+  }
+  /** The effort button that is pre-selected for a set: the level its target falls in. */
+  defaultRpe(s) {
+    if (!s || s.rpeDefault == null) return null;
+    const l = effortLevel(this.rules, s.rpeDefault);
+    return l ? l.rpe : s.rpeDefault;
+  }
+  /** After a set's weight is known or corrected: carry it to the sets of that exercise still to come. */
+  carryWeight(idx, s, weight, oldWeight) {
+    if (weight == null) return;
+    const ex = this.plan.exercises[s.exerciseId];
+    if (s.baseline) {
+      const inc = incrementFor(this.rules, s.exerciseId, ex);
+      const tw = roundTo(weight * this.rules.baseline.trainingFraction, inc);
+      this.steps.forEach((o, i) => { if (i > idx && o.exerciseId === s.exerciseId && o.fillFromBaseline && !o.done) { o.target = { ...(o.target || {}), weight: tw }; } });
+      toast(`Training weight for today: ${fmtWeight(tw)} lb`);
+    } else if (!s.ramp && weight !== oldWeight) {
+      this.steps.forEach((o, i) => { if (i > idx && o.exerciseId === s.exerciseId && o.kind === 'set' && !o.ramp && !o.done && o.target && (o.target.weight === oldWeight || o.target.weight == null)) o.target = { ...o.target, weight }; });
+    }
+  }
+  /** Correct a set that is already logged (from the rest screen). */
+  fixRecord(idx, patch) {
+    const s = this.steps[idx]; if (!s || !s.record) return;
+    const old = s.record.weight;
+    Object.assign(s.record, patch);
+    if ('weight' in patch && patch.weight !== old) this.carryWeight(idx, s, patch.weight, old != null ? old : (s.target ? s.target.weight : null));
+    this.persist();
   }
   logSet({ auto } = {}) {
     const s = this.step;
-    const v = auto ? { weight: s.target ? s.target.weight : null, reps: s.holdSeconds || (s.target ? s.target.reps : null), rpe: s.rpeDefault } : this.readInputs();
+    const v = auto ? { weight: s.target ? s.target.weight : null, reps: s.holdSeconds || (s.target ? s.target.reps : null), rpe: this.defaultRpe(s) } : this.readInputs();
     if (s.holdSeconds && v.reps == null) v.reps = s.holdSeconds;
     const ex = this.plan.exercises[s.exerciseId];
     const needsWeight = ex && ex.equipment !== 'bodyweight' && !s.holdSeconds;
-    if (needsWeight && v.weight == null && !auto) { toast('Enter the weight you used'); this.openEdit(); return; }
+    if (needsWeight && v.weight == null && !auto && !this.isAutoSet(s)) { toast('Enter the weight you used'); this.openEdit(); return; }
     if (v.reps == null && !auto && !s.holdSeconds) { toast('Enter reps'); this.openEdit(); return; }
     if (!auto) this.cue('tap');
     s.done = true; s.skipped = false; s.actualSeconds = Math.round(this.elapsedInStep());
@@ -287,15 +388,7 @@ export class Player {
       }
     }
 
-    if (s.baseline && v.weight != null) {
-      const inc = incrementFor(this.rules, s.exerciseId, ex);
-      const tw = roundTo(v.weight * this.rules.baseline.trainingFraction, inc);
-      this.steps.forEach((o, i) => { if (i > this.s.idx && o.exerciseId === s.exerciseId && o.fillFromBaseline && !o.done) { o.target = { ...(o.target || {}), weight: tw }; } });
-      toast(`Training weight for today: ${fmtWeight(tw)} lb`);
-    } else if (!s.ramp && v.weight != null && s.target && v.weight !== s.target.weight) {
-      const old = s.target.weight;
-      this.steps.forEach((o, i) => { if (i > this.s.idx && o.exerciseId === s.exerciseId && o.kind === 'set' && !o.ramp && !o.done && o.target && (o.target.weight === old || o.target.weight == null)) o.target = { ...o.target, weight: v.weight }; });
-    }
+    if (s.baseline || (s.target && v.weight !== s.target.weight)) this.carryWeight(this.s.idx, s, v.weight, s.target ? s.target.weight : null);
     this.goTo(this.s.idx + 1);
   }
 
@@ -434,12 +527,69 @@ export class Player {
     ]);
     showModal(body);
   }
-  readout(weightText, repsLabel, repsText, effortText, accent) {
+  readout(weightText, repsLabel, repsText, effortText, accent, rpe) {
+    const lvl = effortLevel(this.rules, rpe);
     return el('div', { class: 'readout step-target' + (accent ? '' : ' quiet') }, [
       el('div', { class: 'tile tile-weight' }, [el('div', { class: 'tile-label' }, 'Weight'), el('div', { class: 'tile-value' }, weightText)]),
       el('div', { class: 'tile' }, [el('div', { class: 'tile-label' }, repsLabel), el('div', { class: 'tile-value' }, repsText)]),
-      el('div', { class: 'tile' }, [el('div', { class: 'tile-label' }, 'Effort'), el('div', { class: 'tile-value small' }, effortText || '–')])
+      el('div', { class: 'tile tile-effort' }, [el('div', { class: 'tile-label' }, 'Effort'), el('div', { class: 'tile-value small' }, [lvl && effortText ? el('span', { class: 'dot effort-' + lvl.key }) : null, (effortText || '–').replace(' in the tank', '\nin the tank').replace('close: ', 'close:\n')])])
     ]);
+  }
+  /** Effort target in plain words for a set ("Leave 2-3 in the tank"). */
+  effortWords(x) {
+    if (x.ramp) return 'Easy';
+    if (x.baseline || x.retest) return x.effort ? effortPlain(x.effort) : '';
+    return x.effort ? effortPlain(x.effort) : (x.effortText || '');
+  }
+  whereText(x) {
+    const parts = [];
+    if (x.equipment) parts.push(x.equipment);
+    if (x.ramp) parts.push('Ramp-up');
+    else if (x.baseline) parts.push('Baseline set');
+    else if (x.retest) parts.push('Retest set');
+    else if (x.round) parts.push(`Round ${x.round} of ${x.roundCount}`);
+    else if (x.setIndex && x.setCount) parts.push(`Set ${x.setIndex} of ${x.setCount}`);
+    return parts.join(' · ');
+  }
+  /** Rest screen: the set that just ended, with its numbers and effort one tap away. */
+  justDone(idx) {
+    const p = this.steps[idx];
+    if (!p || p.kind !== 'set' || !p.record || !p.record.done) return null;
+    const ex = this.plan.exercises[p.exerciseId];
+    const rec = p.record;
+    const isBw = ex && ex.equipment === 'bodyweight';
+    const needs = !isBw && !p.holdSeconds && rec.weight == null;
+    const nums = `${isBw || p.holdSeconds ? '' : (rec.weight != null ? fmtWeight(rec.weight) + ' lb × ' : '? lb × ')}${rec.reps != null ? rec.reps : '?'}${p.holdSeconds ? ' s' : ''}`;
+    return el('div', { class: 'just-done', id: 'just-done' }, [
+      el('div', { class: 'row' }, [
+        el('div', { class: 'jd-left' }, [el('div', { class: 'label' }, 'Just done'), el('div', { class: 'jd-name' }, p.name)]),
+        el('button', { class: 'jd-nums' + (needs ? ' needs' : ''), id: 'jd-fix', onclick: () => this.openFix(idx) }, [nums, icon('edit')])
+      ]),
+      p.holdSeconds ? null : effortChips(this.rules, rec.rpe, lvl => { this.fixRecord(idx, { rpe: lvl.rpe }); this.cue('tap'); this.renderStep(); })
+    ]);
+  }
+  openFix(idx) {
+    const p = this.steps[idx]; if (!p || !p.record) return;
+    const ex = this.plan.exercises[p.exerciseId];
+    const isBw = ex && ex.equipment === 'bodyweight';
+    const wStep = ex && ex.mainLift ? incrementFor(this.rules, p.exerciseId, ex) : (ex ? (this.rules.smallestJump[ex.equipment] || 5) : 5);
+    const wVal = p.record.weight != null ? p.record.weight : (p.target && p.target.weight != null ? p.target.weight : '');
+    const num = id => { const x = document.getElementById(id); return x && x.value !== '' ? Number(x.value) : null; };
+    showModal(el('div', {}, [
+      el('h2', {}, `${p.name}${p.setIndex ? ', ' + (p.round ? 'round ' : 'set ') + p.setIndex : ''}`),
+      el('div', { class: 'grid2' }, [
+        isBw || p.holdSeconds ? el('div') : field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight (lb)', 'fix-weight', wVal, wStep || 2.5),
+        field(p.holdSeconds ? 'Seconds' : 'Reps', 'fix-reps', p.record.reps != null ? p.record.reps : '', 1)
+      ]),
+      el('div', { class: 'btn-row' }, [
+        el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
+        el('button', { class: 'btn primary', onclick: () => {
+          const patch = { reps: num('fix-reps') };
+          if (!isBw && !p.holdSeconds) patch.weight = num('fix-weight');
+          this.fixRecord(idx, patch); closeModal(); this.renderStep();
+        } }, 'Save')
+      ])
+    ]));
   }
 
   // ---- rendering ----
@@ -457,7 +607,8 @@ export class Player {
 
   kindGroup(s) {
     if (s.kind === 'rest') return 'rest';
-    if (s.kind === 'stretch' || s.blockType === 'warmup' || s.kind === 'transition') return 'calm';
+    if (s.kind === 'transition') return this.leadsIntoSet() ? 'rest' : 'calm';
+    if (s.kind === 'stretch' || s.blockType === 'warmup' || s.kind === 'decision') return 'calm';
     return 'work';
   }
 
@@ -470,8 +621,12 @@ export class Player {
     const group = this.kindGroup(s);
     document.body.setAttribute('data-kind', group);
 
-    const where = `${s.blockName}${s.setIndex && s.setCount && !s.round ? ` · set ${s.setIndex} of ${s.setCount}` : ''}${s.round ? ` · round ${s.round} of ${s.roundCount}` : ''}`;
+    // a set-up step belongs to the block it leads into, so the header names that one
+    const hb = this.leadsIntoSet() ? this.steps[this.s.idx + 1] : s;
+    const letter = /^[A-Z]$/.test(hb.blockName);
+    const where = `${letter ? 'Block ' + hb.blockName + ' · ' : ''}${this.blockLabel(hb.blockId)}`;
     const head = el('div', { class: 'player-head' }, [
+      this.s.idx > 0 ? el('button', { class: 'icon-btn', id: 'back-btn', 'aria-label': 'Back one step', onclick: () => this.back() }, icon('back')) : el('div', { class: 'icon-btn ghost-slot' }),
       el('div', { class: 'head-left' }, [
         el('div', { class: 'label' }, tl.sessionName),
         el('div', { class: 'block' }, where)
@@ -484,81 +639,108 @@ export class Player {
 
     const main = el('div', { class: 'step-main' });
     const next = this.steps[this.s.idx + 1];
-    const kindLabel = { set: s.ramp ? 'Ramp-up' : (s.baseline ? 'Baseline' : (s.retest ? 'Retest' : (s.holdSeconds ? 'Hold' : 'Work set'))), rest: 'Rest', timed: 'Timed', transition: 'Transition', stretch: 'Stretch', decision: 'Your call' }[s.kind] || s.kind;
+    const kindLabel = { set: s.ramp ? 'Ramp-up' : (s.baseline ? 'Baseline' : (s.retest ? 'Retest' : (s.holdSeconds ? 'Hold' : 'Work'))), rest: 'Rest', timed: 'Timed', transition: 'Set up', stretch: 'Stretch', decision: 'Your call' }[s.kind] || s.kind;
+    const pill = (text, cls) => el('div', { class: 'phase-pill step-kind ' + cls, id: 'phase-pill' }, text);
+    const tipList = x => (x.tips && x.tips.length) || x.cue ? el('div', { class: 'tips' }, [
+      ...(x.tips || []).map(t => el('div', { class: 'tip' }, t)),
+      x.cue ? el('div', { class: 'tip note' }, x.cue) : null
+    ]) : null;
 
-    if (s.kind === 'rest') {
-      // L3: compact rest screen. The timer leads; the next set is the content.
-      main.appendChild(el('div', { class: 'label step-kind' }, 'Rest'));
+    if (this.leadsIntoSet()) {
+      // Rest or set-up before a set: fix the last set, watch the clock, see what is next.
+      const ready = this.isReady();
+      const base = s.kind === 'rest' ? (s.setupFor ? 'Rest + set up' : 'Rest') : (s.setupFor ? 'Set up' : 'Switch');
+      main.appendChild(pill(ready ? 'Get ready' : base, ready ? 'ready' : 'rest'));
+      const jd = this.justDone(this.s.idx - 1);
+      if (jd) main.appendChild(jd);
+      main.appendChild(this.timerBlock(true, !!jd));
+      main.appendChild(el('div', { class: 'label', style: 'margin-top:10px' }, 'Up next'));
+      main.appendChild(el('div', { class: 'step-name' }, next.name));
+      if (this.whereText(next)) main.appendChild(el('div', { class: 'step-where small' }, this.whereText(next)));
+      const nex = this.plan.exercises[next.exerciseId];
+      const w = next.target && next.target.weight != null ? `${fmtWeight(next.target.weight)} lb` : (nex && nex.equipment === 'bodyweight' ? 'BW' : (next.baseline ? 'Work up' : '–'));
+      const rl = next.holdSeconds ? 'Seconds' : (next.perSide ? 'Reps / side' : 'Reps');
+      const r = next.holdSeconds ? `${next.holdSeconds}` : (next.target && next.target.reps != null ? `${next.target.reps}` : (next.repRange ? repsText(next.repRange) : 'max'));
+      main.appendChild(this.readout(w, rl, r, this.effortWords(next), false, next.rpeDefault));
+      const prevSet = this.lastSetOf(next.exerciseId);
+      const prevW = prevSet ? (prevSet.record && prevSet.record.weight != null ? prevSet.record.weight : (prevSet.target ? prevSet.target.weight : null)) : null;
+      if (prevW != null && next.target && next.target.weight != null && prevW !== next.target.weight) {
+        main.appendChild(el('div', { class: 'step-cue' }, `Change the weight: ${fmtWeight(prevW)} → ${fmtWeight(next.target.weight)} lb`));
+      } else if (next.tips && next.tips.length) {
+        main.appendChild(el('div', { class: 'step-cue' }, next.tips[0]));
+      }
+    } else if (s.kind === 'rest') {
+      main.appendChild(pill('Rest', 'rest'));
       main.appendChild(this.timerBlock(true));
       if (next) {
-        const after = this.steps[this.s.idx + 2];
         main.appendChild(el('div', { class: 'label', style: 'margin-top:14px' }, 'Up next'));
         main.appendChild(el('div', { class: 'step-name' }, next.name));
-        if (next.kind === 'set') {
-          const nex = this.plan.exercises[next.exerciseId];
-          const w = next.target && next.target.weight != null ? `${fmtWeight(next.target.weight)} lb` : (nex && nex.equipment === 'bodyweight' ? 'BW' : '–');
-          const rl = next.holdSeconds ? 'Seconds' : 'Reps';
-          const r = next.holdSeconds ? `${next.holdSeconds}` : (next.target && next.target.reps != null ? `${next.target.reps}` : (next.repRange ? repsText(next.repRange) : 'max'));
-          main.appendChild(this.readout(w, rl, r, next.effortText, false));
-          const prevSet = this.lastSetOf(next.exerciseId);
-          const prevW = prevSet ? (prevSet.record && prevSet.record.weight != null ? prevSet.record.weight : (prevSet.target ? prevSet.target.weight : null)) : null;
-          if (prevW != null && next.target && next.target.weight != null && prevW !== next.target.weight) {
-            main.appendChild(el('div', { class: 'step-cue' }, `Change the bar: ${fmtWeight(prevW)} → ${fmtWeight(next.target.weight)} lb`));
-          }
-        } else if (next.seconds) {
-          main.appendChild(el('div', { class: 'step-effort' }, fmtClock(next.seconds)));
-        }
-        if (after && after.kind !== 'rest') main.appendChild(el('div', { class: 'step-cue' }, `Then: ${this.describe(after)}`));
+        if (next.seconds) main.appendChild(el('div', { class: 'step-effort' }, fmtClock(next.seconds)));
       }
     } else {
-      main.appendChild(el('div', { class: 'label step-kind' }, kindLabel + (s.holdSeconds && s.perSide ? (this.s.side === 0 ? ' · left' : ' · right') : '')));
-      main.appendChild(el('div', { class: 'step-name' }, [s.name, s.pr ? el('span', { class: 'pr-badge' }, 'PR') : null]));
+      const sideTxt = s.holdSeconds && s.perSide ? (this.s.side === 0 ? ' · left' : ' · right') : '';
+      main.appendChild(pill(kindLabel + sideTxt, this.kindGroup(s) === 'work' ? 'work' : 'calm'));
+      main.appendChild(el('div', { class: 'step-name' + (s.kind === 'set' ? ' big' : '') }, [s.name, s.pr ? el('span', { class: 'pr-badge' }, 'PR') : null]));
       if (s.kind === 'set') {
         const ex = this.plan.exercises[s.exerciseId];
+        if (this.whereText(s)) main.appendChild(el('div', { class: 'step-where' }, this.whereText(s)));
         const w = s.target && s.target.weight != null ? `${fmtWeight(s.target.weight)} lb` : (ex && ex.equipment === 'bodyweight' ? 'BW' : (ex && ex.equipment === 'weighted_bw' ? '+0 lb' : '?'));
         const rl = s.holdSeconds ? (s.perSide ? 'Sec / side' : 'Seconds') : (s.perSide ? 'Reps / side' : 'Reps');
         const r = s.holdSeconds ? `${s.holdSeconds}` : (s.target && s.target.reps != null ? `${s.target.reps}` : (s.repRange ? repsText(s.repRange) : 'max'));
-        const eff = s.baseline || s.retest ? (s.effort ? effortShort(s.effort) : '') : (s.effortText || '');
-        main.appendChild(this.readout(w, rl, r, eff, true));
+        main.appendChild(this.readout(w, rl, r, this.effortWords(s), true, s.rpeDefault));
+        if (s.auto && !s.holdSeconds) {
+          main.appendChild(el('div', { class: 'pace', id: 'pace' }, [
+            el('div', { class: 'pace-row' }, [el('span', { class: 'pace-text', id: 'pace-text' }, ''), el('span', { class: 'pace-clock', id: 'timer' }, '0:00')]),
+            el('div', { class: 'pace-track' }, [el('div', { class: 'pace-fill', id: 'pace-fill' })])
+          ]));
+        }
         if (s.repRange && !s.holdSeconds && s.repRange[0] !== s.repRange[1]) main.appendChild(el('div', { class: 'step-effort' }, `Range ${repsText(s.repRange)} reps`));
         if ((s.baseline || s.retest) && s.effortText) main.appendChild(el('div', { class: 'step-effort' }, s.effortText));
+        const tips = tipList(s);
+        if (tips) main.appendChild(tips);
         // L2: last time
         if (s.last && ((s.last.sets && s.last.sets.length) || s.last.topSet) && !s.ramp) {
           const l = s.last.sets && s.last.sets.length ? s.last : { ...s.last, sets: [s.last.topSet] };
           const sameW = l.sets.every(x => x.weight === l.sets[0].weight);
           const reps = l.sets.map(x => x.reps == null ? '?' : x.reps).join(', ');
           const rpes = l.sets.map(x => x.rpe).filter(x => x != null);
-          const rpe = rpes.length ? ` @ RPE ${Math.max(...rpes)}` : '';
+          const lvl = rpes.length ? effortLevel(this.rules, Math.max(...rpes)) : null;
+          const rpe = lvl ? ` · ${lvl.label}` : '';
           const txt = sameW && l.sets[0].weight != null ? `${fmtWeight(l.sets[0].weight)} lb × ${reps}${rpe}` : l.sets.map(x => `${x.weight != null ? fmtWeight(x.weight) : 'bw'} × ${x.reps == null ? '?' : x.reps}`).join(', ') + rpe;
           main.appendChild(el('div', { class: 'last-time' }, [el('span', { class: 'label-inline' }, 'Last time'), ' ', txt]));
         }
+        if (!(s.auto && !s.holdSeconds)) main.appendChild(this.timerBlock(this.isCountdown(s)));
+      } else {
         if (s.cue) main.appendChild(el('div', { class: 'step-cue' }, s.cue));
-      } else if (s.cue) {
-        main.appendChild(el('div', { class: 'step-cue' }, s.cue));
+        main.appendChild(this.timerBlock(this.isCountdown(s)));
       }
-      main.appendChild(this.timerBlock(this.isCountdown(s)));
-      if (next) main.appendChild(el('div', { class: 'next' }, [el('b', {}, 'Next: '), this.describe(next), next.kind === 'rest' && this.steps[this.s.idx + 2] ? el('span', { class: 'muted' }, ` → ${this.describe(this.steps[this.s.idx + 2])}`) : null]));
+      if (next) main.appendChild(el('div', { class: 'next' }, [el('b', {}, 'Next: '), this.describe(next), (next.kind === 'rest' || next.kind === 'transition') && this.steps[this.s.idx + 2] ? el('span', { class: 'muted' }, ` → ${this.describe(this.steps[this.s.idx + 2])}`) : null]));
     }
     if (paused) main.appendChild(el('div', { class: 'badge' }, 'Paused'));
 
     const actions = el('div', { class: 'player-actions' });
+    // v1.4: sets and rests now run on their own, so Pause sits on the screen for when you step away
+    const pauseBtn = () => el('button', { class: 'btn', id: 'pause-btn', onclick: () => (paused ? this.unpause() : this.pause()) }, [icon(paused ? 'play' : 'pause'), paused ? 'Resume' : 'Pause']);
     if (s.kind === 'set') {
       const ex = this.plan.exercises[s.exerciseId];
       const showEdit = this.editOpen || (s.target && s.target.weight == null && ex && ex.equipment !== 'bodyweight' && !s.holdSeconds) || s.baseline || s.retest || (s.repRange == null && !s.holdSeconds);
       actions.appendChild(this.editPanel(s, ex, showEdit));
       actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.logSet() }, [icon('check'), s.holdSeconds ? 'Done early' : 'Done']));
       actions.appendChild(el('div', { class: 'secondary' }, [
+        this.isAutoSet(s) ? el('button', { class: 'btn', id: 'extend-btn', onclick: () => this.addSeconds(this.rules.timing.extendSeconds) }, [icon('plus'), `${this.rules.timing.extendSeconds} s`]) : null,
+        this.isAutoSet(s) || s.holdSeconds ? pauseBtn() : null,
         el('button', { class: 'btn', onclick: () => this.toggleEdit() }, [icon('edit'), this.editOpen ? 'Hide' : 'Edit']),
-        el('button', { class: 'btn', onclick: () => this.skip() }, [icon('skip'), 'Skip set'])
+        el('button', { class: 'btn', onclick: () => this.skip() }, [icon('skip'), 'Skip'])
       ]));
     } else if (s.kind === 'decision') {
       actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.decide(true) }, 'Do it'));
       actions.appendChild(el('div', { class: 'secondary' }, [el('button', { class: 'btn', onclick: () => this.decide(false) }, 'Skip it')]));
     } else {
-      actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.advance() }, [icon('skip'), s.kind === 'rest' ? 'Skip rest' : 'Next']));
-      actions.appendChild(el('div', { class: 'secondary' }, [el('button', { class: 'btn', onclick: () => this.addSeconds(30) }, [icon('plus'), '30 s'])]));
+      actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.advance() }, [icon('skip'), s.kind === 'rest' ? 'Skip rest' : (this.leadsIntoSet() ? 'Start now' : 'Next')]));
+      actions.appendChild(el('div', { class: 'secondary' }, [el('button', { class: 'btn', onclick: () => this.addSeconds(30) }, [icon('plus'), '30 s']), pauseBtn()]));
     }
 
+    document.body.setAttribute('data-kind', this.isReady() ? 'ready' : group);
     const wrap = el('div', { class: 'player', 'data-kind': group }, [head, prog, main, actions]);
     c.appendChild(wrap);
     this.updateTimerDom();
@@ -570,9 +752,9 @@ export class Player {
     return null;
   }
 
-  timerBlock(countdown) {
+  timerBlock(countdown, compact) {
     if (!countdown) return el('div', { class: 'timer small', id: 'timer' }, '0:00');
-    const ring = el('div', { class: 'ring-wrap' });
+    const ring = el('div', { class: 'ring-wrap' + (compact ? ' compact' : '') });
     ring.innerHTML = `<svg class="ring" viewBox="0 0 220 220" aria-hidden="true"><circle class="ring-bg" cx="110" cy="110" r="${RING_R}"/><circle class="ring-fg" id="ring-fg" cx="110" cy="110" r="${RING_R}" stroke-dasharray="${RING_C.toFixed(1)}" stroke-dashoffset="0"/></svg>`;
     ring.appendChild(el('div', { class: 'timer ring-timer', id: 'timer' }, '0:00'));
     return ring;
@@ -582,26 +764,55 @@ export class Player {
     const rec = s.record || {};
     const wVal = rec.weight != null ? rec.weight : (s.target && s.target.weight != null ? s.target.weight : '');
     const rVal = rec.reps != null ? rec.reps : (s.holdSeconds ? s.holdSeconds : (s.target && s.target.reps != null ? s.target.reps : ''));
-    const pVal = rec.rpe != null ? rec.rpe : (s.rpeDefault != null ? s.rpeDefault : '');
+    const pVal = this.pendingRpe != null ? this.pendingRpe : (rec.rpe != null ? rec.rpe : this.defaultRpe(s));
     const wStep = ex && ex.mainLift ? incrementFor(this.rules, s.exerciseId, ex) : (ex ? (this.rules.smallestJump[ex.equipment] || 5) : 5);
     const isBw = ex && ex.equipment === 'bodyweight';
     const panel = el('div', { class: 'edit-panel', id: 'edit-panel', hidden: !open });
     if (!isBw) panel.appendChild(field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight (lb)', 'in-weight', wVal, wStep || 2.5));
     panel.appendChild(field(s.holdSeconds ? 'Seconds' : 'Reps', 'in-reps', rVal, 1));
-    panel.appendChild(field('RPE', 'in-rpe', pVal, 0.5));
     if (isBw) panel.appendChild(el('div'));
+    if (!s.holdSeconds && !s.ramp) {
+      const chips = effortChips(this.rules, pVal, lvl => {
+        this.pendingRpe = lvl.rpe;
+        chips.querySelectorAll('.effort-chip').forEach(b => b.classList.toggle('on', b.dataset.key === lvl.key));
+      });
+      chips.classList.add('span-all');
+      panel.appendChild(chips);
+    }
     return panel;
   }
-  toggleEdit() { this.editOpen = !this.editOpen; this.renderStep(); }
-  openEdit() { this.editOpen = true; this.renderStep(); }
+  toggleEdit() { this.editOpen = !this.editOpen; if (this.editOpen) this.s.manual = true; this.renderStep(); }
+  openEdit() { this.editOpen = true; this.s.manual = true; this.renderStep(); }
 
   updateTimerDom() {
     const t = this.container.querySelector('#timer');
     const s = this.step; if (!t || !s) return;
-    if (this.isCountdown(s)) {
+    const want = this.isReady() ? 'ready' : this.kindGroup(s);
+    if (document.body.getAttribute('data-kind') !== want) document.body.setAttribute('data-kind', want);
+    if (s.kind === 'set' && s.auto && !s.holdSeconds) {
+      // pace bar: which rep the tempo says you should be on
+      const e = this.elapsedInStep();
+      const auto = this.autoOn();
+      t.textContent = auto ? fmtClock(Math.ceil(Math.max(0, s.seconds - e))) : fmtClock(e);
+      const reps = s.target && s.target.reps ? s.target.reps : null;
+      const pt = this.container.querySelector('#pace-text');
+      const pf = this.container.querySelector('#pace-fill');
+      if (pt && reps) {
+        const w = e - (s.startSeconds || 0);
+        const per = reps * s.repSeconds;
+        let txt;
+        if (w < 0) txt = 'Get set';
+        else if (!s.perSide) txt = w < per ? `Rep ${Math.min(reps, Math.floor(w / s.repSeconds) + 1)} of ${reps}` : 'Finish the set';
+        else if (w < per) txt = `First side · rep ${Math.min(reps, Math.floor(w / s.repSeconds) + 1)} of ${reps}`;
+        else if (w < per + this.rules.timing.sideSwitchSeconds) txt = 'Switch sides';
+        else { const w2 = w - per - this.rules.timing.sideSwitchSeconds; txt = w2 < per ? `Second side · rep ${Math.min(reps, Math.floor(w2 / s.repSeconds) + 1)} of ${reps}` : 'Finish the set'; }
+        if (pt.textContent !== txt) pt.textContent = txt;
+      }
+      if (pf) pf.style.width = `${Math.min(100, 100 * e / (s.seconds || 1)).toFixed(1)}%`;
+    } else if (this.isCountdown(s)) {
       const rem = this.remainingInStep(s);
       t.textContent = fmtClock(Math.ceil(rem));
-      t.classList.toggle('warn', rem <= this.rules.timing.restWarningSeconds && rem > 0);
+      t.classList.toggle('warn', !this.leadsIntoSet() && rem <= this.rules.timing.restWarningSeconds && rem > 0);
       const fg = this.container.querySelector('#ring-fg');
       if (fg) { const total = this.stepSeconds(s) || 1; fg.setAttribute('stroke-dashoffset', (RING_C * (1 - rem / total)).toFixed(1)); }
     } else {
@@ -629,11 +840,9 @@ export class Player {
   }
 }
 
-function effortShort(effort) {
-  if (!effort) return '';
-  if (effort.kind === 'rpe') return effort.min === effort.max ? `RPE ${effort.min}` : `RPE ${effort.min}-${effort.max}`;
-  if (effort.kind === 'rir') return `${effort.min === effort.max ? effort.min : effort.min + '-' + effort.max} left`;
-  return '';
+function modalOpen() {
+  const m = document.getElementById('modal');
+  return !!(m && !m.hidden);
 }
 
 function field(label, id, value, step) {
