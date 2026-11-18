@@ -155,10 +155,10 @@ with sync_playwright() as p:
     check('v1.4 preview shows the session goal and time', 'Upper-body strength' in pre and 'About' in pre and 'min' in pre, pre[:200])
     check('v1.4 preview: strict press prefilled from the benchmark target', page.locator('input[data-ex="strict_press"]').input_value() == '90', page.locator('input[data-ex="strict_press"]').input_value())
     check('v1.4 preview: pull-up has no weight yet, works up today', 'Work up today' in pre)
-    check('v1.4 preview: dumbbell bench shows an estimate (50)', page.locator('input[data-ex="db_bench"]').input_value() == '50' and page.locator('.pre-ex .est').count() >= 1, page.locator('input[data-ex="db_bench"]').input_value())
+    check('v1.4 preview: incline dumbbell press shows an estimate (45)', page.locator('input[data-ex="incline_db_press"]').input_value() == '45' and page.locator('.pre-ex .est').count() >= 1, page.locator('input[data-ex="incline_db_press"]').input_value())
     check('v1.4 preview: machine row has no estimate', page.locator('input[data-ex="cs_row"]').input_value() == '')
-    page.fill('input[data-ex="db_bench"]', '55'); page.locator('input[data-ex="db_bench"]').dispatch_event('change'); page.wait_for_timeout(100)
-    check('v1.4 preview: a typed weight sticks and loses the estimate tag', page.locator('input[data-ex="db_bench"]').input_value() == '55')
+    page.fill('input[data-ex="incline_db_press"]', '55'); page.locator('input[data-ex="incline_db_press"]').dispatch_event('change'); page.wait_for_timeout(100)
+    check('v1.4 preview: a typed weight sticks and loses the estimate tag', page.locator('input[data-ex="incline_db_press"]').input_value() == '55')
     page.screenshot(path=f'{SHOTS}/lift2-preview.png', full_page=True)
     page.click('#start-workout')
     page.wait_for_selector('.player')
@@ -187,7 +187,7 @@ with sync_playwright() as p:
         elif kind.startswith(IS_SET):
             wv = page.locator('#in-weight')
             if wv.count() and wv.is_visible() and wv.input_value() == '': page.fill('#in-weight', '40')
-            if 'bench' in name.lower() and not saw_bench:
+            if 'incline dumbbell press' in name.lower() and not saw_bench:
                 saw_bench = True
                 check('v1.4 typed preview weight (55) is the set target', '55' in page.locator('.tile-weight').inner_text(), page.locator('.tile-weight').inner_text())
             page.click('button.btn.primary')
