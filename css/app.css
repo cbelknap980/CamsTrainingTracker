@@ -385,6 +385,14 @@ body[data-kind="ready"] .rest-top .timer { font-size: 3.4rem; }
 .adh-key > span { display: inline-flex; align-items: center; gap: 6px; }
 .adh-key .adh-cell { width: 20px; height: 20px; font-size: 11px; }
 #load-backup p, #sync-card p { max-width: 72ch; }
+/* v1.7.1: dumbbell question, one answer per lift */
+.pair-row { padding: 12px 0; border-top: 1px solid var(--line); }
+.pair-row .segmented { background: var(--surface-2); margin: 8px 0 6px; }
+.pair-row .segmented button { padding: 10px 16px; min-height: 44px; }
+.pair-row .segmented button.on { background: var(--accent); color: var(--accent-ink); }
+.pair-saved { font-weight: 700; white-space: nowrap; }
+.pair-result { font-size: var(--t-small); }
+#pair-save { margin-top: 12px; }
 /* v1.7: sync sheet */
 .sync-status { font-size: var(--t-small); margin: 4px 0 12px; }
 .sync-status.bad { color: var(--bad); font-weight: 600; }
