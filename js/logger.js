@@ -1,5 +1,5 @@
 // logger.js - Logger: turns a finished timeline into a session record, runs the Progression Engine,
-// saves everything, and renders the summary. Also the run log form.
+// saves everything, and renders the summary.
 
 import { applyProgression, incrementFor } from './progression.js';
 import { getTargets, setTargets, putSession, putRun, newId, getSettings } from './store.js';
@@ -239,35 +239,7 @@ export function setsTable(sets) {
   return el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'Effort')]), ...rows]);
 }
 
-// ---- run log form ----
-export function runForm(plan, settings, existing, onSaved) {
-  const today = toISODate(new Date());
-  const r = existing || { date: today, type: 'Intervals', distance: '', minutes: '', rpe: 7, hr: '', notes: '' };
-  const f = {};
-  const mk = (label, key, attrs) => { f[key] = el('input', { value: r[key] == null ? '' : r[key], ...attrs }); return el('div', { class: 'field' }, [el('label', {}, label), f[key]]); };
-  const typeSel = el('select', {}, plan.runTypes.map(t => el('option', { value: t, selected: t === r.type }, t)));
-  const form = el('div', {}, [
-    el('h2', {}, existing ? 'Edit run' : 'Log a run'),
-    mk('Date', 'date', { type: 'date' }),
-    el('div', { class: 'field' }, [el('label', {}, 'Type'), typeSel]),
-    el('div', { class: 'grid2' }, [mk('Distance (mi)', 'distance', { type: 'number', step: '0.1', inputmode: 'decimal' }), mk('Time (min)', 'minutes', { type: 'number', step: '0.5', inputmode: 'decimal' })]),
-    el('div', { class: 'grid2' }, [mk('RPE', 'rpe', { type: 'number', step: '0.5', inputmode: 'decimal' }), mk('Avg HR', 'hr', { type: 'number', step: '1', inputmode: 'numeric' })]),
-    el('div', { class: 'field' }, [el('label', {}, 'Notes'), (f.notes = el('textarea', { rows: 2 }, r.notes || ''))]),
-    el('div', { class: 'btn-row' }, [
-      el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
-      el('button', { class: 'btn primary', onclick: async () => {
-        const num = x => (x.value === '' ? null : Number(x.value));
-        const rec = { id: r.id || newId('run'), date: f.date.value || today, type: typeSel.value, distance: num(f.distance), minutes: num(f.minutes), rpe: num(f.rpe), hr: num(f.hr), notes: f.notes.value.trim(), appVersion: APP_VERSION };
-        rec.week = weekNumber(new Date(rec.date + 'T12:00:00'), settings.startDate);
-        rec.pace = rec.distance && rec.minutes ? Math.round((rec.minutes / rec.distance) * 100) / 100 : null;
-        await putRun(rec);
-        closeModal(); toast('Run saved'); onSaved && onSaved(rec);
-      } }, 'Save run')
-    ])
-  ]);
-  showModal(form);
-}
-
+// ---- pace as m:ss per mile ----
 export function fmtPace(p) {
   if (!p) return '';
   const m = Math.floor(p); const s = Math.round((p - m) * 60);

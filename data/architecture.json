@@ -48,6 +48,17 @@
       "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore. v1.9: coach check-ins on the Plan tab: a note with quick tags (Too heavy, Too light, Rest too long, Need more rest, Pain, Slept badly, Felt good). Weight tags move that lift's next target one step; rest tags move its rest 15 s, at most 45 s either way (settings.restAdjust, applied by the Session Builder)."
     },
     {
+      "id": "garmin",
+      "column": "inputs",
+      "name": "Garmin runs",
+      "lines": [
+        "activities from the watch, by way",
+        "of a job in your private repo"
+      ],
+      "file": "js/garmin.js, data/garmin-job.yml",
+      "description": "Optional (v1.10). Garmin's personal API lets Cameron read his own activities with a key he creates in Garmin Connect. The key is saved as a secret in his private GitHub repo, where a small job (data/garmin-job.yml, added to that repo during set-up) asks Garmin every two hours, and whenever the app saves garmin-request.json there, and writes garmin-activities.json with the location fields dropped. The phone reads that file through the same token sync uses and adds what is new to the run log: runs, ski days and long bike or rower sessions (rules.json garmin.types). A run typed in by hand on the same day takes the watch's numbers instead of being logged twice, a deleted Garmin run stays out, and type, effort and notes are never overwritten. The key is never on the phone, in the app or in a backup. A computer set to Only views never adds runs; it shows them after the phone uploads."
+    },
+    {
       "id": "rules",
       "column": "inputs",
       "name": "Rules (rules.json)",
@@ -86,10 +97,10 @@
       "name": "Logger",
       "lines": [
         "one tap logs weight, reps, RPE",
-        "end-of-session review, run log"
+        "end-of-session review"
       ],
       "file": "js/logger.js",
-      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. When the session ends it opens the Review screen: every exercise with its sets (tap to correct), the engine's verdict (Up / Hold / Drop / Set) with its reason, and the next weight and reps as editable fields; Save runs the engine on the corrected sets, applies any overrides (tagged 'set by you') and stores the session. Then the summary. Also the run log form (date, type, distance, time, RPE, notes). v1.5: the Review screen lists skipped sets and sets missing a weight or reps first and keeps Save locked until each is filled in or confirmed as skipped."
+      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. When the session ends it opens the Review screen: every exercise with its sets (tap to correct), the engine's verdict (Up / Hold / Drop / Set) with its reason, and the next weight and reps as editable fields; Save runs the engine on the corrected sets, applies any overrides (tagged 'set by you') and stores the session. Then the summary. The run log form moved to the Runs page in v1.10. v1.5: the Review screen lists skipped sets and sets missing a weight or reps first and keeps Save locked until each is filled in or confirmed as skipped."
     },
     {
       "id": "progression",
@@ -165,6 +176,17 @@
       ],
       "file": "js/progress.js",
       "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser. v1.9: with one session a lift card shows the best set and the next target instead of a lone dot; clicking a card opens every set of that lift; a card for work sets per muscle group this week against what the plan holds and a 10-set mark (data/muscles.json); sync status moved to the header."
+    },
+    {
+      "id": "runs",
+      "column": "outputs",
+      "name": "Runs page",
+      "lines": [
+        "this week's two runs and what each",
+        "asks for, miles by week, every run"
+      ],
+      "file": "js/runs.js, js/runs-view.js",
+      "description": "The Runs tab (rebuilt in v1.10). This week's planned runs with what each asks for: the interval set for the week and the long-run distance, one step past the longest long run so far (both from the numbers on plan.json runs). Each shows done with its numbers once a run is logged for it. Below: miles by week across the block (bike and ski distance left out, rules.json runLog), and every run with distance, time, pace and heart rate. Opening a run shows the watch's numbers and takes effort and what it counts as in one tap. Log a run takes time as 27:30. Garmin status, Check now and set-up sit under the heading."
     },
     {
       "id": "backup",
@@ -259,6 +281,16 @@
       "from": "storage",
       "to": "progress",
       "label": "saved sessions and runs"
+    },
+    {
+      "from": "garmin",
+      "to": "storage",
+      "label": "new runs, added on the phone"
+    },
+    {
+      "from": "storage",
+      "to": "runs",
+      "label": "runs, with the plan's run numbers"
     },
     {
       "from": "storage",

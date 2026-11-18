@@ -102,8 +102,8 @@ with sync_playwright() as p:
     legs = page.locator('#progress-status .adh-row', has_text='Legs').locator('.adh-cell')
     upper = page.locator('#progress-status .adh-row', has_text='Upper').locator('.adh-cell')
     check('Progress: Legs week 3 counts as done once made up, Upper week 3 is still open', 'done' in legs.nth(2).get_attribute('class') and 'open' in upper.nth(2).get_attribute('class'), [legs.nth(2).get_attribute('class'), upper.nth(2).get_attribute('class')])
-    page.click('#tabs button[data-view="history"]'); page.wait_for_selector('.list-item')
-    check('Log lists the Catch-up session', 'Catch-up' in page.locator('.list-item').first.inner_text(), page.locator('.list-item').first.inner_text())
+    page.click('#progress-mode button[data-mode="sessions"]'); page.wait_for_selector('.list-item')   # v1.9: the log is the Sessions view in Progress
+    check('Sessions lists the Catch-up session', 'Catch-up' in page.locator('.list-item').first.inner_text(), page.locator('.list-item').first.inner_text())
 
     print('Next Monday: nothing rolls over')
     page.clock.set_system_time('2026-12-07T06:00:00')

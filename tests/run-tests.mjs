@@ -8,6 +8,8 @@ import { parseRepo, toBase64, fromBase64, setupLink, readSetupLink, explainStatu
 import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks, muscleSets } from '../js/progress.js';
 import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../js/coach.js';
 import { applyRestAdjust } from '../js/builder.js';
+import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList } from '../js/runs.js';
+import { garminLinks, GARMIN_JOB } from '../js/sync.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -338,6 +340,55 @@ console.log('v1.9 muscle groups and coach check-ins');
   const a2 = adherence([lift1, made, { ...made, id: 'c2', sets: [S('oh_tri_ext', 'lift1:finisher')] }], plan, { ...settings, startDate: '2026-11-16' }, thu);
   const a1 = adherence([lift1, made], plan, { ...settings, startDate: '2026-11-16' }, thu);
   check('v1.8 Progress: ended early stays partial until everything is made up, then counts as done', a1.rows[0].cells[2].status === 'partial' && a2.rows[0].cells[2].status === 'done', [a1.rows[0].cells[2], a2.rows[0].cells[2]]);
+}
+
+// ---- v1.10: runs and Garmin ----
+{
+  const st = { ...settings, startDate: '2026-11-16' };
+  check('v1.10 time: 27:30, 1:02:30 and 27.5 all read as minutes; nonsense does not', parseMinutes('27:30') === 27.5 && parseMinutes('1:02:30') === 62.5 && parseMinutes('27.5') === 27.5 && parseMinutes('') === null && parseMinutes('a:b') === null && parseMinutes('abc') === null);
+  check('v1.10 time prints as a clock', fmtDuration(27.5) === '27:30' && fmtDuration(62.5) === '1:02:30' && fmtDuration(8.867) === '8:52' && fmtDuration(null) === '');
+  check('v1.10 one line per run; bike distance carries no pace', runLine({ type: 'Intervals', distance: 3.1, minutes: 27.5, hr: 151.6 }, rules) === '3.1 mi · 27:30 · 8:52/mi · HR 152' && runLine({ type: 'Bike/rower sub', distance: 5.59, minutes: 25 }, rules) === '5.59 mi · 25:00' && runLine({ type: 'Easy run' }, rules) === '');
+  const [r1, r2] = plan.runs;
+  check('v1.10 the interval set follows the week', prescription(r1, 1).text === '5 × 2 min hard, 2 min easy' && prescription(r1, 6).text === '5 × 3 min hard, 2 min easy' && prescription(r1, 12).text === '4 × 4 min hard, 2-3 min easy', [prescription(r1, 1).text, prescription(r1, 6).text, prescription(r1, 12).text]);
+  check('v1.10 the numbers on the plan runs agree with their notes', r1.note.includes('5 x 2 min hard / 2 min easy') && r1.note.includes('5 x 3 / 2') && r1.note.includes('4 x 4 / 2-3') && r2.note.includes('Start 3.5 mi, add 0.5 mi') && r2.distance.startMiles === 3.5 && r2.distance.stepMiles === 0.5);
+  const lr = (d, date, type = 'Long run') => ({ id: 'r' + date, date, type, planId: 'run2', distance: d, minutes: d * 10, week: 1 });
+  check('v1.10 long run: starts at 3.5, goes half a mile past the longest, a ski day does not move it, stops at the cap',
+    longRunTarget(r2, []).miles === 3.5 && longRunTarget(r2, [lr(3.62, '2026-11-21')]).miles === 4 && longRunTarget(r2, [lr(3.62, '2026-11-21'), lr(2, '2026-11-28')]).miles === 4
+    && longRunTarget(r2, [lr(9, '2026-11-21', 'Ski day')]).miles === 3.5 && longRunTarget(r2, [lr(6.8, '2026-12-20')]).miles === 7 && longRunTarget(r2, [lr(8, '2026-12-20')]).miles === 7,
+    [longRunTarget(r2, [lr(3.62, '2026-11-21')]), longRunTarget(r2, [lr(9, '2026-11-21', 'Ski day')])]);
+  check('v1.10 a ski day counts for the long run, a 5K test for the intervals, an easy run for neither', planRunForType(plan, 'Ski day').id === 'run2' && planRunForType(plan, '5K test').id === 'run1' && planRunForType(plan, 'Easy run') === null);
+  const wk = (runs, day) => weekRuns({ plan, settings: st, runs, week: 1, today: new Date(day + 'T08:00:00') });
+  const mon = wk([], '2026-11-16'), tue = wk([], '2026-11-17'), thu = wk([], '2026-11-19'), sun = wk([], '2026-11-22');
+  check('v1.10 this week: each run is later, today, or not logged yet, and the long run has the whole weekend', mon.map(r => r.status).join() === 'later,later' && tue[0].status === 'today' && thu[0].status === 'open' && thu[1].status === 'later' && sun[1].status === 'today' && tue[0].date === '2026-11-17', [mon, sun].map(x => x.map(r => r.status)));
+  const done = wk([{ id: 'a', date: '2026-11-19', type: 'Intervals', planId: 'run1', distance: 3, minutes: 28 }, { id: 'b', date: '2026-11-21', type: 'Ski day', distance: null, minutes: 240 }, { id: 'c', date: '2026-11-10', type: 'Long run', distance: 5 }], '2026-11-22');
+  check('v1.10 this week: a run on another day still counts, a ski day covers the long run, last week\'s run does not', done[0].status === 'done' && done[0].run.id === 'a' && done[1].status === 'done' && done[1].run.id === 'b', done.map(r => [r.status, r.run && r.run.id]));
+  const miles = weeklyMiles([{ date: '2026-11-17', type: 'Intervals', distance: 3.17 }, { date: '2026-11-21', type: 'Long run', distance: 3.6 }, { date: '2026-11-18', type: 'Bike/rower sub', distance: 5.59 }, { date: '2026-11-24', type: 'Easy run', distance: 2 }, { date: '2026-11-10', type: 'Easy run', distance: 9 }], st, rules);
+  check('v1.10 miles by week leave out the bike and anything before the block', miles.length === 12 && miles[0].miles === 6.8 && miles[0].runs === 2 && miles[1].miles === 2 && miles[2].miles === 0, miles.slice(0, 3));
+
+  const g = (id, typeKey, start, meters, seconds, extra = {}) => ({ activityId: id, activityName: 'x', startTimeLocal: start, activityType: { typeKey }, distance: meters, duration: seconds, averageHR: 150, maxHR: 171, elevationGain: 30, ...extra });
+  const one = garminToRun(g(7, 'trail_running', '2026-11-17 06:12:33', 5100, 1720), { rules });
+  check('v1.10 Garmin: meters and seconds become miles and minutes', one.id === 'garmin-7' && one.garminId === '7' && one.date === '2026-11-17' && one.startTime === '06:12' && one.distance === 3.17 && one.minutes === 28.67 && one.hr === 150 && one.maxHr === 171 && one.climbFt === 98 && one.guess === true, one);
+  check('v1.10 Garmin: lifts and walks are not runs; short jogs and short spins are left out; a ski day and a long spin count', garminToRun(g(1, 'strength_training', '2026-11-17 06:00:00', 0, 3000), { rules }) === null && garminToRun(g(2, 'walking', '2026-11-17 06:00:00', 2000, 1500), { rules }) === null
+    && garminToRun(g(3, 'running', '2026-11-17 06:00:00', 500, 200), { rules }) === null && garminToRun(g(4, 'indoor_cycling', '2026-11-17 06:00:00', 5000, 720), { rules }) === null
+    && garminToRun(g(5, 'resort_skiing_snowboarding_ws', '2026-11-21 09:00:00', 30000, 14400), { rules }).type === 'Ski day' && garminToRun(g(6, 'indoor_cycling', '2026-11-18 18:00:00', 9000, 1500), { rules }).type === 'Bike/rower sub');
+  const other = garminToRun({ summaryId: 'abc', activityType: 'RUNNING', startTimeInSeconds: 1795155153, startTimeOffsetInSeconds: -25200, distanceInMeters: 5000, durationInSeconds: 1500, averageHeartRateInBeatsPerMinute: 149 }, { rules });
+  check('v1.10 Garmin: the other field names Garmin uses are read too', other && other.garminId === 'abc' && other.distance === 3.11 && other.minutes === 25 && other.hr === 149 && /^\d{4}-\d{2}-\d{2}$/.test(other.date), other);
+  check('v1.10 Garmin: the list is found whatever wraps it', garminList([1, 2]).length === 2 && garminList({ fetchedAt: 'x', activities: [1] }).length === 1 && garminList({ activityList: [1, 2, 3] }).length === 3 && garminList(null).length === 0);
+  const file = { activities: [g(13, 'running', '2026-11-22 09:00:00', 3000, 1200), g(12, 'running', '2026-11-21 08:00:00', 5800, 2160), g(11, 'running', '2026-11-17 06:12:33', 5100, 1720), g(10, 'running', '2026-11-14 08:00:00', 5000, 1500)] };
+  const typed = { id: 'run_1', date: '2026-11-17', type: '5K test', planId: 'run1', distance: 3.1, minutes: 27, rpe: 9, notes: 'windy', week: 1 };
+  const m = mergeGarmin([typed], file, { plan, rules, settings: st, ignored: [], appVersion: 't' });
+  const by = Object.fromEntries(m.put.map(r => [r.id, r]));
+  check('v1.10 merge: a run typed that day takes the watch\'s numbers and keeps its type, effort and notes', m.updated === 1 && by.run_1.garminId === '11' && by.run_1.distance === 3.17 && by.run_1.type === '5K test' && by.run_1.rpe === 9 && by.run_1.notes === 'windy' && by.run_1.source === 'garmin', by.run_1);
+  check('v1.10 merge: Saturday is the long run, a second weekend run is an easy run, and nothing from before the block', m.added === 2 && by['garmin-12'].type === 'Long run' && by['garmin-12'].planId === 'run2' && by['garmin-13'].type === 'Easy run' && by['garmin-13'].planId === null && !by['garmin-10'] && by['garmin-12'].week === 1 && by['garmin-12'].rpe === null, m.put.map(r => [r.id, r.type]));
+  const after = [by.run_1, { ...by['garmin-12'], type: 'Easy run', planId: null, rpe: 4, notes: 'legs heavy' }, by['garmin-13']];
+  const again = mergeGarmin(after, file, { plan, rules, settings: st, ignored: [], appVersion: 't' });
+  check('v1.10 merge: the same file again changes nothing', again.put.length === 0 && again.added === 0 && again.updated === 0 && again.seen === 3, again);
+  const fixed = mergeGarmin(after, { activities: [g(12, 'running', '2026-11-21 08:00:00', 6000, 2200)] }, { plan, rules, settings: st, ignored: [], appVersion: 't' });
+  check('v1.10 merge: a corrected activity updates the numbers, not what Cameron set', fixed.updated === 1 && fixed.put[0].distance === 3.73 && fixed.put[0].type === 'Easy run' && fixed.put[0].rpe === 4 && fixed.put[0].notes === 'legs heavy', fixed.put[0]);
+  const gone = mergeGarmin([], file, { plan, rules, settings: st, ignored: ['12'], appVersion: 't' });
+  check('v1.10 merge: a Garmin run Cameron deleted stays out', gone.added === 2 && !gone.put.some(r => r.garminId === '12'), gone.put.map(r => r.id));
+  const links = garminLinks('cam/training-data', 'main', 'name: Garmin runs\non: push\n');
+  check('v1.10 set-up links point at the repo: new secret, and a new file with the job filled in', links.secret === 'https://github.com/cam/training-data/settings/secrets/actions/new' && links.job === 'https://github.com/cam/training-data/new/main?filename=.github%2Fworkflows%2Fgarmin.yml&value=name%3A%20Garmin%20runs%0Aon%3A%20push%0A' && GARMIN_JOB === '.github/workflows/garmin.yml', links);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');

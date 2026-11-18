@@ -514,3 +514,39 @@ body.computer .modal .sheet { max-width: 860px; border-radius: 22px; max-height:
 .tag-btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .tag-btn:disabled { opacity: 0.35; cursor: default; }
 #checkin textarea { width: 100%; margin-bottom: 10px; }
+
+/* v1.10: Runs tab */
+.garmin-row { display: flex; align-items: center; gap: 2px 14px; flex-wrap: wrap; margin: 0 0 10px; }
+.link-btn { border: 0; background: none; color: var(--accent); font-size: var(--t-small); font-weight: 700; padding: 8px 0; min-height: 36px; cursor: pointer; }
+.link-btn:disabled { color: var(--muted); }
+.garmin-state { flex: 1 1 100%; font-size: var(--t-small); color: var(--muted); }
+@media (min-width: 700px) { .garmin-state { flex: 0 1 auto; } }
+.garmin-state.bad { color: var(--bad); }
+.runs-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+@media (min-width: 1000px) { .runs-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; } }
+.run-plan { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 10px; padding: 12px 0; border-top: 1px solid var(--line); align-items: start; }
+.run-plan:first-of-type { border-top: 0; padding-top: 2px; }
+.run-plan .day-name { padding-top: 2px; }
+.run-plan.today .day-name { color: var(--accent); font-weight: 700; }
+.run-plan-body .row { min-height: 26px; }
+.run-plan-body .btn.small { min-height: 34px; padding: 4px 14px; }
+.run-ask { font-size: 1.1rem; font-weight: 700; margin: 2px 0; }
+.run-detail { font-size: var(--t-small); }
+.run-result { display: inline-block; margin-top: 8px; padding: 8px 10px; border: 0; border-radius: 10px; background: var(--surface-2); color: var(--text); font-size: var(--t-small); font-weight: 600; text-align: left; cursor: pointer; }
+.run-plan .day-status { padding-top: 2px; white-space: nowrap; }
+.run-notes { margin-top: 10px; font-size: var(--t-small); }
+.run-notes summary { cursor: pointer; color: var(--muted); font-weight: 600; padding: 6px 0; }
+.run-notes p { margin: 8px 0 0; }
+.run-item .row { align-items: baseline; }
+.run-line { font-size: var(--t-small); margin-top: 3px; }
+.run-tags { display: inline-flex; gap: 6px; flex: none; }
+.tag.tag-todo { background: none; box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
+.run-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.run-stat { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.run-stat span { font-size: var(--t-label); color: var(--muted); }
+.run-stat b { font-size: var(--t-h2); }
+.setup-steps { list-style: none; padding: 0; margin: 0 0 10px; }
+.setup-step { padding: 12px 0; border-top: 1px solid var(--line); }
+.setup-step p { margin: 6px 0 10px; font-size: var(--t-small); }
+.setup-step code { background: var(--surface-2); padding: 2px 6px; border-radius: 6px; font-size: 0.85em; word-break: break-all; }
+a.btn { text-decoration: none; color: var(--text); }

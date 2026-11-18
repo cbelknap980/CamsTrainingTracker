@@ -7,6 +7,12 @@
 import { kvGet, kvSet, kvDel, exportAll, importAll, onDataChange } from './store.js';
 
 export const SYNC_FILE = 'tracker-data.json';
+// v1.10: Garmin. A job in the same private repo writes GARMIN_FILE; the phone reads it and adds the runs.
+export const GARMIN_FILE = 'garmin-activities.json';
+export const GARMIN_REQUEST = 'garmin-request.json';
+export const GARMIN_JOB = '.github/workflows/garmin.yml';
+export const GARMIN_SECRET = 'GARMIN_PERSONAL_API_KEY';
+export const GARMIN_KEY_PAGE = 'https://connect.garmin.com/app/settings/personalApiToken';
 export const COACH_FILE = 'coach.json'; // v1.9: written by the coach review, read by the app
 const API = 'https://api.github.com';
 
@@ -55,6 +61,16 @@ export function explainStatus(status) {
   if (status === 403) return 'The token is not allowed to do that. It needs Contents: Read and write on this repo.';
   if (status === 404) return 'GitHub cannot find that repo with this token. Check the name, and that the token covers it.';
   return `GitHub answered ${status}. Try again in a minute.`;
+}
+
+/** The three pages Garmin set-up needs: Garmin's key page, the repo's new-secret page, and GitHub's new-file page with the job filled in. */
+export function garminLinks(repo, branch, jobText) {
+  return {
+    key: GARMIN_KEY_PAGE,
+    secret: `https://github.com/${repo}/settings/secrets/actions/new`,
+    job: `https://github.com/${repo}/new/${encodeURIComponent(branch || 'main')}?filename=${encodeURIComponent(GARMIN_JOB)}&value=${encodeURIComponent(jobText)}`,
+    runs: `https://github.com/${repo}/actions`
+  };
 }
 
 // ---- settings on this device ----
@@ -157,6 +173,49 @@ export async function pullCoach() {
   } catch (e) {
     return { ok: false, error: String(offline(e).message || e), file: (await kvGet('coach')) || null };
   }
+}
+
+// ---- Garmin (v1.10) ----
+
+/** Is the Garmin job in the repo yet, and which branch does the repo use? */
+export async function garminJobState() {
+  const cfg = await getSync();
+  if (!cfg || !cfg.repo || !cfg.token) return { ok: false, skipped: true };
+  try {
+    const [repo, job] = await Promise.all([call(cfg, ''), call(cfg, `/contents/${GARMIN_JOB}`)]);
+    if (!repo.ok) throw new Error(explainStatus(repo.status));
+    return { ok: true, job: job.ok, branch: (await repo.json()).default_branch || 'main' };
+  } catch (e) { return { ok: false, error: String(offline(e).message || e) }; }
+}
+
+/** The file the Garmin job wrote: { fetchedAt, ok, status, error, activities }. `missing` when the job has not run yet. */
+export async function readGarminFile() {
+  const cfg = await getSync();
+  if (!cfg || !cfg.repo || !cfg.token) return { ok: false, skipped: true };
+  try {
+    const res = await call(cfg, `/contents/${GARMIN_FILE}`, { raw: true });
+    if (res.status === 404) return { ok: true, missing: true };
+    if (!res.ok) throw new Error(explainStatus(res.status));
+    return { ok: true, data: await res.json() };
+  } catch (e) { return { ok: false, error: String(offline(e).message || e) }; }
+}
+
+/** Ask the job to run now: saving this small file in the repo is what starts it. */
+export async function requestGarminPull() {
+  const cfg = await getSync();
+  if (!cfg || !cfg.repo || !cfg.token) return { ok: false, skipped: true };
+  try {
+    const at = new Date().toISOString();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const head = await call(cfg, `/contents/${GARMIN_REQUEST}`);
+      if (!head.ok && head.status !== 404) throw new Error(explainStatus(head.status));
+      const sha = head.ok ? (await head.json()).sha : undefined;
+      const put = await call(cfg, `/contents/${GARMIN_REQUEST}`, { method: 'PUT', body: { message: `Check Garmin ${at}`, content: toBase64(JSON.stringify({ requestedAt: at })), ...(sha ? { sha } : {}) } });
+      if (put.ok) return { ok: true, at };
+      if (put.status !== 409 && put.status !== 422) throw new Error(explainStatus(put.status));
+    }
+    throw new Error('GitHub kept refusing the request. Try again in a minute.');
+  } catch (e) { return { ok: false, error: String(offline(e).message || e) }; }
 }
 
 // ---- automatic upload on the phone ----

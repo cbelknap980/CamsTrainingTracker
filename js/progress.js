@@ -126,7 +126,7 @@ export function prList(sessions) {
 
 // ---- charts (inline SVG; marks in --viz, text in the text colors) ----
 const NS = 'http://www.w3.org/2000/svg';
-function svg(tag, attrs = {}, text) {
+export function svg(tag, attrs = {}, text) {
   const n = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) if (v !== null && v !== undefined) n.setAttribute(k, v);
   if (text != null) n.textContent = text;
@@ -143,7 +143,7 @@ export function yTicks(values, step = 5) {
   return [lo, (lo + hi) / 2, hi];
 }
 
-function tooltip(wrap) {
+export function tooltip(wrap) {
   const tip = el('div', { class: 'viz-tip', hidden: true });
   wrap.appendChild(tip);
   return {

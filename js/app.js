@@ -4,13 +4,16 @@ import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessi
 import { buildTimeline, lastResults } from './builder.js';
 import { icon } from './icons.js';
 import { Player } from './player.js';
-import { saveSession, renderSummary, renderReview, runForm, setsTable, fmtPace } from './logger.js';
+import { saveSession, renderSummary, renderReview, setsTable } from './logger.js';
 import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progression.js';
-import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
+import { getTargets, setTarget, getSessions, getRuns, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
 import { weekOwed, owedLines, buildCatchUpSession, slackDays } from './catchup.js';
+import { renderRunsTab, runForm } from './runs-view.js';
+import { weekRuns, runLine } from './runs.js';
+import { importFromGarmin } from './garmin.js';
 import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
 import { renderPlan } from './plan-view.js';
 import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
@@ -74,6 +77,16 @@ async function startSync() {
     if (cfg && cfg.role === 'viewer') await Promise.race([pullNow(), new Promise(r => setTimeout(r, 8000))]);
   } catch (e) { /* sync never stops the app from opening */ }
   startAutoSync(() => ({ appVersion: APP_VERSION, planVersion: D.plan.planVersion }), r => { if (!r.ok) toast('Upload to the computer copy failed. It will retry.', 3500); updateSyncChip(); });
+  // v1.10: the phone picks up new Garmin runs in the background when the app opens
+  getSync().then(cfg => {
+    if (!cfg || cfg.role !== 'phone') return;
+    importFromGarmin({ plan: D.plan, rules: D.rules }).then(r => {
+      if (!r || !r.ok || !r.added) return;
+      toast(`${r.added} ${r.added === 1 ? 'run' : 'runs'} added from Garmin`, 3500);
+      // redraw only a screen that shows runs: the Runs tab, or Home while it is asking for today's run
+      if (document.getElementById('garmin-row') || (document.getElementById('run-ask') && !document.getElementById('run-done'))) showTab(currentTab);
+    }).catch(() => { /* Garmin never stops the app */ });
+  });
 }
 
 // ---- v1.9: sync status in the header ----
@@ -220,7 +233,7 @@ function showTab(name) {
   if (name === 'home') renderHome();
   else if (name === 'progress') renderProgressTab();
   else if (name === 'plan') renderPlanTab();
-  else if (name === 'runs') renderRuns();
+  else if (name === 'runs') renderRunsTab(view, { plan: D.plan, rules: D.rules, onOpenSync: () => renderSyncSheet() });
   else if (name === 'architecture') renderArchitecture(view, D.architecture, D.plan);
 }
 
@@ -266,9 +279,17 @@ async function renderHome() {
     todayCard.appendChild(el('p', { class: 'muted' }, `${tl.steps.length} steps · about ${fmtMinutes(tl.plannedSeconds)} · ${phase.note || ''}`));
     todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => previewSession(session.id, week) }, 'Start'));
   } else if (run) {
+    // v1.10: what the run asks for this week, and its numbers once it is logged (by hand or from Garmin)
+    const row = week >= 1 && week <= 12 ? weekRuns({ plan: D.plan, settings, runs: await getRuns(), week, today }).find(r => r.id === run.id) : null;
     todayCard.appendChild(el('h1', {}, run.name));
-    todayCard.appendChild(el('p', { class: 'muted' }, run.note));
-    todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => runForm(D.plan, settings, null, () => renderHome()) }, 'Log this run'));
+    if (row) todayCard.appendChild(el('p', { id: 'run-ask', style: 'font-weight:600;margin:0 0 4px' }, row.plan.text));
+    todayCard.appendChild(el('p', { class: 'muted' }, row ? row.plan.detail : run.note));
+    if (row && row.run) {
+      todayCard.appendChild(el('p', { id: 'run-done', style: 'color:var(--good);font-weight:700' }, `✓ Done · ${runLine(row.run, D.rules) || 'logged'}`));
+      todayCard.appendChild(el('button', { class: 'btn', onclick: () => showTab('runs') }, 'Open Runs'));
+    } else {
+      todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => runForm(D.plan, settings, null, () => renderHome(), { type: run.type }) }, 'Log this run'));
+    }
   } else if (hasOwed) {
     // v1.8: on a Slack day the catch-up takes the today card
     todayCard.id = 'catchup-card';
@@ -780,35 +801,6 @@ async function renderSyncSheet(note) {
       cfg.repo ? el('button', { class: 'btn', id: 'sync-link', onclick: copyLink }, 'Copy set-up link for the computer') : null,
       cfg.repo ? el('button', { class: 'btn danger', id: 'sync-off', onclick: async () => { if (await confirmDialog('Turn sync off on this device?', 'The repo name and token are removed from this device. The copy on GitHub stays.', 'Turn off', true)) { await clearSync(); toast('Sync is off'); renderSyncSheet(); } else renderSyncSheet(); } }, 'Turn off') : null,
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close')
-    ])
-  ]));
-}
-
-// ---- Runs ----
-async function renderRuns() {
-  const settings = await getSettings();
-  const runs = await getRuns();
-  view.innerHTML = '';
-  view.appendChild(el('div', { class: 'row' }, [el('h1', {}, 'Runs'), el('button', { class: 'btn small primary', onclick: () => runForm(D.plan, settings, null, () => renderRuns()) }, 'Log a run')]));
-  view.appendChild(el('div', { class: 'card' }, D.plan.runs.map(r => el('p', { class: 'muted' }, [el('b', { style: 'color:var(--text)' }, r.name + ': '), r.note]))));
-  if (!runs.length) { view.appendChild(el('p', { class: 'muted' }, 'No runs logged yet.')); return; }
-  const table = el('table', {}, [
-    el('tr', {}, [el('th', {}, 'Date'), el('th', {}, 'Type'), el('th', { class: 'num' }, 'Mi'), el('th', { class: 'num' }, 'Min'), el('th', { class: 'num' }, 'Pace'), el('th', { class: 'num' }, 'RPE')]),
-    ...runs.map(r => el('tr', { class: 'tappable', onclick: () => editRun(r, settings) }, [
-      el('td', {}, fmtDate(r.date)), el('td', {}, r.type), el('td', { class: 'num' }, r.distance == null ? '' : r.distance), el('td', { class: 'num' }, r.minutes == null ? '' : r.minutes), el('td', { class: 'num' }, fmtPace(r.pace)), el('td', { class: 'num' }, r.rpe == null ? '' : r.rpe)
-    ]))
-  ]);
-  view.appendChild(el('div', { class: 'card' }, table));
-}
-
-function editRun(r, settings) {
-  showModal(el('div', {}, [
-    el('h2', {}, `${r.type}, ${fmtDate(r.date)}`),
-    el('p', { class: 'muted' }, r.notes || ''),
-    el('div', { class: 'btn-row' }, [
-      el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close'),
-      el('button', { class: 'btn', onclick: () => runForm(D.plan, settings, r, () => renderRuns()) }, 'Edit'),
-      el('button', { class: 'btn danger', onclick: async () => { closeModal(); if (await confirmDialog('Delete this run?', '', 'Delete', true)) { await deleteRun(r.id); renderRuns(); } } }, 'Delete')
     ])
   ]));
 }
