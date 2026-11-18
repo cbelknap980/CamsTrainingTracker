@@ -1,11 +1,11 @@
 {
-  "rulesVersion": "1.1",
+  "rulesVersion": "1.2",
   "increments": {
     "default": 5,
     "byExercise": {
       "strict_press": 2.5,
       "push_press": 2.5,
-      "weighted_pullup": 2.5
+      "weighted_pullup": 5
     }
   },
   "smallestJump": {
@@ -13,7 +13,7 @@
     "dumbbell": 5,
     "machine": 5,
     "cable": 5,
-    "weighted_bw": 2.5,
+    "weighted_bw": 5,
     "bodyweight": 0
   },
   "mainLiftTest": {
@@ -144,7 +144,9 @@
     "switchSeconds": 12,
     "getReadySeconds": 5,
     "extendSeconds": 15,
-    "rampSetSeconds": 30
+    "rampSetSeconds": 30,
+    "confirmSetup": "block",
+    "confirmSetupDescription": "Before the first set of each new block the set-up countdown waits for a 'Set-up done' tap instead of starting the set by itself. Values: block, exercise, off. The Settings toggle switches it off on the phone."
   },
   "e1rm": {
     "formula": "epley"
@@ -186,7 +188,7 @@
     ]
   },
   "startingEstimates": {
-    "description": "Rough first-session weights for free-weight accessories with no history, as a fraction of a main lift training weight or of bodyweight. Dumbbell numbers are per dumbbell. Machines and cables are left blank because stacks differ. Shown as estimates; the first logged session replaces them.",
+    "description": "Rough first-session weights for free-weight accessories with no history, as a fraction of a main lift training weight or of bodyweight. Fractions for dumbbell lifts are per dumbbell; a lift marked pair in plan.json shows the total of both. Machines and cables are left blank because stacks differ. Shown as estimates; the first logged session replaces them.",
     "roundTo": 5,
     "byExercise": {
       "rdl": {
@@ -226,5 +228,13 @@
         "fraction": 0.26
       }
     }
+  },
+  "dumbbellPairs": {
+    "description": "Exercises marked pair in plan.json use two dumbbells. Their weights are stored, shown and logged as the total of both; the weight jump is this many times the dumbbell jump so each hand moves one step.",
+    "count": 2
+  },
+  "review": {
+    "description": "End-of-session review: a set that was skipped, or is missing a weight or reps, is listed at the top and Save stays locked until each one is filled in or confirmed as skipped.",
+    "blockSaveOnOpenItems": true
   }
 }

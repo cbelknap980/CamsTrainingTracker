@@ -1,9 +1,9 @@
 // logger.js - Logger: turns a finished timeline into a session record, runs the Progression Engine,
 // saves everything, and renders the summary. Also the run log form.
 
-import { applyProgression } from './progression.js';
+import { applyProgression, incrementFor } from './progression.js';
 import { getTargets, setTargets, putSession, putRun, newId, getSettings } from './store.js';
-import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, weekNumber, effortLabel, getData } from './data.js';
+import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, weekNumber, effortLabel, getData, weightWithPair, isPair } from './data.js';
 import { el, toast, closeModal, showModal, effortChips } from './ui.js';
 
 /** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
@@ -75,8 +75,19 @@ export const VERDICT = {
  * End-of-session Review (v1.3): every exercise with its sets (tap to edit), the engine's verdict and reason,
  * and the next weight/reps as editable fields. Save runs the engine on the edited sets and applies overrides.
  */
+/** v1.5: what still needs a look on a set before the session can be saved ('' when it is fine). */
+export function setIssue(st, ex) {
+  if (st.ramp) return '';
+  if (st.skipped) return st.skipOk ? '' : 'skipped';
+  const needsWeight = ex && ex.equipment !== 'bodyweight' && !st.holdSeconds;
+  if (needsWeight && st.weight == null) return 'no weight';
+  if (st.reps == null) return st.holdSeconds ? 'no time' : 'no reps';
+  return '';
+}
+
 export async function renderReview(container, draft, ctx, { onSave, onCancel }) {
   const { plan, rules } = ctx;
+  const gate = !(rules.review && rules.review.blockSaveOnOpenItems === false);
   const overrides = {};
   draft.recordId = draft.recordId || newId('ses');
   const settings = await getSettings();
@@ -90,6 +101,23 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
       el('p', { class: 'muted' }, `${record.sessionName} · week ${record.week} · ${fmtMinutes(record.actualSeconds)} (plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)})${record.status !== 'complete' ? ' · ended early' : ''}`),
       el('p', { class: 'muted', style: 'margin:0' }, 'Tap a set to correct it. The arrow is the plan’s verdict for next time; change the next weight if you disagree.')
     ]));
+
+    // v1.5: skipped sets and missing numbers come first, and Save waits for them
+    const open = record.sets.map(st => ({ st, ex: plan.exercises[st.exerciseId], why: setIssue(st, plan.exercises[st.exerciseId]) })).filter(x => x.why);
+    const skippedOpen = open.filter(x => x.why === 'skipped');
+    if (open.length) {
+      container.appendChild(el('div', { class: 'card review-open', id: 'review-open' }, [
+        el('h2', {}, `${open.length} ${open.length === 1 ? 'set needs' : 'sets need'} a look`),
+        el('p', { class: 'muted', style: 'margin:0 0 6px' }, gate ? 'Fill each one in, or confirm you skipped it. Then you can save.' : 'Fill each one in, or confirm you skipped it.'),
+        ...open.map(({ st, ex, why }) => el('div', { class: 'open-item', onclick: () => editSet(st, ex) }, [
+          el('span', {}, `${ex ? ex.name : st.name}${st.round ? ', round ' + st.round : (st.setIndex ? ', set ' + st.setIndex : '')}`),
+          el('span', { class: 'why' }, `${why} ›`)
+        ])),
+        skippedOpen.length ? el('button', { class: 'btn', id: 'confirm-skipped', style: 'margin-top:10px', onclick: () => { skippedOpen.forEach(x => { x.st.skipOk = true; }); paint(); } }, skippedOpen.length === 1 ? 'Yes, I skipped that set' : `Yes, I skipped those ${skippedOpen.length} sets`) : null
+      ]));
+    } else {
+      container.appendChild(el('div', { class: 'card review-open clear', id: 'review-clear' }, [el('b', {}, '✓ Every set is filled in or marked skipped.')]));
+    }
 
     const order = [];
     const groups = {};
@@ -109,18 +137,18 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
         el('div', {}, [el('b', {}, ex ? ex.name : (sets[0].name || id)), el('div', { class: 'muted', style: 'font-size:var(--t-small)' }, line.reason || '')]),
         v.label ? el('span', { class: 'verdict ' + (ov ? 'you' : v.cls) }, ov ? '✎ set by you' : `${v.arrow} ${v.label}${delta != null && delta !== 0 ? ` ${delta > 0 ? '+' : ''}${fmtWeight(delta)}` : ''}`) : null
       ]));
-      const rows = sets.map((st, i) => el('div', { class: 'review-set' + (st.skipped ? ' skipped' : ''), onclick: () => editSet(st, ex) }, [
+      const rows = sets.map((st, i) => el('div', { class: 'review-set' + (st.skipped ? ' skipped' : '') + (setIssue(st, ex) ? ' flag' : ''), onclick: () => editSet(st, ex) }, [
         el('span', { class: 'muted' }, st.baseline ? 'Base' : (st.retest ? 'Test' : (st.round ? `R${st.round}` : `${st.setIndex || i + 1}`))),
-        el('span', {}, st.skipped ? 'skipped' : `${st.weight != null ? fmtWeight(st.weight) + ' lb' : (st.holdSeconds ? '' : 'bw')} × ${st.reps != null ? st.reps : '?'}${st.holdSeconds ? ' s' : ''}`),
+        setIssue(st, ex) ? el('span', { class: 'flag-text' }, st.skipped ? 'skipped: confirm or fill in' : `${setIssue(st, ex)}: tap to add`) : el('span', {}, st.skipped ? 'skipped' : `${st.weight != null ? weightWithPair(ex, st.weight) : (st.holdSeconds ? '' : (ex && ex.equipment === 'bodyweight' ? 'bw' : '? lb'))} × ${st.reps != null ? st.reps : '?'}${st.holdSeconds ? ' s' : ''}`),
         el('span', { class: 'muted' }, st.rpe != null && !st.skipped ? effortLabel(rules, st.rpe) : ''),
         st.pr && st.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : el('span', { class: 'muted' }, '›')
       ]));
       card.appendChild(el('div', { class: 'review-sets' }, rows));
       if (line.verdict !== 'none' && (nextW != null || (ex && ex.equipment !== 'bodyweight'))) {
-        const wIn = el('input', { type: 'number', step: String(ex && ex.mainLift ? (rules.increments.byExercise[id] || rules.increments.default) : (rules.smallestJump[(ex || {}).equipment] || 5)), value: nextW == null ? '' : nextW, inputmode: 'decimal', onchange: e => { overrides[id] = { ...(overrides[id] || {}), weight: e.target.value === '' ? null : Number(e.target.value) }; paint(); } });
+        const wIn = el('input', { type: 'number', step: String(incrementFor(rules, id, ex) || 5), value: nextW == null ? '' : nextW, inputmode: 'decimal', onchange: e => { overrides[id] = { ...(overrides[id] || {}), weight: e.target.value === '' ? null : Number(e.target.value) }; paint(); } });
         const rIn = el('input', { type: 'number', step: '1', value: nextR == null ? '' : nextR, inputmode: 'numeric', onchange: e => { overrides[id] = { ...(overrides[id] || {}), reps: e.target.value === '' ? null : Number(e.target.value) }; paint(); } });
         card.appendChild(el('div', { class: 'review-next' }, [
-          el('div', { class: 'field' }, [el('label', {}, 'Next weight (lb)'), wIn]),
+          el('div', { class: 'field' }, [el('label', {}, isPair(ex) ? 'Next total (lb)' : 'Next weight (lb)'), wIn]),
           el('div', { class: 'field' }, [el('label', {}, 'Next reps'), rIn]),
           ov ? el('button', { class: 'btn small ghost', onclick: () => { delete overrides[id]; paint(); } }, 'Reset') : el('div')
         ]));
@@ -129,7 +157,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     }
     if (result.prs && result.prs.length) container.appendChild(el('div', { class: 'card pr-card' }, [el('h2', {}, 'Personal records'), el('ul', { class: 'lines' }, result.prs.map(p => el('li', {}, p.kind === 'e1rm' ? `${p.name}: e1RM ${p.value} lb (was ${p.prev})` : `${p.name}: heaviest ${fmtWeight(p.value)} lb (was ${fmtWeight(p.prev)})`)))]));
     container.appendChild(el('div', { class: 'stack' }, [
-      el('button', { class: 'btn primary', onclick: () => onSave(overrides) }, 'Save session'),
+      el('button', { class: 'btn primary', id: 'save-session', disabled: gate && open.length > 0, onclick: () => { if (gate && open.length) return; onSave(overrides); } }, gate && open.length ? `Save session (${open.length} to check first)` : 'Save session'),
       onCancel ? el('button', { class: 'btn ghost', onclick: onCancel }, 'Back') : null
     ]));
     window.scrollTo(0, 0);
@@ -144,14 +172,16 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     showModal(el('div', {}, [
       el('h2', {}, `${st.name}${st.setIndex ? ', set ' + st.setIndex : ''}`),
       el('div', { class: 'grid2' }, [
-        isBw ? el('div') : el('div', { class: 'field' }, [el('label', {}, ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight'), w]),
+        isBw ? el('div') : el('div', { class: 'field' }, [el('label', {}, ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight')), w]),
         el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r])
       ]),
       st.holdSeconds ? null : el('div', { class: 'field' }, [el('label', {}, 'Effort'), chips]),
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
-        st.skipped ? el('button', { class: 'btn', onclick: () => { st.skipped = false; st.done = true; st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = rpe; closeModal(); paint(); } }, 'Mark done') : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.done = false; closeModal(); paint(); } }, 'Mark skipped'),
-        el('button', { class: 'btn primary', onclick: () => { st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = rpe; st.done = true; st.skipped = false; closeModal(); paint(); } }, 'Save')
+        st.skipped
+          ? el('button', { class: 'btn', onclick: () => { st.skipOk = true; closeModal(); paint(); } }, 'I skipped it')
+          : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.skipOk = true; st.done = false; closeModal(); paint(); } }, 'Mark skipped'),
+        el('button', { class: 'btn primary', onclick: () => { st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = rpe; st.done = true; st.skipped = false; st.skipOk = false; closeModal(); paint(); } }, st.skipped ? 'I did it: save' : 'Save')
       ])
     ]));
   }
@@ -201,7 +231,7 @@ export function setsTable(sets) {
   const rows = sets.filter(s => !s.ramp).map(s => el('tr', {}, [
     el('td', {}, [`${s.name}${s.baseline ? ' (baseline)' : ''}${s.retest ? ' (retest)' : ''}`, s.pr && s.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null]),
     el('td', { class: 'num' }, s.setIndex != null ? (s.round ? `R${s.round}` : `${s.setIndex || ''}`) : ''),
-    el('td', { class: 'num' }, s.skipped ? 'skipped' : `${s.weight != null ? fmtWeight(s.weight) + ' lb' : (s.holdSeconds ? '' : 'bw')} × ${s.reps != null ? s.reps : '?'}${s.holdSeconds ? ' s' : ''}`),
+    el('td', { class: 'num' }, s.skipped ? 'skipped' : `${s.weight != null ? weightWithPair(getData().plan.exercises[s.exerciseId], s.weight) : (s.holdSeconds ? '' : 'bw')} × ${s.reps != null ? s.reps : '?'}${s.holdSeconds ? ' s' : ''}`),
     el('td', { class: 'num' }, s.rpe != null && !s.skipped ? effortLabel(getData().rules, s.rpe) : '')
   ]));
   return el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'Effort')]), ...rows]);

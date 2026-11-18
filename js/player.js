@@ -2,11 +2,13 @@
 // rest-end notifications when the app is in the background, live PR check, haptics.
 // v1.4: sets end on their own timer (logged at target, fixed on the rest screen), a get-ready countdown before
 // every set, voice prompts, a pace bar, effort buttons, work/rest colors.
+// v1.5: Pause in the header on every screen, a Set-up done tap before each new block, an Equipment taken swap,
+// two-dumbbell weights as totals, and a last-set card with weight and rep steppers and a Saved check.
 // State lives in `this.s` and is saved to IndexedDB on every change so a session can be resumed.
 
 import { trimToFit, remainingSeconds } from './builder.js';
 import { setInProgress, clearInProgress } from './store.js';
-import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration } from './data.js';
+import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText } from './data.js';
 import { incrementFor, checkPR } from './progression.js';
 import { el, showModal, closeModal, toast, effortChips } from './ui.js';
 import { icon } from './icons.js';
@@ -24,7 +26,7 @@ export class Player {
       trims: [], warned: false, fired: false, status: 'running', startedISO: null, prs: []
     };
     this.audio = null; this.wakeLock = null; this.timer = null; this.editOpen = false; this.swReg = null;
-    this.pendingRpe = null; this.said = [];
+    this.pendingRpe = null; this.said = []; this.savedAt = 0;
     this._onVis = () => this.onVisibility();
   }
 
@@ -142,7 +144,7 @@ export class Player {
     if (x.ramp) parts.push('ramp-up');
     else if (x.round) parts.push(`round ${x.round} of ${x.roundCount}`);
     else if (x.setIndex && x.setCount) parts.push(`set ${x.setIndex} of ${x.setCount}`);
-    if (x.target && x.target.weight != null) parts.push(`${fmtWeight(x.target.weight)} pounds`);
+    if (x.target && x.target.weight != null) parts.push(`${fmtWeight(x.target.weight)} pounds${isPair(this.plan.exercises[x.exerciseId]) ? ' total' : ''}`);
     if (x.holdSeconds) parts.push(`${x.holdSeconds} seconds${x.perSide ? ' each side' : ''}`);
     else if (x.target && x.target.reps != null) parts.push(`${x.target.reps} reps${x.perSide ? ' each side' : ''}`);
     return parts.join(', ') + '.';
@@ -164,11 +166,12 @@ export class Player {
   notificationText() {
     const n = this.steps[this.s.idx + 1];
     const body = n ? `Next: ${this.describe(n)}` : 'Last step';
+    if (this.waiting()) return { title: 'Set-up time is up', body: n ? `Tap Set-up done for ${n.name}` : body };
     return { title: 'Rest done', body };
   }
   scheduleNotification() {
     if (!this.notificationsOn() || !this.step || !this.isCountdown(this.step) || this.s.pausedAt != null) return;
-    const endAt = this.s.stepStart + this.stepSeconds(this.step) * 1000;
+    const endAt = this.s.stepStart + (this.stepSeconds(this.step) - (this.waiting() ? this.holdAt() : 0)) * 1000;
     if (endAt <= Date.now()) return;
     const { title, body } = this.notificationText();
     if (this.swReg.active) this.swReg.active.postMessage({ type: 'schedule-rest-end', endAt, title, body });
@@ -201,8 +204,35 @@ export class Player {
     const a = this.steps[idx]; const b = this.steps[idx + 1];
     return !!(a && b && (a.kind === 'rest' || a.kind === 'transition') && b.kind === 'set');
   }
+  /** v1.5: does this countdown wait for a Set-up done tap? Yes before the first set of a new block (rules.timing.confirmSetup). */
+  needsConfirm(idx = this.s.idx) {
+    const mode = this.rules.timing.confirmSetup;
+    if (this.settings.confirmSetup === false || !mode || mode === 'off' || !this.leadsIntoSet(idx)) return false;
+    const next = this.steps[idx + 1];
+    for (let i = idx - 1; i >= 0; i--) {
+      const x = this.steps[i];
+      if (x.kind !== 'set') continue;
+      if (mode === 'exercise') { if (x.exerciseId === next.exerciseId) return false; }
+      else return x.blockId !== next.blockId;
+    }
+    return true;
+  }
+  waiting() { return !this.s.confirmed && this.needsConfirm(); }
+  /** The set-up clock has run out and the step is holding for the tap. */
+  held() { return this.waiting() && this.remainingInStep() <= this.holdAt() + 0.3; }
+  phaseKind(group) { return this.isReady() || this.held() ? 'ready' : group; }
+  /** Seconds left on the clock where a waiting set-up step holds: the start of the get-ready count. */
+  holdAt(step = this.step) { return Math.min(this.rules.timing.getReadySeconds, this.stepSeconds(step)); }
+  confirmSetup() {
+    if (!this.waiting()) return;
+    this.s.confirmed = true; this.cue('tap');
+    const total = this.stepSeconds(this.step); const g = this.holdAt();
+    if (this.remainingInStep() > g) this.s.stepStart = this.now() - (total - g) * 1000; // straight to the get-ready count
+    this.s.fired = false; this.s.readySaid = false; this.s.lastTickSec = null;
+    this.renderStep(); this.persist();
+  }
   isReady() {
-    if (!this.leadsIntoSet() || this.s.pausedAt != null) return false;
+    if (!this.leadsIntoSet() || this.s.pausedAt != null || this.waiting()) return false;
     const rem = this.remainingInStep();
     return rem > 0 && rem <= this.rules.timing.getReadySeconds && this.stepSeconds(this.step) > this.rules.timing.getReadySeconds;
   }
@@ -234,6 +264,21 @@ export class Player {
         this.logSet({ auto: true });
         return;
       }
+    }
+    if (this.isCountdown(step) && this.waiting()) {
+      // v1.5: the set-up clock runs down, then holds until Set-up done is tapped
+      const g = this.holdAt(step);
+      if (this.remainingInStep(step) <= g) {
+        this.s.stepStart = Date.now() - (this.stepSeconds(step) - g) * 1000;
+        if (!this.s.waitSaid) {
+          this.s.waitSaid = true; this.cue('end'); this.say('Tap set-up done when you are ready.');
+          if (document.hidden) this.showNotificationNow();
+          this.renderStep();
+        }
+      }
+      this.updateTimerDom();
+      if (Date.now() - (this.s.lastTick || 0) > 5000) this.persist();
+      return;
     }
     if (this.isCountdown(step)) {
       const rem = this.remainingInStep(step);
@@ -270,6 +315,7 @@ export class Player {
   goTo(idx) {
     this.s.idx = idx; this.s.stepStart = Date.now(); this.s.side = 0; this.s.warned = false; this.s.fired = false; this.editOpen = false;
     this.s.readySaid = false; this.s.lastTickSec = null; this.s.manual = false; this.pendingRpe = null;
+    this.s.confirmed = false; this.s.waitSaid = false;
     this.cancelScheduledNotification();
     if (idx >= this.steps.length) { this.finish('complete'); return; }
     this.renderStep();
@@ -307,8 +353,9 @@ export class Player {
   }
   addSeconds(n) {
     const s = this.step; if (!s) return;
-    s.seconds = (s.seconds || 0) + n; this.s.fired = false; this.s.warned = false;
+    s.seconds = (s.seconds || 0) + n; this.s.fired = false; this.s.warned = false; this.s.waitSaid = false;
     if (this.s.readySaid && !this.isReady()) { this.s.readySaid = false; this.s.lastTickSec = null; this.renderStep(); }
+    if (this.needsConfirm()) this.renderStep();
     this.updateTimerDom(); this.persist();
     if (document.hidden) this.scheduleNotification();
   }
@@ -356,6 +403,7 @@ export class Player {
     const s = this.steps[idx]; if (!s || !s.record) return;
     const old = s.record.weight;
     Object.assign(s.record, patch);
+    s.record.edited = true; this.savedAt = Date.now();
     if ('weight' in patch && patch.weight !== old) this.carryWeight(idx, s, patch.weight, old != null ? old : (s.target ? s.target.weight : null));
     this.persist();
   }
@@ -414,6 +462,67 @@ export class Player {
     toast(`Trimmed about ${Math.round(res.savedSeconds / 60)} min`);
   }
 
+  // ---- equipment taken: do a later block now (v1.5) ----
+  blockSetNames(blockId) {
+    return [...new Set(this.steps.filter(st => st.blockId === blockId && st.kind === 'set').map(st => st.name))];
+  }
+  blockTitle(blockId) {
+    const first = this.steps.find(st => st.blockId === blockId);
+    const letter = first && /^[A-Z]$/.test(first.blockName);
+    return `${letter ? 'Block ' + first.blockName : (first ? first.blockName : blockId)}: ${this.blockSetNames(blockId).join(', ')}`;
+  }
+  /** Later blocks that have not been started and can be done now instead of the one coming up. */
+  swapChoices() {
+    if (!this.leadsIntoSet()) return [];
+    const n = this.s.idx + 1;
+    const seen = new Set([this.steps[n].blockId]);
+    const out = [];
+    for (let i = n; i < this.steps.length; i++) {
+      const st = this.steps[i];
+      if (seen.has(st.blockId)) continue;
+      seen.add(st.blockId);
+      if (!['straight', 'superset', 'finisher'].includes(st.blockType) || st.iftime) continue;
+      let to = i; while (to < this.steps.length && this.steps[to].blockId === st.blockId) to++;
+      const part = this.steps.slice(i, to);
+      if (part[0].kind !== 'set' || part.some(x => x.done || x.skipped)) continue;
+      out.push({ blockId: st.blockId, from: i, to, title: this.blockTitle(st.blockId) });
+    }
+    return out;
+  }
+  openSwap() {
+    const choices = this.swapChoices();
+    if (!choices.length) { toast('Nothing later in this session to swap with'); return; }
+    const cur = this.steps[this.s.idx + 1];
+    showModal(el('div', {}, [
+      el('h2', {}, 'Equipment taken?'),
+      el('p', { class: 'muted' }, `Pick what to do now. ${this.blockSetNames(cur.blockId).join(' and ')} ${this.blockSetNames(cur.blockId).length > 1 ? 'move' : 'moves'} to right after it.`),
+      el('div', { class: 'menu' }, choices.map(c => el('button', { class: 'menu-item swap-choice', onclick: () => { closeModal(); this.doSwap(c); } }, [icon('skip'), el('span', {}, c.title)]))),
+      el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel')
+    ]));
+  }
+  doSwap(c) {
+    const steps = this.steps;
+    const n = this.s.idx + 1;
+    const cur = steps[n].blockId;
+    let xEnd = n; while (xEnd < steps.length && steps[xEnd].blockId === cur) xEnd++;
+    if (c.from < xEnd) return;
+    const next = [...steps.slice(0, n), ...steps.slice(c.from, c.to), ...steps.slice(n, xEnd), ...steps.slice(xEnd, c.from), ...steps.slice(c.to)];
+    // the countdown before each block names what it now leads into
+    next.forEach((st, i) => {
+      st.idx = i;
+      const nx = next[i + 1];
+      if (!nx || (st.kind !== 'transition' && st.kind !== 'rest')) return;
+      const between = st.kind === 'transition' && !st.lead && /^Set up for /.test(st.name);
+      if (nx.kind !== 'set') { if (between) st.name = nx.kind === 'stretch' ? 'Set up for the stretch block' : `Set up for ${nx.name}`; return; }
+      const names = [...new Set(next.filter(o => o.blockId === nx.blockId && o.kind === 'set').map(o => o.name))];
+      if (between) st.name = `Set up for ${names.join(' + ')}`;
+      if (st.setupFor) st.setupFor = nx.name;
+    });
+    this.s.timeline.steps = next;
+    toast(`Doing ${c.title.split(':')[0]} now`);
+    this.goTo(this.s.idx);
+  }
+
   // ---- menu (L5) ----
   openMenu() {
     const paused = this.s.pausedAt != null;
@@ -424,6 +533,7 @@ export class Player {
       el('div', { class: 'menu' }, [
         item(paused ? 'play' : 'pause', paused ? 'Resume' : 'Pause', () => (paused ? this.unpause() : this.pause())),
         this.s.idx > 0 ? item('back', 'Back one step', () => this.back()) : null,
+        this.swapChoices().length ? item('skip', 'Equipment taken: do another block now', () => this.openSwap()) : null,
         behind ? item('scissors', `Trim to fit (${Math.round(Math.max(p.deltaSeconds, p.overCapSeconds) / 60)} min over)`, () => this.trimPreview()) : null,
         item('stop', 'End session early', () => this.confirmEnd(), 'danger')
       ]),
@@ -527,10 +637,10 @@ export class Player {
     ]);
     showModal(body);
   }
-  readout(weightText, repsLabel, repsText, effortText, accent, rpe) {
+  readout(weightText, repsLabel, repsText, effortText, accent, rpe, pairSub) {
     const lvl = effortLevel(this.rules, rpe);
     return el('div', { class: 'readout step-target' + (accent ? '' : ' quiet') }, [
-      el('div', { class: 'tile tile-weight' }, [el('div', { class: 'tile-label' }, 'Weight'), el('div', { class: 'tile-value' }, weightText)]),
+      el('div', { class: 'tile tile-weight' }, [el('div', { class: 'tile-label' }, pairSub ? 'Total weight' : 'Weight'), el('div', { class: 'tile-value' }, weightText), pairSub ? el('div', { class: 'tile-sub' }, pairSub + ' lb') : null]),
       el('div', { class: 'tile' }, [el('div', { class: 'tile-label' }, repsLabel), el('div', { class: 'tile-value' }, repsText)]),
       el('div', { class: 'tile tile-effort' }, [el('div', { class: 'tile-label' }, 'Effort'), el('div', { class: 'tile-value small' }, [lvl && effortText ? el('span', { class: 'dot effort-' + lvl.key }) : null, (effortText || '–').replace(' in the tank', '\nin the tank').replace('close: ', 'close:\n')])])
     ]);
@@ -551,34 +661,57 @@ export class Player {
     else if (x.setIndex && x.setCount) parts.push(`Set ${x.setIndex} of ${x.setCount}`);
     return parts.join(' · ');
   }
-  /** Rest screen: the set that just ended, with its numbers and effort one tap away. */
+  /**
+   * Rest screen: the set that just ended, as its own card. v1.5: weight and reps change with - and + right here
+   * (tap a number to type it), and a check shows that the set is logged or that a change was saved.
+   */
   justDone(idx) {
     const p = this.steps[idx];
     if (!p || p.kind !== 'set' || !p.record || !p.record.done) return null;
     const ex = this.plan.exercises[p.exerciseId];
     const rec = p.record;
     const isBw = ex && ex.equipment === 'bodyweight';
-    const needs = !isBw && !p.holdSeconds && rec.weight == null;
-    const nums = `${isBw || p.holdSeconds ? '' : (rec.weight != null ? fmtWeight(rec.weight) + ' lb × ' : '? lb × ')}${rec.reps != null ? rec.reps : '?'}${p.holdSeconds ? ' s' : ''}`;
+    const hasWeight = !isBw && !p.holdSeconds;
+    const needs = hasWeight && rec.weight == null;
+    const wStep = (ex ? incrementFor(this.rules, p.exerciseId, ex) : 5) || 5;
+    const change = patch => { this.fixRecord(idx, patch); this.cue('tap'); this.renderStep(); };
+    const stepper = (key, label, value, sub, minus, plus) => el('div', { class: 'jd-step' }, [
+      el('div', { class: 'jd-step-label' }, label),
+      el('div', { class: 'jd-step-row' }, [
+        el('button', { type: 'button', class: 'jd-pm', id: `jd-${key}-minus`, 'aria-label': `less ${label}`, onclick: minus }, '−'),
+        el('button', { type: 'button', class: 'jd-val' + (needs && key === 'w' ? ' needs' : ''), id: `jd-${key}`, 'aria-label': `type ${label}`, onclick: () => this.openFix(idx) }, [el('span', {}, value), sub ? el('small', {}, sub) : null]),
+        el('button', { type: 'button', class: 'jd-pm', id: `jd-${key}-plus`, 'aria-label': `more ${label}`, onclick: plus }, '+')
+      ])
+    ]);
+    const w = rec.weight != null ? rec.weight : (p.target && p.target.weight != null ? p.target.weight : null);
+    const fresh = Date.now() - this.savedAt < 1600;
+    const where = p.round ? `round ${p.round}` : (p.ramp ? 'ramp-up' : (p.setIndex ? `set ${p.setIndex}` : ''));
     return el('div', { class: 'just-done', id: 'just-done' }, [
       el('div', { class: 'row' }, [
-        el('div', { class: 'jd-left' }, [el('div', { class: 'label' }, 'Just done'), el('div', { class: 'jd-name' }, p.name)]),
-        el('button', { class: 'jd-nums' + (needs ? ' needs' : ''), id: 'jd-fix', onclick: () => this.openFix(idx) }, [nums, icon('edit')])
+        el('div', { class: 'label' }, 'Last set · fix it here'),
+        el('div', { class: 'jd-saved' + (fresh ? ' flash' : ''), id: 'jd-saved' }, [icon('check'), rec.edited ? 'Saved' : 'Logged'])
       ]),
-      p.holdSeconds ? null : effortChips(this.rules, rec.rpe, lvl => { this.fixRecord(idx, { rpe: lvl.rpe }); this.cue('tap'); this.renderStep(); })
+      el('div', { class: 'jd-name' }, `${p.name}${where ? ', ' + where : ''}`),
+      el('div', { class: 'jd-steps' + (hasWeight ? '' : ' one') }, [
+        hasWeight ? stepper('w', isPair(ex) ? 'Total lb' : (ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight lb'), rec.weight != null ? fmtWeight(rec.weight) : '?', pairText(ex, rec.weight),
+          () => change({ weight: Math.max(0, (w || 0) - wStep) }), () => change({ weight: (w || 0) + wStep })) : null,
+        stepper('r', p.holdSeconds ? 'Seconds' : (p.perSide ? 'Reps / side' : 'Reps'), rec.reps != null ? `${rec.reps}` : '?', '',
+          () => change({ reps: Math.max(0, (rec.reps || 0) - 1) }), () => change({ reps: (rec.reps || 0) + 1 }))
+      ]),
+      p.holdSeconds ? null : effortChips(this.rules, rec.rpe, lvl => change({ rpe: lvl.rpe }))
     ]);
   }
   openFix(idx) {
     const p = this.steps[idx]; if (!p || !p.record) return;
     const ex = this.plan.exercises[p.exerciseId];
     const isBw = ex && ex.equipment === 'bodyweight';
-    const wStep = ex && ex.mainLift ? incrementFor(this.rules, p.exerciseId, ex) : (ex ? (this.rules.smallestJump[ex.equipment] || 5) : 5);
+    const wStep = ex ? incrementFor(this.rules, p.exerciseId, ex) : 5;
     const wVal = p.record.weight != null ? p.record.weight : (p.target && p.target.weight != null ? p.target.weight : '');
     const num = id => { const x = document.getElementById(id); return x && x.value !== '' ? Number(x.value) : null; };
     showModal(el('div', {}, [
       el('h2', {}, `${p.name}${p.setIndex ? ', ' + (p.round ? 'round ' : 'set ') + p.setIndex : ''}`),
       el('div', { class: 'grid2' }, [
-        isBw || p.holdSeconds ? el('div') : field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight (lb)', 'fix-weight', wVal, wStep || 2.5),
+        isBw || p.holdSeconds ? el('div') : field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight (lb)'), 'fix-weight', wVal, wStep || 2.5),
         field(p.holdSeconds ? 'Seconds' : 'Reps', 'fix-reps', p.record.reps != null ? p.record.reps : '', 1)
       ]),
       el('div', { class: 'btn-row' }, [
@@ -625,6 +758,8 @@ export class Player {
     const hb = this.leadsIntoSet() ? this.steps[this.s.idx + 1] : s;
     const letter = /^[A-Z]$/.test(hb.blockName);
     const where = `${letter ? 'Block ' + hb.blockName + ' · ' : ''}${this.blockLabel(hb.blockId)}`;
+    // v1.5: Pause sits in the header on every screen, warm-up and stretch included
+    const pauseBtn = el('button', { class: 'pause-pill' + (paused ? ' on' : ''), id: 'pause-btn', onclick: () => (paused ? this.unpause() : this.pause()) }, [icon(paused ? 'play' : 'pause'), paused ? 'Resume' : 'Pause']);
     const head = el('div', { class: 'player-head' }, [
       this.s.idx > 0 ? el('button', { class: 'icon-btn', id: 'back-btn', 'aria-label': 'Back one step', onclick: () => this.back() }, icon('back')) : el('div', { class: 'icon-btn ghost-slot' }),
       el('div', { class: 'head-left' }, [
@@ -632,9 +767,21 @@ export class Player {
         el('div', { class: 'block' }, where)
       ]),
       el('div', { class: 'head-right' }, [
-        el('button', { class: 'icon-btn', 'aria-label': 'More', onclick: () => this.openMenu() }, icon('more'))
+        pauseBtn,
+        el('button', { class: 'icon-btn', id: 'more-btn', 'aria-label': 'More', onclick: () => this.openMenu() }, icon('more'))
       ])
     ]);
+    // v1.5: in a finisher the top bar lists its exercises, with the one you are on (or about to do) picked out
+    let finRow = null;
+    if (hb.blockType === 'finisher') {
+      const ids = [...new Set(this.steps.filter(st => st.blockId === hb.blockId && st.kind === 'set' && st.exerciseId).map(st => st.exerciseId))];
+      const nowId = hb.kind === 'set' ? hb.exerciseId : null;
+      const short = id => (this.plan.exercises[id] && (this.plan.exercises[id].short || this.plan.exercises[id].name)) || id;
+      finRow = el('div', { class: 'fin-row', id: 'fin-row' }, [
+        el('span', { class: 'fin-round' }, hb.round ? `Round ${hb.round} of ${hb.roundCount}` : hb.blockName),
+        ...ids.map(id => el('span', { class: 'fin-ex' + (id === nowId ? ' now' : '') }, short(id)))
+      ]);
+    }
     const prog = this.renderStrip();
 
     const main = el('div', { class: 'step-main' });
@@ -649,26 +796,36 @@ export class Player {
     if (this.leadsIntoSet()) {
       // Rest or set-up before a set: fix the last set, watch the clock, see what is next.
       const ready = this.isReady();
+      const held = this.held();
       const base = s.kind === 'rest' ? (s.setupFor ? 'Rest + set up' : 'Rest') : (s.setupFor ? 'Set up' : 'Switch');
-      main.appendChild(pill(ready ? 'Get ready' : base, ready ? 'ready' : 'rest'));
+      const phase = pill(ready ? 'Get ready' : (held ? 'Confirm set-up' : base), ready || held ? 'ready' : 'rest');
       const jd = this.justDone(this.s.idx - 1);
-      if (jd) main.appendChild(jd);
-      main.appendChild(this.timerBlock(true, !!jd));
-      main.appendChild(el('div', { class: 'label', style: 'margin-top:10px' }, 'Up next'));
-      main.appendChild(el('div', { class: 'step-name' }, next.name));
-      if (this.whereText(next)) main.appendChild(el('div', { class: 'step-where small' }, this.whereText(next)));
+      if (jd) {
+        // v1.5: with the last-set card on screen the clock is a compact row and bar, so everything fits without scrolling
+        main.appendChild(el('div', { class: 'rest-top' }, [phase, el('div', { class: 'timer', id: 'timer' }, '0:00')]));
+        main.appendChild(el('div', { class: 'rest-track' }, [el('div', { class: 'rest-fill', id: 'rest-fill' })]));
+        main.appendChild(jd);
+      } else {
+        main.appendChild(phase);
+        main.appendChild(this.timerBlock(true));
+      }
       const nex = this.plan.exercises[next.exerciseId];
+      const up = el('div', { class: 'up-next' + (jd ? ' split' : ''), id: 'up-next' });
+      up.appendChild(el('div', { class: 'label' }, 'Up next'));
+      up.appendChild(el('div', { class: 'step-name' }, next.name));
+      if (this.whereText(next)) up.appendChild(el('div', { class: 'step-where small' }, this.whereText(next)));
       const w = next.target && next.target.weight != null ? `${fmtWeight(next.target.weight)} lb` : (nex && nex.equipment === 'bodyweight' ? 'BW' : (next.baseline ? 'Work up' : '–'));
       const rl = next.holdSeconds ? 'Seconds' : (next.perSide ? 'Reps / side' : 'Reps');
       const r = next.holdSeconds ? `${next.holdSeconds}` : (next.target && next.target.reps != null ? `${next.target.reps}` : (next.repRange ? repsText(next.repRange) : 'max'));
-      main.appendChild(this.readout(w, rl, r, this.effortWords(next), false, next.rpeDefault));
+      up.appendChild(this.readout(w, rl, r, this.effortWords(next), false, next.rpeDefault, next.target ? pairText(nex, next.target.weight) : ''));
       const prevSet = this.lastSetOf(next.exerciseId);
       const prevW = prevSet ? (prevSet.record && prevSet.record.weight != null ? prevSet.record.weight : (prevSet.target ? prevSet.target.weight : null)) : null;
       if (prevW != null && next.target && next.target.weight != null && prevW !== next.target.weight) {
-        main.appendChild(el('div', { class: 'step-cue' }, `Change the weight: ${fmtWeight(prevW)} → ${fmtWeight(next.target.weight)} lb`));
+        up.appendChild(el('div', { class: 'step-cue' }, `Change the weight: ${fmtWeight(prevW)} → ${fmtWeight(next.target.weight)} lb`));
       } else if (next.tips && next.tips.length) {
-        main.appendChild(el('div', { class: 'step-cue' }, next.tips[0]));
+        up.appendChild(el('div', { class: 'step-cue' }, next.tips[0]));
       }
+      main.appendChild(up);
     } else if (s.kind === 'rest') {
       main.appendChild(pill('Rest', 'rest'));
       main.appendChild(this.timerBlock(true));
@@ -687,7 +844,7 @@ export class Player {
         const w = s.target && s.target.weight != null ? `${fmtWeight(s.target.weight)} lb` : (ex && ex.equipment === 'bodyweight' ? 'BW' : (ex && ex.equipment === 'weighted_bw' ? '+0 lb' : '?'));
         const rl = s.holdSeconds ? (s.perSide ? 'Sec / side' : 'Seconds') : (s.perSide ? 'Reps / side' : 'Reps');
         const r = s.holdSeconds ? `${s.holdSeconds}` : (s.target && s.target.reps != null ? `${s.target.reps}` : (s.repRange ? repsText(s.repRange) : 'max'));
-        main.appendChild(this.readout(w, rl, r, this.effortWords(s), true, s.rpeDefault));
+        main.appendChild(this.readout(w, rl, r, this.effortWords(s), true, s.rpeDefault, s.target ? pairText(ex, s.target.weight) : ''));
         if (s.auto && !s.holdSeconds) {
           main.appendChild(el('div', { class: 'pace', id: 'pace' }, [
             el('div', { class: 'pace-row' }, [el('span', { class: 'pace-text', id: 'pace-text' }, ''), el('span', { class: 'pace-clock', id: 'timer' }, '0:00')]),
@@ -716,11 +873,9 @@ export class Player {
       }
       if (next) main.appendChild(el('div', { class: 'next' }, [el('b', {}, 'Next: '), this.describe(next), (next.kind === 'rest' || next.kind === 'transition') && this.steps[this.s.idx + 2] ? el('span', { class: 'muted' }, ` → ${this.describe(this.steps[this.s.idx + 2])}`) : null]));
     }
-    if (paused) main.appendChild(el('div', { class: 'badge' }, 'Paused'));
+    if (paused) main.insertBefore(el('button', { class: 'paused-banner', id: 'paused-banner', onclick: () => this.unpause() }, [icon('play'), 'Paused. Tap to resume']), main.firstChild);
 
     const actions = el('div', { class: 'player-actions' });
-    // v1.4: sets and rests now run on their own, so Pause sits on the screen for when you step away
-    const pauseBtn = () => el('button', { class: 'btn', id: 'pause-btn', onclick: () => (paused ? this.unpause() : this.pause()) }, [icon(paused ? 'play' : 'pause'), paused ? 'Resume' : 'Pause']);
     if (s.kind === 'set') {
       const ex = this.plan.exercises[s.exerciseId];
       const showEdit = this.editOpen || (s.target && s.target.weight == null && ex && ex.equipment !== 'bodyweight' && !s.holdSeconds) || s.baseline || s.retest || (s.repRange == null && !s.holdSeconds);
@@ -728,20 +883,29 @@ export class Player {
       actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.logSet() }, [icon('check'), s.holdSeconds ? 'Done early' : 'Done']));
       actions.appendChild(el('div', { class: 'secondary' }, [
         this.isAutoSet(s) ? el('button', { class: 'btn', id: 'extend-btn', onclick: () => this.addSeconds(this.rules.timing.extendSeconds) }, [icon('plus'), `${this.rules.timing.extendSeconds} s`]) : null,
-        this.isAutoSet(s) || s.holdSeconds ? pauseBtn() : null,
         el('button', { class: 'btn', onclick: () => this.toggleEdit() }, [icon('edit'), this.editOpen ? 'Hide' : 'Edit']),
         el('button', { class: 'btn', onclick: () => this.skip() }, [icon('skip'), 'Skip'])
       ]));
     } else if (s.kind === 'decision') {
       actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.decide(true) }, 'Do it'));
       actions.appendChild(el('div', { class: 'secondary' }, [el('button', { class: 'btn', onclick: () => this.decide(false) }, 'Skip it')]));
+    } else if (this.waiting()) {
+      // v1.5: a new block starts only after this tap; then the get-ready count runs
+      actions.appendChild(el('button', { class: 'btn primary', id: 'confirm-btn', onclick: () => this.confirmSetup() }, [icon('check'), 'Set-up done']));
+      actions.appendChild(el('div', { class: 'secondary' }, [
+        el('button', { class: 'btn', onclick: () => this.addSeconds(30) }, [icon('plus'), '30 s']),
+        this.swapChoices().length ? el('button', { class: 'btn', id: 'swap-btn', onclick: () => this.openSwap() }, 'Equipment taken') : null
+      ]));
     } else {
       actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.advance() }, [icon('skip'), s.kind === 'rest' ? 'Skip rest' : (this.leadsIntoSet() ? 'Start now' : 'Next')]));
-      actions.appendChild(el('div', { class: 'secondary' }, [el('button', { class: 'btn', onclick: () => this.addSeconds(30) }, [icon('plus'), '30 s']), pauseBtn()]));
+      actions.appendChild(el('div', { class: 'secondary' }, [
+        el('button', { class: 'btn', onclick: () => this.addSeconds(30) }, [icon('plus'), '30 s']),
+        this.swapChoices().length ? el('button', { class: 'btn', id: 'swap-btn', onclick: () => this.openSwap() }, 'Equipment taken') : null
+      ]));
     }
 
-    document.body.setAttribute('data-kind', this.isReady() ? 'ready' : group);
-    const wrap = el('div', { class: 'player', 'data-kind': group }, [head, prog, main, actions]);
+    document.body.setAttribute('data-kind', this.phaseKind(group));
+    const wrap = el('div', { class: 'player' + (paused ? ' is-paused' : ''), 'data-kind': group }, [head, finRow, prog, main, actions]);
     c.appendChild(wrap);
     this.updateTimerDom();
 
@@ -765,10 +929,10 @@ export class Player {
     const wVal = rec.weight != null ? rec.weight : (s.target && s.target.weight != null ? s.target.weight : '');
     const rVal = rec.reps != null ? rec.reps : (s.holdSeconds ? s.holdSeconds : (s.target && s.target.reps != null ? s.target.reps : ''));
     const pVal = this.pendingRpe != null ? this.pendingRpe : (rec.rpe != null ? rec.rpe : this.defaultRpe(s));
-    const wStep = ex && ex.mainLift ? incrementFor(this.rules, s.exerciseId, ex) : (ex ? (this.rules.smallestJump[ex.equipment] || 5) : 5);
+    const wStep = ex ? incrementFor(this.rules, s.exerciseId, ex) : 5;
     const isBw = ex && ex.equipment === 'bodyweight';
     const panel = el('div', { class: 'edit-panel', id: 'edit-panel', hidden: !open });
-    if (!isBw) panel.appendChild(field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight (lb)', 'in-weight', wVal, wStep || 2.5));
+    if (!isBw) panel.appendChild(field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight (lb)'), 'in-weight', wVal, wStep || 2.5));
     panel.appendChild(field(s.holdSeconds ? 'Seconds' : 'Reps', 'in-reps', rVal, 1));
     if (isBw) panel.appendChild(el('div'));
     if (!s.holdSeconds && !s.ramp) {
@@ -787,7 +951,7 @@ export class Player {
   updateTimerDom() {
     const t = this.container.querySelector('#timer');
     const s = this.step; if (!t || !s) return;
-    const want = this.isReady() ? 'ready' : this.kindGroup(s);
+    const want = this.phaseKind(this.kindGroup(s));
     if (document.body.getAttribute('data-kind') !== want) document.body.setAttribute('data-kind', want);
     if (s.kind === 'set' && s.auto && !s.holdSeconds) {
       // pace bar: which rep the tempo says you should be on
@@ -810,11 +974,16 @@ export class Player {
       }
       if (pf) pf.style.width = `${Math.min(100, 100 * e / (s.seconds || 1)).toFixed(1)}%`;
     } else if (this.isCountdown(s)) {
-      const rem = this.remainingInStep(s);
+      // v1.5: a set-up step that waits for the tap counts down to zero and holds there
+      const hold = this.waiting() ? this.holdAt(s) : 0;
+      const rem = Math.max(0, this.remainingInStep(s) - hold);
       t.textContent = fmtClock(Math.ceil(rem));
       t.classList.toggle('warn', !this.leadsIntoSet() && rem <= this.rules.timing.restWarningSeconds && rem > 0);
       const fg = this.container.querySelector('#ring-fg');
-      if (fg) { const total = this.stepSeconds(s) || 1; fg.setAttribute('stroke-dashoffset', (RING_C * (1 - rem / total)).toFixed(1)); }
+      const total = (this.stepSeconds(s) - hold) || 1;
+      if (fg) fg.setAttribute('stroke-dashoffset', (RING_C * (1 - rem / total)).toFixed(1));
+      const bar = this.container.querySelector('#rest-fill');
+      if (bar) bar.style.width = `${Math.max(0, Math.min(100, 100 * rem / total)).toFixed(1)}%`;
     } else {
       t.textContent = fmtClock(this.elapsedInStep());
     }

@@ -41,11 +41,16 @@ export function epley(weight, reps) {
   return Math.round(weight * (1 + reps / 30));
 }
 
+/** Weight step for an exercise. v1.5: a two-dumbbell lift (ex.pair) is stored as a total, so its step is doubled. */
 export function incrementFor(rules, exerciseId, ex) {
   if (rules.increments.byExercise[exerciseId] != null) return rules.increments.byExercise[exerciseId];
-  if (ex && !ex.mainLift) return rules.smallestJump[ex.equipment] != null ? rules.smallestJump[ex.equipment] : rules.increments.default;
+  if (ex && !ex.mainLift) {
+    const j = rules.smallestJump[ex.equipment] != null ? rules.smallestJump[ex.equipment] : rules.increments.default;
+    return ex.pair ? j * pairCount(rules) : j;
+  }
   return rules.increments.default;
 }
+export function pairCount(rules) { return (rules.dumbbellPairs && rules.dumbbellPairs.count) || 2; }
 
 /**
  * applyProgression({ session, targets, rules, plan, settings })
@@ -215,7 +220,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
       }
     } else {
       if (allTop) {
-        const jump = rules.smallestJump[ex.equipment] || 0;
+        const jump = incrementFor(rules, id, ex) || 0;
         if (jump > 0 && baseWeight != null) {
           cur.weight = roundTo(baseWeight + jump, jump);
           cur.reps = bottom; cur.stall = 0;
@@ -272,12 +277,14 @@ function summarizeReps(done) {
  * (a fraction of a main lift's training weight, or of bodyweight). Returns null when there is no rule
  * or nothing to base it on.
  */
-export function estimateStart(rules, exerciseId, targets, settings) {
+export function estimateStart(rules, exerciseId, targets, settings, ex) {
   const se = rules.startingEstimates;
   const r = se && se.byExercise && se.byExercise[exerciseId];
   if (!r) return null;
   const base = r.of === 'bodyweight' ? (settings && settings.bodyweightLb) : (targets && targets[r.of] && targets[r.of].weight);
   if (!base) return null;
   const step = se.roundTo || 5;
-  return Math.max(step, roundTo(base * r.fraction, step));
+  const one = Math.max(step, roundTo(base * r.fraction, step));
+  // v1.5: the fraction is per dumbbell; a two-dumbbell lift shows the total
+  return ex && ex.pair ? one * pairCount(rules) : one;
 }

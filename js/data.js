@@ -1,6 +1,6 @@
 // data.js - loads the data files and provides plan helpers (week number, phase, today's session).
 
-export const APP_VERSION = '1.4.1';
+export const APP_VERSION = '1.5.0';
 
 let cache = null;
 
@@ -119,6 +119,12 @@ export function effortLabel(rules, rpe) {
 
 const EQUIPMENT = { barbell: 'Barbell', dumbbell: 'Dumbbells', machine: 'Machine', cable: 'Cable', weighted_bw: 'Weighted', bodyweight: 'Bodyweight' };
 export function equipmentLabel(eq) { return EQUIPMENT[eq] || ''; }
+/** v1.5: "Dumbbells" only for lifts that use two; a one-dumbbell lift reads "Dumbbell". */
+export function equipmentFor(ex) {
+  if (!ex) return '';
+  if (ex.equipment === 'dumbbell' && !ex.pair) return 'Dumbbell';
+  return equipmentLabel(ex.equipment);
+}
 
 /** "2 minutes 45 seconds" for the voice prompts. */
 export function spokenDuration(seconds) {
@@ -140,6 +146,20 @@ export function fmtWeight(w) {
   if (w === null || w === undefined || w === '') return '';
   const n = Number(w);
   return Number.isInteger(n) ? `${n}` : `${n.toFixed(1)}`;
+}
+
+// ---- v1.5 two-dumbbell lifts: weights are the total of both ----
+export function isPair(ex) { return !!(ex && ex.pair); }
+/** "2 × 40" for a pair total of 80; '' for anything else. */
+export function pairText(ex, total) {
+  if (!isPair(ex) || total == null || total === '') return '';
+  return `2 × ${fmtWeight(Number(total) / 2)}`;
+}
+/** "80 lb (2 × 40)" for pairs, "135 lb" otherwise. */
+export function weightWithPair(ex, w) {
+  if (w == null || w === '') return '';
+  const p = pairText(ex, w);
+  return `${fmtWeight(w)} lb${p ? ' (' + p + ')' : ''}`;
 }
 
 export function roundTo(value, step) {

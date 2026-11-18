@@ -1,5 +1,5 @@
 {
-  "planVersion": "1.1",
+  "planVersion": "1.2",
   "planName": "12-Week Strength Block",
   "source": "2026-11-15 General 12-Week Training Plan.md",
   "startDate": "2026-11-16",
@@ -133,7 +133,8 @@
       "tips": [
         "Slow down, front foot flat, knee tracks over toes.",
         "Lean slightly forward and drive through the front heel."
-      ]
+      ],
+      "pair": true
     },
     "leg_curl": {
       "name": "Seated leg curl",
@@ -155,7 +156,7 @@
       "name": "Standing dumbbell curl",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "DB curl",
+      "short": "Standing curl",
       "tempo": [
         2,
         0,
@@ -166,7 +167,8 @@
         "Elbows pinned to your sides; no swing.",
         "Lower all the way to straight arms."
       ],
-      "logName": "Curl"
+      "logName": "Standing dumbbell curl",
+      "pair": true
     },
     "oh_tri_ext": {
       "name": "Overhead triceps extension",
@@ -252,7 +254,8 @@
       "tips": [
         "Lower until you feel the upper chest stretch, pause, press.",
         "Shoulder blades pinned back and down; a steeper bench turns this into a shoulder press."
-      ]
+      ],
+      "pair": true
     },
     "cs_row": {
       "name": "Chest-supported row",
@@ -284,13 +287,14 @@
       "tips": [
         "Lead with the elbows, raise out and slightly forward.",
         "Lower slowly; no shrugging or swinging."
-      ]
+      ],
+      "pair": true
     },
     "incline_curl": {
-      "name": "Incline curl",
+      "name": "Incline dumbbell curl",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "Inc curl",
+      "short": "Incline curl",
       "tempo": [
         3,
         1,
@@ -300,7 +304,8 @@
       "tips": [
         "Arms hang straight down behind the body; feel the stretch.",
         "Shoulders stay back on the bench."
-      ]
+      ],
+      "pair": true
     },
     "t2b": {
       "name": "Toes-to-bar",
@@ -406,10 +411,10 @@
       ]
     },
     "preacher_curl": {
-      "name": "Preacher curl",
+      "name": "Dumbbell preacher curl",
       "equipment": "dumbbell",
       "mainLift": false,
-      "short": "Preacher",
+      "short": "Preacher curl",
       "tempo": [
         3,
         1,

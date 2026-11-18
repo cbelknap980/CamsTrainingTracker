@@ -105,6 +105,47 @@ function deepMerge(a, b) {
   return out;
 }
 
+// ---- v1.5: two-dumbbell lifts are stored as totals ----
+// kv 'pairTotals': 'none' (nothing to convert), 'doubled' (old per-dumbbell numbers were doubled), 'kept' (left as they were).
+export const getPairTotals = () => kvGet('pairTotals');
+export const setPairTotals = v => kvSet('pairTotals', v);
+
+/** Saved weights for the given exercise ids that were entered before totals: [{ id, weight }] from targets, else from the log. */
+export async function pairWeightsOnFile(ids) {
+  const targets = await getTargets();
+  const sessions = await getSessions();
+  const out = [];
+  for (const id of ids) {
+    let w = targets[id] && targets[id].weight != null ? targets[id].weight : null;
+    if (w == null) { for (const s of sessions) { const st = (s.sets || []).find(x => x.exerciseId === id && x.weight != null); if (st) { w = st.weight; break; } } }
+    if (w != null) out.push({ id, weight: w });
+  }
+  return out;
+}
+
+/** Double every stored weight for the given exercise ids: targets, logged sets, bests, and a session in progress. */
+export async function doublePairWeights(ids) {
+  const set = new Set(ids);
+  const x2 = (o, keys) => { for (const k of keys) if (o && typeof o[k] === 'number') o[k] = o[k] * 2; };
+  const lbText = t => (typeof t === 'string' ? t.replace(/(\d+(?:\.\d+)?) lb/g, (m, n) => `${Number(n) * 2} lb`) : t);
+  const targets = await getTargets();
+  for (const id of ids) x2(targets[id], ['weight', 'bestWeight', 'bestE1rm', 'e1rm', 'baselineWeight', 'baselineE1rm', 'benchmarkWeight', 'retestE1rm']);
+  await setTargets(targets);
+  for (const s of await getSessions()) {
+    let touched = false;
+    for (const st of s.sets || []) { if (set.has(st.exerciseId)) { x2(st, ['weight']); x2(st.target, ['weight']); touched = true; } }
+    for (const id of ids) if (s.e1rms && typeof s.e1rms[id] === 'number') { s.e1rms[id] *= 2; touched = true; }
+    for (const p of s.prs || []) if (set.has(p.exerciseId)) { x2(p, ['value', 'prev']); touched = true; }
+    for (const l of s.whatChanged || []) if (set.has(l.exerciseId)) { x2(l.next, ['weight']); l.text = lbText(l.text); l.reason = lbText(l.reason); touched = true; }
+    if (touched) await putSession(s);
+  }
+  const ip = await getInProgress();
+  if (ip && ip.timeline && ip.timeline.steps) {
+    for (const st of ip.timeline.steps) if (set.has(st.exerciseId)) { x2(st.target, ['weight']); x2(st.record, ['weight']); if (st.record) x2(st.record.target, ['weight']); }
+    await setInProgress(ip);
+  }
+}
+
 // ---- backup and restore ----
 export async function exportAll(appVersion, planVersion) {
   return {
@@ -115,7 +156,8 @@ export async function exportAll(appVersion, planVersion) {
     targets: await getTargets(),
     sessions: await getSessions(),
     runs: await getRuns(),
-    settings: (await kvGet('settings')) || {}
+    settings: (await kvGet('settings')) || {},
+    pairTotals: (await kvGet('pairTotals')) || null
   };
 }
 
@@ -131,6 +173,8 @@ export async function importAll(backup) {
     t.objectStore('kv').put(backup.targets || {}, 'targets');
     t.objectStore('kv').put(backup.settings || {}, 'settings');
     t.objectStore('kv').delete('inProgress');
+    // a backup from before v1.5 has per-dumbbell numbers: clear the flag so the app asks again
+    if (backup.pairTotals) t.objectStore('kv').put(backup.pairTotals, 'pairTotals'); else t.objectStore('kv').delete('pairTotals');
     t.oncomplete = resolve;
     t.onerror = () => reject(t.error);
   });

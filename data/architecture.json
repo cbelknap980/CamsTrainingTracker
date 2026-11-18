@@ -24,7 +24,7 @@
         "sets, reps, rest, minutes"
       ],
       "file": "data/plan.json",
-      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes. v1.4 adds a tempo and focus cues to every exercise and a goal sentence to every session."
+      "description": "The approved 12-week plan as data: three lift sessions with ordered blocks, every exercise's sets, rep range, effort target and rest, the stretch block, run definitions, the weekday calendar and the week phases. Changing the plan means editing this file and publishing a new version; no code changes. v1.4 adds a tempo and focus cues to every exercise and a goal sentence to every session. v1.5: exercises that use two dumbbells are marked pair, and every curl is named by type."
     },
     {
       "id": "settings",
@@ -35,7 +35,7 @@
         "start date, bodyweight"
       ],
       "file": "data/settings.json",
-      "description": "Defaults for cues (vibrate, beep, warning tick), screen wake lock, transition seconds, start date and bodyweight. Cameron's changes in the Settings screen are stored in IndexedDB on top of these defaults."
+      "description": "Defaults for cues (vibrate, beep, warning tick), screen wake lock, transition seconds, start date and bodyweight. Cameron's changes in the Settings screen are stored in IndexedDB on top of these defaults. v1.5: confirmSetup toggles the Set-up done tap before each new block."
     },
     {
       "id": "taps",
@@ -56,7 +56,7 @@
         "week 7, weeks 8-11 overrides"
       ],
       "file": "data/rules.json",
-      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates. v1.4 adds set timing (tempo default, margin, set-up seconds by equipment, get-ready seconds), the effort scale behind the four effort buttons (stored as RPE 6, 8, 9, 10), and rough starting-weight estimates for free-weight accessories."
+      "description": "Progression rules as data: weight increments per lift, the success test (all sets at the top of the range at RPE 8 or lower), the accessory rule (reps first, then the smallest jump), the stall rule (two misses, drop 10%), baseline weeks, phase overrides (week 7 half sets, weeks 8-11 at 3-5 reps, week 12 retest), ramp-up steps, trim order and timing estimates. v1.4 adds set timing (tempo default, margin, set-up seconds by equipment, get-ready seconds), the effort scale behind the four effort buttons (stored as RPE 6, 8, 9, 10), and rough starting-weight estimates for free-weight accessories. v1.5: dumbbellPairs (pair lifts are stored as totals and jump two dumbbell steps), timing.confirmSetup (wait for a tap before each new block), review.blockSaveOnOpenItems, weighted pull-up jump 5 lb."
     },
     {
       "id": "builder",
@@ -78,7 +78,7 @@
         "auto-advance, pace, trim, PRs"
       ],
       "file": "js/player.js",
-      "description": "Walks the timeline one step at a time. Timers are computed from timestamps so they stay right when the screen locks. Vibrates and beeps when a rest ends, keeps the screen awake, shows planned vs projected finish and how far ahead or behind the session is, and offers Trim to fit (preview, then confirm). Each work set shows last session's result for that exercise. Logging a set runs a live PR check against the stored bests (estimated 1RM, heaviest weight) and gives a haptic tap. When the app is in the background during a rest, it asks the service worker to fire a notification at the end time. Pause, back and end early live behind the menu button; the in-progress session is saved on every step so it can be resumed. Since v1.4 a work set ends on its own timer and is logged at its target; the rest screen that follows shows the set just done with four effort buttons and a tap-to-fix weight and reps. The last 5 seconds before every set are a get-ready count (amber screen, ticks, the coming set spoken aloud). A pace bar shows which rep the tempo puts you on. The screen is green for work, blue for rest. Back and Pause are on the screen. Voice and auto-advance can be switched off in Settings."
+      "description": "Walks the timeline one step at a time. Timers are computed from timestamps so they stay right when the screen locks. Vibrates and beeps when a rest ends, keeps the screen awake, shows planned vs projected finish and how far ahead or behind the session is, and offers Trim to fit (preview, then confirm). Each work set shows last session's result for that exercise. Logging a set runs a live PR check against the stored bests (estimated 1RM, heaviest weight) and gives a haptic tap. When the app is in the background during a rest, it asks the service worker to fire a notification at the end time. Pause, back and end early live behind the menu button; the in-progress session is saved on every step so it can be resumed. Since v1.4 a work set ends on its own timer and is logged at its target; the rest screen that follows shows the set just done with four effort buttons and a tap-to-fix weight and reps. The last 5 seconds before every set are a get-ready count (amber screen, ticks, the coming set spoken aloud). A pace bar shows which rep the tempo puts you on. The screen is green for work, blue for rest. Back and Pause are on the screen. Voice and auto-advance can be switched off in Settings. v1.5: Pause is in the header on every step with a tap-to-resume banner; the countdown before the first set of a new block holds until Set-up done is tapped; Equipment taken moves a later block to now and puts the current one right after it; in a finisher the top bar lists its exercises; the last-set card has - and + for weight and reps and a Logged / Saved check; two-dumbbell lifts show the total with 2 x each."
     },
     {
       "id": "logger",
@@ -89,7 +89,7 @@
         "end-of-session review, run log"
       ],
       "file": "js/logger.js",
-      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. When the session ends it opens the Review screen: every exercise with its sets (tap to correct), the engine's verdict (Up / Hold / Drop / Set) with its reason, and the next weight and reps as editable fields; Save runs the engine on the corrected sets, applies any overrides (tagged 'set by you') and stores the session. Then the summary. Also the run log form (date, type, distance, time, RPE, notes)."
+      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. When the session ends it opens the Review screen: every exercise with its sets (tap to correct), the engine's verdict (Up / Hold / Drop / Set) with its reason, and the next weight and reps as editable fields; Save runs the engine on the corrected sets, applies any overrides (tagged 'set by you') and stores the session. Then the summary. Also the run log form (date, type, distance, time, RPE, notes). v1.5: the Review screen lists skipped sets and sets missing a weight or reps first and keeps Save locked until each is filled in or confirmed as skipped."
     },
     {
       "id": "progression",
@@ -100,7 +100,7 @@
         "verdicts, e1RM, PRs, next targets"
       ],
       "file": "js/progression.js",
-      "description": "Runs once after a session saves. For each exercise in the session: applies the week override if any, the baseline rule in weeks 1-2, otherwise the success test (main lifts) or the reps-then-weight rule (accessories), counts stalls and drops 10% after two misses, computes Epley estimated 1RM for benchmark lifts, writes the new targets and a plain-language what-changed line per exercise. Power clean is excluded from automatic progression. Also keeps each exercise's best estimated 1RM and heaviest weight and reports personal records when a session beats them."
+      "description": "Runs once after a session saves. For each exercise in the session: applies the week override if any, the baseline rule in weeks 1-2, otherwise the success test (main lifts) or the reps-then-weight rule (accessories), counts stalls and drops 10% after two misses, computes Epley estimated 1RM for benchmark lifts, writes the new targets and a plain-language what-changed line per exercise. Power clean is excluded from automatic progression. Also keeps each exercise's best estimated 1RM and heaviest weight and reports personal records when a session beats them. v1.5: incrementFor doubles the jump for pair lifts; starting estimates for pair lifts are totals."
     },
     {
       "id": "storage",
@@ -111,7 +111,7 @@
         "service worker: offline cache, alerts"
       ],
       "file": "js/store.js, sw.js",
-      "description": "IndexedDB holds targets (with per-exercise bests for PR checks), sessions, runs, what-changed lists, settings overrides and the in-progress session. The service worker caches the app's files under a versioned cache name so it opens with no signal, picks up a new version on the next open with signal, and shows the rest-end notification when the page asks it to while in the background. Backup writes a JSON file with everything; Restore reads one back."
+      "description": "IndexedDB holds targets (with per-exercise bests for PR checks), sessions, runs, what-changed lists, settings overrides and the in-progress session. The service worker caches the app's files under a versioned cache name so it opens with no signal, picks up a new version on the next open with signal, and shows the rest-end notification when the page asks it to while in the background. Backup writes a JSON file with everything; Restore reads one back. v1.5: a pairTotals flag records whether older per-dumbbell numbers were doubled; the app asks once when it finds them, and a restored pre-v1.5 backup asks again."
     },
     {
       "id": "architecture",
@@ -132,7 +132,7 @@
         "step, target, countdown,",
         "what's next, ahead/behind"
       ],
-      "description": "What Cameron sees at the gym: the current exercise, set number, target weight and reps, effort target, a countdown or count-up, what comes next, and the session clock."
+      "description": "What Cameron sees at the gym: the current exercise, set number, target weight and reps, effort target, a countdown or count-up, what comes next, and the session clock. v1.5: Pause in the header, a Set-up done tap before each new block, Equipment taken, finisher exercises in the top bar, and a last-set card kept apart from Up next."
     },
     {
       "id": "history",
