@@ -4,6 +4,7 @@
   "bodyweightLb": 165,
   "cues": { "vibrate": true, "beep": true, "warningTick": true, "notify": true, "voice": true },
   "autoAdvance": true,
+  "confirmSetup": true,
   "keepScreenOn": true,
   "transitionSeconds": 30,
   "backupFileName": "CamsTrainingTracker-backup.json",

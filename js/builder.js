@@ -1,7 +1,7 @@
 // builder.js - Session Builder: expands a plan session into a flat timeline of timed steps.
 // Pure functions, no DOM, no storage. Tested in tests/builder.test.mjs.
 
-import { effortText, effortToRpe, roundTo, equipmentLabel } from './data.js';
+import { effortText, effortToRpe, roundTo, equipmentFor } from './data.js';
 
 /**
  * buildTimeline({ plan, rules, settings, sessionId, week, targets })
@@ -125,7 +125,7 @@ export function setTiming(rules, ex, reps, perSide) {
 function timedSet(ctx, ex, reps, perSide) {
   const tm = setTiming(ctx.rules, ex, reps, perSide);
   return { seconds: tm.seconds, repSeconds: tm.repSeconds, startSeconds: tm.startSeconds, auto: true,
-    tips: (ex && ex.tips) || [], equipment: equipmentLabel(ex && ex.equipment) };
+    tips: (ex && ex.tips) || [], equipment: equipmentFor(ex) };
 }
 
 /**
@@ -145,7 +145,7 @@ function addLeadIns(ctx, steps) {
       seen.add(s.exerciseId);
       const setup = first ? ((t.firstSetSetupSeconds && t.firstSetSetupSeconds[ex && ex.equipment]) || t.switchSeconds) : 0;
       const prev = out[out.length - 1];
-      const label = `${s.name}${ex && equipmentLabel(ex.equipment) ? ' (' + equipmentLabel(ex.equipment).toLowerCase() + ')' : ''}`;
+      const label = `${s.name}${ex && equipmentFor(ex) ? ' (' + equipmentFor(ex).toLowerCase() + ')' : ''}`;
       if (prev && (prev.kind === 'rest' || prev.kind === 'transition') && !prev.lead) {
         if (first) {
           if (prev.kind === 'transition') prev.seconds = Math.max(prev.seconds, setup);
@@ -194,7 +194,7 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
       exerciseId: item.exercise, setIndex: 0, setCount: null, baseline: true,
       target: { weight: null, reps }, repRange: [reps, reps], effort: { kind: 'rir', min: r.baseline.topSetRir, max: r.baseline.topSetRir },
       effortText: label, rpeDefault: 10 - r.baseline.topSetRir, seconds: item.rampUp ? 240 : 150, cue: ex.cue || '',
-      tips: ex.tips || [], equipment: equipmentLabel(ex.equipment) });
+      tips: ex.tips || [], equipment: equipmentFor(ex) });
     push(ctx, { kind: 'rest', blockId: block.id, blockName: block.name, blockType: block.type, name: 'Rest',
       seconds: item.restSeconds, countdown: true, trimKind: 'rest' });
     return { derived: true };
@@ -204,7 +204,7 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
       exerciseId: item.exercise, setIndex: 0, setCount: null, retest: true,
       target: { weight: target.weight, reps: 5 }, repRange: [5, 5], effort: { kind: 'rpe', min: 8, max: 9 },
       effortText: 'Retest: work up to a 5-rep set with 1-2 reps left', rpeDefault: 8.5, seconds: item.rampUp ? 240 : 150, cue: ex.cue || '',
-      tips: ex.tips || [], equipment: equipmentLabel(ex.equipment) });
+      tips: ex.tips || [], equipment: equipmentFor(ex) });
     push(ctx, { kind: 'rest', blockId: block.id, blockName: block.name, blockType: block.type, name: 'Rest',
       seconds: item.restSeconds, countdown: true, trimKind: 'rest' });
     return { derived: false };
@@ -310,7 +310,7 @@ function addFinisher(ctx, block) {
         effort: item.effort, effortText: effortText(item.effort), rpeDefault: effortToRpe(item.effort),
         holdSeconds: item.seconds || null, perSide: !!(item.perSide || (ex && ex.perSide)),
         ...(item.seconds
-          ? { seconds: item.seconds * ((item.perSide || (ex && ex.perSide)) ? 2 : 1) + 10, tips: (ex && ex.tips) || [], equipment: equipmentLabel(ex && ex.equipment) }
+          ? { seconds: item.seconds * ((item.perSide || (ex && ex.perSide)) ? 2 : 1) + 10, tips: (ex && ex.tips) || [], equipment: equipmentFor(ex) }
           : timedSet(ctx, ex, target.reps, !!(item.perSide || (ex && ex.perSide)))),
         countdown: !!item.seconds, cue: ex.cue || '', protectedBlock: !!block.protected
       });

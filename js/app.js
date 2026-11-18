@@ -1,12 +1,12 @@
 // app.js - app shell: boot, tabs, Home, History, Runs, Settings, and the start/resume/summary flow.
 
-import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentLabel } from './data.js';
+import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentFor, isPair, pairText, weightWithPair } from './data.js';
 import { buildTimeline, lastResults } from './builder.js';
 import { icon } from './icons.js';
 import { Player } from './player.js';
 import { saveSession, renderSummary, renderReview, runForm, setsTable, fmtPace } from './logger.js';
-import { epley, targetFromBenchmark, estimateStart } from './progression.js';
-import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll } from './store.js';
+import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progression.js';
+import { getTargets, setTarget, getSessions, getRuns, deleteRun, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { el, toast, showModal, closeModal, confirmDialog } from './ui.js';
@@ -39,6 +39,11 @@ async function boot() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   await updateWeekChip();
+  if (await pairPrompt(() => openApp())) return;
+  openApp();
+}
+
+async function openApp() {
   const inProgress = await getInProgress();
   if (inProgress && inProgress.status === 'running' && Date.now() - (inProgress.lastTick || 0) < D.rules.timing.resumeWindowHours * 3600000) {
     offerResume(inProgress);
@@ -46,6 +51,37 @@ async function boot() {
     if (inProgress) clearInProgress().catch(() => {});
     showTab('home');
   }
+}
+
+/**
+ * v1.5: two-dumbbell lifts changed from per-dumbbell numbers to totals. If older numbers are on the phone,
+ * ask once whether to double them. Returns true when the question is on screen (then() runs after the answer).
+ */
+async function pairPrompt(then) {
+  if (await getPairTotals()) return false;
+  const ids = Object.entries(D.plan.exercises).filter(([, ex]) => isPair(ex)).map(([id]) => id);
+  const found = await pairWeightsOnFile(ids);
+  if (!found.length) { await setPairTotals('none'); return false; }
+  view.innerHTML = '';
+  window.scrollTo(0, 0);
+  const answer = async double => {
+    if (double) await doublePairWeights(ids);
+    await setPairTotals(double ? 'doubled' : 'kept');
+    toast(double ? 'Doubled. Dumbbell weights are totals now.' : 'Left as they were.');
+    then();
+  };
+  view.appendChild(el('div', { class: 'card accent', id: 'pair-prompt' }, [
+    el('h1', {}, 'Dumbbell weights are now totals'),
+    el('p', {}, 'Lifts that use two dumbbells now show the total of both, so two 40s read as 80 lb (2 × 40). Before this update the app asked for the weight of one dumbbell.'),
+    el('p', { class: 'muted' }, 'Your saved numbers for these lifts:'),
+    el('table', {}, found.map(f => el('tr', {}, [el('td', {}, D.plan.exercises[f.id].name), el('td', { class: 'num' }, `${fmtWeight(f.weight)} lb`)]))),
+    el('p', { class: 'muted' }, 'Were those the weight of one dumbbell?'),
+    el('div', { class: 'stack' }, [
+      el('button', { class: 'btn primary', id: 'pair-double', onclick: () => answer(true) }, 'Yes, one dumbbell: double them'),
+      el('button', { class: 'btn', id: 'pair-keep', onclick: () => answer(false) }, 'No, they were already totals')
+    ])
+  ]));
+  return true;
 }
 
 async function updateWeekChip() {
@@ -106,7 +142,7 @@ async function renderHome() {
     const t = targets[id];
     return el('tr', { class: 'tappable', onclick: () => editTarget(id, ex, t) }, [
       el('td', {}, [ex.name, ' ', t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : null]),
-      el('td', { class: 'num' }, `${fmtWeight(t.weight)} lb × ${t.reps != null ? t.reps : '-'}`),
+      el('td', { class: 'num' }, `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}`),
       el('td', { class: 'num muted' }, t.e1rm ? `e1RM ${t.e1rm}` : '')
     ]);
   });
@@ -233,7 +269,7 @@ async function previewSession(sessionId, week) {
     if (!ex || ex.equipment === 'bodyweight' || st.holdSeconds) continue;
     if (st.target && st.target.weight != null) weights[st.exerciseId] = st.target.weight;
     else if (st.baseline || st.fillFromBaseline) weights[st.exerciseId] = null;
-    else { const est = estimateStart(D.rules, st.exerciseId, targets, settings); weights[st.exerciseId] = est; if (est != null) estimated[st.exerciseId] = true; }
+    else { const est = estimateStart(D.rules, st.exerciseId, targets, settings, ex); weights[st.exerciseId] = est; if (est != null) estimated[st.exerciseId] = true; }
   }
 
   const paint = () => {
@@ -270,14 +306,14 @@ async function previewSession(sessionId, week) {
         const st = e.step;
         const reps = st.holdSeconds ? `${st.holdSeconds} s${st.perSide ? '/side' : ''}` : `${st.repRange ? repsText(st.repRange) : (st.target && st.target.reps) || ''}${st.perSide ? '/side' : ''}`;
         const unit = b.type === 'finisher' ? 'rounds' : 'sets';
-        const sub = [equipmentLabel(ex.equipment), `${e.sets} ${unit} × ${reps}`, st.effort ? effortPlain(st.effort) : ''].filter(Boolean).join(' · ');
+        const sub = [equipmentFor(ex), `${e.sets} ${unit} × ${reps}`, st.effort ? effortPlain(st.effort) : ''].filter(Boolean).join(' · ');
         let right;
         if (ex.equipment === 'bodyweight' || st.holdSeconds) right = el('div', { class: 'pre-fixed' }, st.holdSeconds ? 'Timed' : 'Bodyweight');
         else if (e.baseline && weights[e.id] == null) right = el('div', { class: 'pre-fixed' }, 'Work up today');
         else {
-          const input = el('input', { type: 'number', step: '2.5', inputmode: 'decimal', placeholder: 'lb', 'data-ex': e.id, 'aria-label': `${e.name} weight`, value: weights[e.id] == null ? '' : weights[e.id],
+          const input = el('input', { type: 'number', step: String(incrementFor(D.rules, e.id, ex) || 2.5), inputmode: 'decimal', placeholder: 'lb', 'data-ex': e.id, 'aria-label': `${e.name} weight`, value: weights[e.id] == null ? '' : weights[e.id],
             onchange: ev => { weights[e.id] = ev.target.value === '' ? null : Number(ev.target.value); delete estimated[e.id]; paint(); } });
-          right = el('div', {}, [input, estimated[e.id] ? el('div', { class: 'est' }, 'Estimate') : null]);
+          right = el('div', {}, [input, isPair(ex) && weights[e.id] != null ? el('div', { class: 'pair-sub' }, `total · ${pairText(ex, weights[e.id])} lb`) : null, estimated[e.id] ? el('div', { class: 'est' }, 'Estimate') : null]);
         }
         return el('div', { class: 'pre-ex' }, [el('div', {}, [el('div', { class: 'pre-name' }, e.name), el('div', { class: 'pre-sub' }, sub)]), right]);
       });
@@ -286,7 +322,7 @@ async function previewSession(sessionId, week) {
         ...rows
       ]));
     }
-    card.appendChild(el('p', { class: 'muted', style: 'margin:10px 0 0' }, 'Weights are in lb; dumbbell numbers are per dumbbell. Change any of them here. A number marked Estimate is a rough guess from your main lifts and bodyweight, so set it to what you know. Blank ones get filled in after the first set.'));
+    card.appendChild(el('p', { class: 'muted', style: 'margin:10px 0 0' }, 'Weights are in lb. Lifts with two dumbbells show the total of both. Change any of them here. A number marked Estimate is a rough guess from your main lifts and bodyweight, so set it to what you know. Blank ones get filled in after the first set.'));
     view.appendChild(card);
     view.appendChild(el('div', { class: 'stack' }, [
       el('button', { class: 'btn primary', id: 'start-workout', onclick: async () => {
@@ -509,7 +545,7 @@ async function renderSettings() {
   const fileInput = el('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: async e => {
     const f = e.target.files[0]; if (!f) return;
     if (!(await confirmDialog('Restore from this file?', 'This replaces everything on the phone with the backup.', 'Restore', true))) return;
-    try { const r = await restoreFromFile(f); toast(`Restored ${r.sessions} sessions, ${r.runs} runs`); closeModal(); await updateWeekChip(); showTab('home'); } catch (err) { toast('Restore failed: ' + err.message, 4000); }
+    try { const r = await restoreFromFile(f); toast(`Restored ${r.sessions} sessions, ${r.runs} runs`); closeModal(); await updateWeekChip(); if (!(await pairPrompt(() => showTab('home')))) showTab('home'); } catch (err) { toast('Restore failed: ' + err.message, 4000); }
   } });
   showModal(el('div', {}, [
     el('h2', {}, 'Settings'),
@@ -518,6 +554,7 @@ async function renderSettings() {
     toggle('Countdown ticks before a set starts', 'cues.warningTick', s.cues.warningTick),
     toggle('Say each exercise and rest out loud', 'cues.voice', s.cues.voice !== false),
     toggle('End each set on its own timer', 'autoAdvance', s.autoAdvance !== false),
+    toggle('Wait for a Set-up done tap before each new block', 'confirmSetup', s.confirmSetup !== false),
     toggle('Notify when a rest ends while in another app', 'cues.notify', s.cues.notify !== false),
     ('Notification' in window && Notification.permission === 'denied') ? el('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Notifications are blocked for this site in Android settings; allow them there to get the rest-end alert.') : null,
     toggle('Keep the screen on during a session', 'keepScreenOn', s.keepScreenOn !== false),
@@ -531,7 +568,7 @@ async function renderSettings() {
       el('button', { class: 'btn', onclick: async () => { const r = await exportExcel(s, D.plan); if (r) toast(`Exported ${r.sets} sets, ${r.runs} runs`); } }, 'Export to Excel'),
       el('button', { class: 'btn', onclick: () => fileInput.click() }, 'Restore from backup file'),
       fileInput,
-      el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Wipe all data on this phone?', 'Back up first. This cannot be undone.', 'Wipe', true)) { await wipeAll(); toast('Wiped'); closeModal(); showTab('home'); } } }, 'Wipe all data')
+      el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Wipe all data on this phone?', 'Back up first. This cannot be undone.', 'Wipe', true)) { await wipeAll(); await setPairTotals('none'); toast('Wiped'); closeModal(); showTab('home'); } } }, 'Wipe all data')
     ]),
     el('p', { class: 'muted', style: 'margin-top:14px' }, `Cam's Training Tracker v${APP_VERSION} · plan v${D.plan.planVersion} · rules v${D.rules.rulesVersion}`),
     el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close')

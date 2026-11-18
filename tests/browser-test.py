@@ -22,6 +22,11 @@ def pass_review(page, prefix, override=None):
         card.locator('.review-next input').first.dispatch_event('change')
         page.wait_for_timeout(200)
         check(f'{prefix}: override tags set by you', page.locator('.verdict.you').count() >= 1)
+    # v1.5: skipped sets must be confirmed (or filled in) before Save unlocks
+    if page.locator('#confirm-skipped').count():
+        seen['gated'] = seen.get('gated', 0) + (1 if page.locator('#save-session').is_disabled() else 0)
+        page.click('#confirm-skipped'); page.wait_for_timeout(150)
+    check(f'{prefix}: review has no open items left', page.locator('#review-clear').count() == 1 and not page.locator('#save-session').is_disabled(), page.locator('#review-open').inner_text() if page.locator('#review-open').count() else '')
     page.click('button:has-text("Save session")')
     page.wait_for_selector('h1:has-text("Session")')
 
@@ -38,7 +43,16 @@ def start_from_preview(page, start_selector, shot=None):
     page.wait_for_selector('.player')
 
 IS_SET = ('work', 'ramp', 'hold')
-IS_LEAD = ('rest', 'set up', 'switch', 'get ready')
+IS_LEAD = ('rest', 'set up', 'switch', 'get ready', 'confirm')
+seen = {}
+
+def lead_step(page, skip_rests=True):
+    """v1.5: a countdown before a new block waits for Set-up done; other countdowns run or get skipped."""
+    if page.locator('#confirm-btn').count():
+        seen['confirms'] = seen.get('confirms', 0) + 1
+        page.click('#confirm-btn')
+    elif skip_rests: page.click('.player-actions button.btn.primary')
+    else: page.clock.run_for((timer_secs(page) + 1) * 1000)
 
 def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests=True, go_behind_at=None):
     start_from_preview(page, start_selector, shot=f'{shots_prefix}-preview')
@@ -50,7 +64,9 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
             break
         kind = page.locator('.step-kind').inner_text().strip().lower()
         kinds.append(kind)
-        name = page.locator('.step-name').inner_text().strip()
+        name = page.locator('.step-name').first.inner_text().strip()
+        seen['pause'] = seen.get('pause', True) and page.locator('#pause-btn').count() == 1
+        if page.locator('#fin-row').count() and 'fin' not in seen: seen['fin'] = page.locator('#fin-row').inner_text()
         if steps in (0, 3, 12):
             page.screenshot(path=f'{SHOTS}/{shots_prefix}-step{steps}.png')
         if go_behind_at is not None and steps == go_behind_at and not trimmed:
@@ -81,9 +97,8 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
                 page.click('button.btn.primary')
             else:
                 page.clock.run_for((timer_secs(page) + 1) * 1000)  # v1.4: the set ends on its own timer
-        elif kind.startswith(IS_LEAD):
-            if skip_rests: page.click('.player-actions button.btn.primary')
-            else: page.clock.run_for((timer_secs(page) + 1) * 1000)
+        elif kind.startswith(IS_LEAD) and page.locator('#up-next').count():
+            lead_step(page, skip_rests)
         elif kind in ('timed', 'stretch', 'set up'):
             page.clock.run_for((timer_secs(page) + 1) * 1000)  # let it auto-advance
         elif kind == 'your call':
@@ -125,6 +140,9 @@ with sync_playwright() as p:
     page.locator('.toggle', has_text='End each set on its own timer').locator('input').uncheck(); page.wait_for_timeout(150)
     page.click('.modal button:has-text("Close")')
     steps, kinds = run_session(page, '.card.accent .btn.primary', {'Box squat': 185}, 'lift1', skip_rests=True, go_behind_at=14)
+    check('v1.5 Pause is in the header on every step of the session', seen.get('pause') is True)
+    check('v1.5 each new block waited for Set-up done (4 on Lift 1)', seen.get('confirms') == 4, seen.get('confirms'))
+    check('v1.5 finisher row lists its exercises', all(x in seen.get('fin', '') for x in ('Standing curl', 'Tri ext', 'Ab wheel')), seen.get('fin'))
     page.click('#settings-btn'); page.wait_for_selector('.modal')
     page.locator('.toggle', has_text='End each set on its own timer').locator('input').check(); page.wait_for_timeout(150)
     page.click('.modal button:has-text("Close")')
@@ -155,10 +173,10 @@ with sync_playwright() as p:
     check('v1.4 preview shows the session goal and time', 'Upper-body strength' in pre and 'About' in pre and 'min' in pre, pre[:200])
     check('v1.4 preview: strict press prefilled from the benchmark target', page.locator('input[data-ex="strict_press"]').input_value() == '90', page.locator('input[data-ex="strict_press"]').input_value())
     check('v1.4 preview: pull-up has no weight yet, works up today', 'Work up today' in pre)
-    check('v1.4 preview: incline dumbbell press shows an estimate (45)', page.locator('input[data-ex="incline_db_press"]').input_value() == '45' and page.locator('.pre-ex .est').count() >= 1, page.locator('input[data-ex="incline_db_press"]').input_value())
+    check('v1.5 preview: incline dumbbell press estimate is a total (90 = 2 x 45)', page.locator('input[data-ex="incline_db_press"]').input_value() == '90' and page.locator('.pre-ex .est').count() >= 1 and '2 × 45' in pre, page.locator('input[data-ex="incline_db_press"]').input_value())
     check('v1.4 preview: machine row has no estimate', page.locator('input[data-ex="cs_row"]').input_value() == '')
-    page.fill('input[data-ex="incline_db_press"]', '55'); page.locator('input[data-ex="incline_db_press"]').dispatch_event('change'); page.wait_for_timeout(100)
-    check('v1.4 preview: a typed weight sticks and loses the estimate tag', page.locator('input[data-ex="incline_db_press"]').input_value() == '55')
+    page.fill('input[data-ex="incline_db_press"]', '100'); page.locator('input[data-ex="incline_db_press"]').dispatch_event('change'); page.wait_for_timeout(100)
+    check('v1.4 preview: a typed weight sticks and loses the estimate tag', page.locator('input[data-ex="incline_db_press"]').input_value() == '100' and '2 × 50' in page.locator('#view').inner_text())
     page.screenshot(path=f'{SHOTS}/lift2-preview.png', full_page=True)
     page.click('#start-workout')
     page.wait_for_selector('.player')
@@ -181,7 +199,7 @@ with sync_playwright() as p:
     steps2 = 0
     saw_bench = False
     while steps2 < 400 and page.locator('.player').count():
-        kind = page.locator('.step-kind').inner_text().strip().lower(); name = page.locator('.step-name').inner_text().strip()
+        kind = page.locator('.step-kind').inner_text().strip().lower(); name = page.locator('.step-name').first.inner_text().strip()
         if kind.startswith('baseline'):
             page.fill('#in-weight', '95' if 'press' in name.lower() else '25'); page.click('button.btn.primary:has-text("Done")')
         elif kind.startswith(IS_SET):
@@ -189,9 +207,9 @@ with sync_playwright() as p:
             if wv.count() and wv.is_visible() and wv.input_value() == '': page.fill('#in-weight', '40')
             if 'incline dumbbell press' in name.lower() and not saw_bench:
                 saw_bench = True
-                check('v1.4 typed preview weight (55) is the set target', '55' in page.locator('.tile-weight').inner_text(), page.locator('.tile-weight').inner_text())
+                check('v1.5 typed preview total (100) is the set target, shown with 2 x 50', '100' in page.locator('.tile-weight').inner_text() and '2 × 50' in page.locator('.tile-weight').inner_text(), page.locator('.tile-weight').inner_text())
             page.click('button.btn.primary')
-        elif kind.startswith(IS_LEAD): page.click('.player-actions button.btn.primary')
+        elif kind.startswith(IS_LEAD) and page.locator('#up-next').count(): lead_step(page)
         elif kind in ('timed', 'stretch', 'set up'):
             page.clock.run_for((timer_secs(page) + 1) * 1000)
         else: page.click('button.btn.primary')
@@ -213,6 +231,20 @@ with sync_playwright() as p:
     check('lift3 side plank line present', any('Side plank' in l for l in lines3), lines3)
     check('lift3 if-time decision was offered', 'your call' in kinds3, set(kinds3))
     page.click('button:has-text("Done")'); page.wait_for_selector('.card.accent')
+
+    # ---- v1.5: numbers saved per dumbbell before the update get one question, then are doubled ----
+    KV = """(key, del) => new Promise(r => { const q = indexedDB.open('cams-training-tracker'); q.onsuccess = () => { const st = q.result.transaction('kv', 'readwrite').objectStore('kv'); const t = del ? st.delete(key) : st.get(key); t.onsuccess = () => r(t.result === undefined ? null : t.result); }; })"""
+    check('v1.5 a fresh install never sees the dumbbell question', page.evaluate(f"({KV})('pairTotals')") == 'none')
+    before = page.evaluate(f"({KV})('targets')")
+    page.evaluate(f"({KV})('pairTotals', true)")
+    page.reload(); page.wait_for_selector('#pair-prompt')
+    check('v1.5 old dumbbell numbers: the app asks once and lists them', 'Lateral raise' in page.locator('#pair-prompt').inner_text() and 'Incline dumbbell press' in page.locator('#pair-prompt').inner_text(), page.locator('#pair-prompt').inner_text()[:300])
+    page.screenshot(path=f'{SHOTS}/v15-pair-prompt.png', full_page=True)
+    page.click('#pair-double'); page.wait_for_selector('.card.accent h1')
+    after = page.evaluate(f"({KV})('targets')")
+    check('v1.5 doubling: two-dumbbell targets doubled, others untouched', after['lateral_raise']['weight'] == 2 * before['lateral_raise']['weight'] and after['incline_db_press']['weight'] == 2 * before['incline_db_press']['weight'] and after['back_squat']['weight'] == before['back_squat']['weight'] and after['db_row']['weight'] == before['db_row']['weight'], (before.get('lateral_raise'), after.get('lateral_raise')))
+    page.reload(); page.wait_for_selector('.card.accent h1')
+    check('v1.5 the question is not asked twice', page.locator('#pair-prompt').count() == 0)
 
     # ---- History ----
     page.click('#tabs button[data-view="history"]'); page.wait_for_selector('.list-item')
@@ -262,15 +294,37 @@ with sync_playwright() as p:
     check('week 3 chip', 'week 3' in page.locator('#week-chip').inner_text().lower(), page.locator('#week-chip').inner_text())
     start_from_preview(page, '.card.accent .btn.primary', shot='week3-preview')
     said_from = page.evaluate('window.__said.length')
+    # v1.5: Pause in the header during the warm-up
+    check('v1.5 warm-up step shows Pause in the header', page.locator('.player-head #pause-btn').is_visible() and 'Pause' in page.locator('#pause-btn').inner_text())
+    page.click('#pause-btn'); page.wait_for_timeout(100)
+    t0 = page.locator('#timer').inner_text(); page.clock.run_for(20000); page.wait_for_timeout(100)
+    check('v1.5 paused: banner shows, button says Resume, clock stands still', page.locator('#paused-banner').count() == 1 and 'Resume' in page.locator('#pause-btn').inner_text() and page.locator('#timer').inner_text() == t0, page.locator('#timer').inner_text())
+    page.screenshot(path=f'{SHOTS}/v15-paused.png')
+    page.click('#paused-banner'); page.wait_for_timeout(100)
+    check('v1.5 tapping the banner resumes', page.locator('#paused-banner').count() == 0)
     # skip warmup to reach the first squat step
     for _ in range(12):
         k = page.locator('.step-kind').inner_text().lower()
         if k.startswith('ramp'): break
         if k.startswith('set up') and 'box squat' in page.locator('.step-main').inner_text().lower():
-            # v1.4: the set-up before the first barbell set, then the get-ready count
-            check('v1.4 barbell set-up step is 60 s and shows what is next', timer_secs(page) in (59, 60) and 'up next' in page.locator('.step-main').inner_text().lower(), page.locator('.step-main').inner_text()[:120])
+            # v1.4: the set-up before the first barbell set; v1.5: it waits for Set-up done, then the get-ready count
+            check('v1.4 barbell set-up step is 60 s and shows what is next', timer_secs(page) in (54, 55) and 'up next' in page.locator('.step-main').inner_text().lower(), page.locator('.step-main').inner_text()[:120])
             check('v1.4 set-up screen is the rest color', page.evaluate("document.body.getAttribute('data-kind')") == 'rest')
-            page.clock.run_for((timer_secs(page) - 4) * 1000); page.wait_for_timeout(120)
+            # v1.5: equipment taken -> do block B now, then swap back
+            check('v1.5 set-up screen offers Equipment taken', page.locator('#swap-btn').count() == 1)
+            page.click('#swap-btn'); page.wait_for_selector('.swap-choice')
+            check('v1.5 swap sheet lists the later blocks (B, C, Finisher)', page.locator('.swap-choice').count() == 3, page.locator('.swap-choice').all_inner_texts())
+            page.screenshot(path=f'{SHOTS}/v15-swap.png')
+            page.locator('.swap-choice').first.click(); page.wait_for_timeout(150)
+            check('v1.5 after the swap, Romanian deadlift is up next and squat comes after', 'romanian deadlift' in page.locator('#up-next').inner_text().lower() and page.locator('.seg-label').all_inner_texts()[1].startswith('RDL'), page.locator('.seg-label').all_inner_texts())
+            page.click('#swap-btn'); page.wait_for_selector('.swap-choice')
+            page.locator('.swap-choice', has_text='Box squat').click(); page.wait_for_timeout(150)
+            check('v1.5 swapping back puts Box squat next again', 'box squat' in page.locator('#up-next').inner_text().lower() and page.locator('.seg-label').all_inner_texts()[1] == 'Squat', page.locator('.seg-label').all_inner_texts())
+            check('v1.5 a new block waits: the main button is Set-up done', page.locator('#confirm-btn').count() == 1)
+            page.clock.run_for((timer_secs(page) + 20) * 1000); page.wait_for_timeout(120)
+            check('v1.5 set-up clock runs out and holds for the tap', 'confirm' in page.locator('.step-kind').inner_text().lower() and timer_secs(page) == 0 and page.evaluate('window.__said.slice(-1)[0]') == 'Tap set-up done when you are ready.', (page.locator('.step-kind').inner_text(), page.evaluate('window.__said.slice(-1)[0]')))
+            page.screenshot(path=f'{SHOTS}/v15-confirm-setup.png')
+            page.click('#confirm-btn'); page.wait_for_timeout(120)
             check('v1.4 get-ready: screen turns amber for the last 5 s', page.evaluate("document.body.getAttribute('data-kind')") == 'ready' and 'get ready' in page.locator('.step-kind').inner_text().lower(), page.locator('.step-kind').inner_text())
             page.screenshot(path=f'{SHOTS}/v14-get-ready.png')
             page.clock.run_for(6000); page.wait_for_timeout(120)
@@ -316,24 +370,38 @@ with sync_playwright() as p:
     page.click('.player-actions button.btn.primary')
     page.wait_for_timeout(200)
     check('heavier set triggers PR toast', page.locator('#toast').is_visible() and 'PR' in page.locator('#toast').inner_text(), page.locator('#toast').inner_text())
-    check('rest screen shows ring and up-next', page.locator('.ring-fg').count() == 1 and 'up next' in page.locator('.step-main').inner_text().lower(), page.locator('.step-main').inner_text()[:80])
+    check('rest screen shows the clock bar and up-next', page.locator('#rest-fill').count() == 1 and 'up next' in page.locator('.step-main').inner_text().lower(), page.locator('.step-main').inner_text()[:80])
     # v1.4: fix the set that just ended from the rest screen
-    check('v1.4 rest shows the set just done with Solid selected', '195 lb × 5' in page.locator('#jd-fix').inner_text() and page.locator('#just-done .effort-chip.on').get_attribute('data-key') == 'solid', page.locator('#just-done').inner_text())
+    check('v1.4 rest shows the set just done with Solid selected', '195' in page.locator('#jd-w').inner_text() and page.locator('#jd-r').inner_text().strip() == '5' and page.locator('#just-done .effort-chip.on').get_attribute('data-key') == 'solid', page.locator('#just-done').inner_text())
+    check('v1.5 last-set card says Logged before any change', 'Logged' in page.locator('#jd-saved').inner_text())
     page.screenshot(path=f'{SHOTS}/week3-rest.png')
     page.click('#just-done .effort-chip[data-key="hard"]'); page.wait_for_timeout(100)
     check('v1.4 effort chip changes the logged effort', page.locator('#just-done .effort-chip.on').get_attribute('data-key') == 'hard')
-    page.click('#jd-fix'); page.wait_for_selector('#fix-weight')
+    check('v1.5 a change shows the Saved check', 'Saved' in page.locator('#jd-saved').inner_text() and 'flash' in page.locator('#jd-saved').get_attribute('class'), page.locator('#jd-saved').inner_text())
+    page.screenshot(path=f'{SHOTS}/v15-rest-saved.png')
+    # v1.5: weight and reps change with - and + on the card
+    page.click('#jd-w-minus'); page.click('#jd-w-minus'); page.click('#jd-r-minus'); page.wait_for_timeout(100)
+    check('v1.5 steppers change the logged weight and reps and the next set', '185' in page.locator('#jd-w').inner_text() and page.locator('#jd-r').inner_text().strip() == '4' and '185' in page.locator('.tile-weight').inner_text(), (page.locator('#jd-w').inner_text(), page.locator('#jd-r').inner_text(), page.locator('.tile-weight').inner_text()))
+    page.click('#jd-w'); page.wait_for_selector('#fix-weight')
     page.fill('#fix-weight', '190'); page.fill('#fix-reps', '4'); page.click('.modal button:has-text("Save")'); page.wait_for_timeout(150)
-    check('v1.4 fixing weight on the rest screen updates the record and the next set', '190 lb × 4' in page.locator('#jd-fix').inner_text() and '190' in page.locator('.tile-weight').inner_text(), (page.locator('#jd-fix').inner_text(), page.locator('.tile-weight').inner_text()))
+    check('v1.4 fixing weight on the rest screen updates the record and the next set', '190' in page.locator('#jd-w').inner_text() and page.locator('#jd-r').inner_text().strip() == '4' and '190' in page.locator('.tile-weight').inner_text(), (page.locator('#just-done').inner_text(), page.locator('.tile-weight').inner_text()))
     page.screenshot(path=f'{SHOTS}/v14-rest-fixed.png')
-    page.click('.head-right .icon-btn'); page.wait_for_selector('.menu')
+    page.click('#more-btn'); page.wait_for_selector('.menu')
     check('menu lists pause, back, end', page.locator('.menu-item').count() >= 3, page.locator('.menu-item').all_inner_texts())
     page.screenshot(path=f'{SHOTS}/menu.png')
     page.click('.menu-item:has-text("End session")'); page.click('.modal button:has-text("End session")')
     page.wait_for_selector('h1:has-text("Review and save")')
     rev = page.locator('.review-card', has_text='Box squat').inner_text()
     check('v1.4 review shows the corrected set with its effort word', '190 lb × 4' in rev and 'Hard' in rev, rev)
+    check('v1.5 review lists the skipped sets first and locks Save', page.locator('#review-open .open-item').count() >= 5 and page.locator('#save-session').is_disabled() and 'to check first' in page.locator('#save-session').inner_text(), page.locator('#save-session').inner_text())
+    page.screenshot(path=f'{SHOTS}/v15-review-open.png', full_page=True)
+    # fill one in by hand, confirm the rest
+    page.locator('#review-open .open-item').first.click(); page.wait_for_selector('.modal input')
+    page.locator('.modal input').nth(0).fill('170'); page.locator('.modal input').nth(1).fill('4'); page.click('.modal button:has-text("I did it")'); page.wait_for_timeout(150)
+    rev = page.locator('.review-card', has_text='Box squat').inner_text()
+    check('v1.5 a skipped set filled in on the review counts as done', '170 lb × 4' in rev, rev)
     pass_review(page, 'week3')
+    check('v1.5 Save was locked until the skipped sets were confirmed', seen.get('gated', 0) >= 1, seen.get('gated'))
     check('summary shows PR card', page.locator('.pr-card').count() == 1, page.locator('.pr-card').inner_text() if page.locator('.pr-card').count() else 'none')
     page.screenshot(path=f'{SHOTS}/week3-summary.png', full_page=True)
 
