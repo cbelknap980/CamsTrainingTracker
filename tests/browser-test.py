@@ -114,7 +114,7 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
 with sync_playwright() as p:
     chrome = os.environ.get('CHROME_PATH') or next((c for c in ('/usr/bin/google-chrome', '/opt/pw-browsers/chromium') if os.path.exists(c)), None)
     browser = p.chromium.launch(executable_path=chrome, headless=True, args=['--no-sandbox'])
-    ctx = browser.new_context(viewport={'width': 393, 'height': 851}, device_scale_factor=2, is_mobile=True, has_touch=True, accept_downloads=True)
+    ctx = browser.new_context(viewport={'width': 393, 'height': 851}, reduced_motion='reduce', device_scale_factor=2, is_mobile=True, has_touch=True, accept_downloads=True)
     ctx.grant_permissions(['notifications'], origin='http://localhost:8080')
     page = ctx.new_page()
     errors = []
@@ -170,7 +170,7 @@ with sync_playwright() as p:
     page.click('button:has-text("Lift 2")')
     page.wait_for_selector('#start-workout')
     pre = page.locator('#view').inner_text()
-    check('v1.4 preview shows the session goal and time', 'Upper-body strength' in pre and 'About' in pre and 'min' in pre, pre[:200])
+    check('v1.4 preview shows the session goal and time', 'Upper-body strength' in pre and 'done by' in pre and 'min' in pre, pre[:200])
     check('v1.4 preview: strict press prefilled from the benchmark target', page.locator('input[data-ex="strict_press"]').input_value() == '90', page.locator('input[data-ex="strict_press"]').input_value())
     check('v1.4 preview: pull-up has no weight yet, works up today', 'Work up today' in pre)
     check('v1.5 preview: incline dumbbell press estimate is a total (90 = 2 x 45)', page.locator('input[data-ex="incline_db_press"]').input_value() == '90' and page.locator('.pre-ex .est').count() >= 1 and '2 × 45' in pre, page.locator('input[data-ex="incline_db_press"]').input_value())
@@ -312,7 +312,9 @@ with sync_playwright() as p:
     page.screenshot(path=f'{SHOTS}/plan-phone.png', full_page=True)
 
     # ---- Architecture tab + search ----
-    page.click('#tabs button[data-view="architecture"]'); page.wait_for_selector('.arch-svg')
+    # polish: on a phone the Architecture page moved from the tab bar into Settings
+    check('polish: phone tab bar has four tabs', page.locator('#tabs .tab:visible').count() == 4, page.locator('#tabs .tab:visible').count())
+    page.click('#settings-btn'); page.wait_for_selector('#arch-open'); page.click('#arch-open'); page.wait_for_selector('.arch-svg')
     check('architecture draws 18 boxes', page.locator('.arch-svg g[data-part]').count() == 18, page.locator('.arch-svg g[data-part]').count())
     page.fill('input[type="search"]', 'trim'); page.wait_for_timeout(100)
     check('search "trim" highlights Player and Rules', page.locator('.arch-svg .box.hit').count() >= 2, page.locator('.arch-svg .box.hit').count())

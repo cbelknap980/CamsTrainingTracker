@@ -228,6 +228,9 @@ function showTab(name) {
   currentTab = name;
   document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   window.scrollTo(0, 0);
+  // polish: the new page rises in (CSS in polish.css), then the class comes off so later re-renders stay still
+  view.classList.remove('enter'); void view.offsetWidth; view.classList.add('enter');
+  clearTimeout(showTab.t); showTab.t = setTimeout(() => view.classList.remove('enter'), 700);
   view.classList.toggle('wide', name === 'progress' || name === 'plan' || document.body.classList.contains('computer'));
   view.classList.toggle('home-cols', name === 'home' && document.body.classList.contains('computer'));
   if (name === 'home') renderHome();
@@ -293,7 +296,14 @@ async function renderHome() {
   if (session) {
     const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets });
     todayCard.appendChild(el('h1', {}, session.name));
-    todayCard.appendChild(el('p', { class: 'muted' }, `${tl.steps.length} steps · about ${fmtMinutes(tl.plannedSeconds)} · ${phase.note || ''}`));
+    // polish: the facts as chips, a strip with one bar per block (sized by its minutes), the phase note small
+    const blocks = session.blocks.filter(b => b.type !== 'iftime');
+    todayCard.appendChild(el('ul', { class: 'hero-facts' }, [
+      el('li', {}, [el('b', {}, fmtMinutes(tl.plannedSeconds))]),
+      el('li', {}, ['done by', el('b', {}, fmtTime(Date.now() + tl.plannedSeconds * 1000))])
+    ]));
+    todayCard.appendChild(el('div', { class: 'hero-blocks', 'aria-hidden': 'true' }, blocks.map(b => el('span', { class: b.type === 'warmup' || b.type === 'stretch' ? 'soft' : '', style: `flex:${b.minutes || 1}` }))));
+    if (phase.note) todayCard.appendChild(el('p', { class: 'hero-note' }, phase.note));
     todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => previewSession(session.id, week) }, 'Start'));
   } else if (run) {
     // v1.10: what the run asks for this week, and its numbers once it is logged (by hand or from Garmin;
@@ -354,22 +364,25 @@ async function renderHome() {
 
   const other = el('div', { class: 'card' }, [
     el('h3', {}, 'Start a different session'),
-    el('div', { class: 'grid3' }, D.plan.sessions.map(s => el('button', { class: 'btn small', style: 'width:100%', onclick: () => previewSession(s.id, week) }, s.name.replace(': ', '\n'))))
+    el('div', { class: 'grid3' }, D.plan.sessions.map(s => { const [k, n] = s.name.includes(': ') ? s.name.split(': ') : ['', s.name]; return el('button', { class: 'btn small sess-btn', style: 'width:100%', onclick: () => previewSession(s.id, week) }, [k ? el('small', {}, k) : null, el('b', {}, n)]); }))
   ]);
   view.appendChild(other);
 
   // next targets
   const rows = Object.entries(D.plan.exercises).filter(([id]) => targets[id] && targets[id].weight != null).map(([id, ex]) => {
     const t = targets[id];
+    // polish: two columns; the badge and e1RM sit under the name so long names do not wrap into a column
     return el('tr', { class: 'tappable', onclick: () => editTarget(id, ex, t) }, [
-      el('td', {}, [ex.name, ' ', t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : null)]),
-      el('td', { class: 'num' }, `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}`),
-      el('td', { class: 'num muted' }, t.e1rm ? `e1RM ${t.e1rm}` : '')
+      el('td', {}, [el('div', { class: 'tgt-name' }, ex.name), (t.e1rm || t.source === 'you' || t.source === 'coach') ? el('div', { class: 'tgt-sub' }, [
+        t.e1rm ? `e1RM ${t.e1rm}` : null,
+        t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : null)
+      ]) : null]),
+      el('td', { class: 'num tgt-val' }, `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}`)
     ]);
   });
   view.appendChild(el('div', { class: 'card', id: 'next-targets' }, [
     el('h3', {}, 'Next targets'),
-    rows.length ? el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, '')]), ...rows]) : el('p', { class: 'muted' }, 'No targets yet. Week 1 sessions work up to a baseline set on each main lift; accessories take the weight you log the first time.'),
+    rows.length ? el('table', { class: 'tgt-table' }, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Weight × reps')]), ...rows]) : el('p', { class: 'muted' }, 'No targets yet. Week 1 sessions work up to a baseline set on each main lift; accessories take the weight you log the first time.'),
     el('p', { class: 'muted', style: 'margin-top:8px' }, 'Tap a row to change a target by hand.')
   ]));
 
@@ -501,9 +514,13 @@ async function previewSession(sessionRef, week) {
     view.appendChild(el('div', { class: 'card accent' }, [
       el('h3', {}, `Week ${week}${phase.name ? ' · ' + phase.name : ''}`),
       el('h1', {}, session.name),
-      session.goal ? el('p', {}, session.goal) : null,
-      phase.note ? el('p', { class: 'muted' }, phase.note) : null,
-      el('p', { class: 'muted', style: 'margin:0' }, `About ${fmtMinutes(tl.plannedSeconds)} · done around ${fmtTime(finish)} if you start now`)
+      // polish: same chips as the Home card; the session goal reads as the lead, the phase note small
+      el('ul', { class: 'hero-facts' }, [
+        el('li', {}, [el('b', {}, fmtMinutes(tl.plannedSeconds))]),
+        el('li', {}, ['done by', el('b', {}, fmtTime(finish))])
+      ]),
+      session.goal ? el('p', { class: 'hero-lead' }, session.goal) : null,
+      phase.note ? el('p', { class: 'hero-note', style: 'margin:0' }, phase.note) : null
     ]));
 
     const blocks = [];
@@ -538,8 +555,9 @@ async function previewSession(sessionRef, week) {
         }
         return el('div', { class: 'pre-ex' }, [el('div', {}, [el('div', { class: 'pre-name' }, e.name), el('div', { class: 'pre-sub' }, sub)]), right]);
       });
+      const mark = /^[A-Z]$/.test(b.name) ? b.name : (b.type === 'warmup' ? 'W' : (b.type === 'stretch' ? 'S' : (b.type === 'finisher' || b.type === 'emom' ? 'F' : '+')));
       card.appendChild(el('div', { class: 'pre-block' }, [
-        el('div', { class: 'row' }, [el('b', {}, title), el('span', { class: 'muted' }, fmtMinutes(b.seconds))]),
+        el('div', { class: 'row pre-head' }, [el('span', { class: 'pre-mark' + (b.type === 'warmup' || b.type === 'stretch' ? ' soft' : '') }, mark), el('b', {}, title), el('span', { class: 'muted' }, fmtMinutes(b.seconds))]),
         ...rows
       ]));
     }
@@ -598,6 +616,7 @@ function offerResume(saved) {
         player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, container: view, onFinish: onSessionFinished });
         player.s = saved; player.finish('ended_early');
       } }, 'Save what I did and stop'),
+      el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
       el('button', { class: 'btn danger', onclick: async () => { await clearInProgress(); showTab('home'); } }, 'Discard it')
     ])
   ]));
@@ -723,6 +742,7 @@ function showSession(s) {
     setsTable(s.sets),
     el('div', { class: 'btn-row', style: 'margin-top:12px' }, [
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close'),
+      el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
       el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Delete this session?', 'Targets already set from it are kept.', 'Delete', true)) { await deleteSession(s.id); toast('Deleted'); renderProgressTab(); } } }, 'Delete')
     ])
   ]));
@@ -872,6 +892,7 @@ async function renderSettings() {
       el('button', { class: 'btn', id: 'sync-open', onclick: () => renderSyncSheet() }, 'Sync with the computer'),
       el('button', { class: 'btn', onclick: () => fileInput.click() }, 'Restore from backup file'),
       fileInput,
+      el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
       el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Wipe all data on this phone?', 'Back up first. This cannot be undone.', 'Wipe', true)) { await wipeAll(); await setPairTotals('none'); toast('Wiped'); closeModal(); showTab('home'); } } }, 'Wipe all data')
     ]),
     el('p', { class: 'muted', style: 'margin-top:14px' }, `Cam's Training Tracker v${APP_VERSION} · plan v${D.plan.planVersion} · rules v${D.rules.rulesVersion}`),

@@ -5,6 +5,7 @@ import { applyProgression, incrementFor } from './progression.js';
 import { getTargets, setTargets, putSession, putRun, newId, getSettings } from './store.js';
 import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, weekNumber, effortLabel, getData, weightWithPair, isPair } from './data.js';
 import { el, toast, closeModal, showModal, effortChips } from './ui.js';
+import { icon } from './icons.js';
 
 /** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
 export async function previewSession(draft, { plan, rules }) {
@@ -194,16 +195,18 @@ export function renderSummary(container, record, { onDone, onBackup }) {
   const done = record.sets.filter(s => s.done && !s.ramp).length;
   const planned = record.sets.filter(s => !s.ramp).length;
   const over = record.actualSeconds - record.plannedSeconds;
+  // polish: a check that pops in, then the numbers as tiles
   const stats = el('div', { class: 'card' }, [
+    record.status === 'complete' ? el('div', { class: 'done-check' }, [icon('check')]) : null,
     el('h1', {}, record.status === 'complete' ? 'Session done' : 'Session ended early'),
-    el('p', { class: 'muted' }, `${record.sessionName} · week ${record.week}`),
-    (planned - done > 0) ? el('p', { id: 'owed-note' }, `${planned - done} ${planned - done === 1 ? 'set was' : 'sets were'} not done. ${planned - done === 1 ? 'It is' : 'They are'} on this week's catch-up list on Home.`) : null,
-    el('table', {}, [
-      el('tr', {}, [el('td', {}, 'Sets logged'), el('td', { class: 'num' }, `${done} of ${planned}`)]),
-      el('tr', {}, [el('td', {}, 'Time'), el('td', { class: 'num' }, `${fmtMinutes(record.actualSeconds)} (plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)})`)]),
-      record.pausedSeconds > 30 ? el('tr', {}, [el('td', {}, 'Paused'), el('td', { class: 'num' }, fmtMinutes(record.pausedSeconds))]) : null,
-      record.trims.length ? el('tr', {}, [el('td', {}, 'Trimmed'), el('td', {}, record.trims.join('; '))]) : null
-    ])
+    el('p', { class: 'muted', style: 'margin:0' }, `${record.sessionName} · week ${record.week}`),
+    (planned - done > 0) ? el('p', { id: 'owed-note', style: 'margin:10px 0 0' }, `${planned - done} ${planned - done === 1 ? 'set was' : 'sets were'} not done. ${planned - done === 1 ? 'It is' : 'They are'} on this week's catch-up list on Home.`) : null,
+    el('div', { class: 'done-stats' }, [
+      el('div', { class: 'done-stat' + (done === planned ? ' good' : '') }, [el('b', {}, [String(done), el('small', {}, `/ ${planned}`)]), el('span', {}, 'sets logged')]),
+      el('div', { class: 'done-stat' }, [el('b', {}, [String(Math.round(record.actualSeconds / 60)), el('small', {}, 'min')]), el('span', {}, `plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)}`)]),
+      record.pausedSeconds > 30 ? el('div', { class: 'done-stat' }, [el('b', {}, [String(Math.round(record.pausedSeconds / 60)), el('small', {}, 'min')]), el('span', {}, 'paused')]) : null
+    ]),
+    record.trims.length ? el('p', { class: 'done-trims' }, [el('b', {}, 'Trimmed: '), record.trims.join('; ')]) : null
   ]);
   const prs = (record.prs || []).length ? el('div', { class: 'card pr-card' }, [
     el('h2', {}, `${record.prs.length === 1 ? 'Personal record' : 'Personal records'}`),
