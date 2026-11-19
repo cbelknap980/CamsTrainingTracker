@@ -1,12 +1,13 @@
-// runs-view.js - v1.10: the Runs tab. This week's two runs with what each asks for, miles by week, every run
+// runs-view.js - v1.10: the Runs tab. v1.12: runs count for the planned run they most likely are, whatever the day.
+// This week's two runs with what each asks for, miles by week, every run
 // with its numbers, the run sheet and form, and Garmin set-up. The numbers come from runs.js.
 
 import { el, toast, showModal, closeModal, confirmDialog } from './ui.js';
-import { APP_VERSION, weekNumber, toISODate, parseISODate, fmtDate } from './data.js';
+import { APP_VERSION, weekNumber, toISODate, parseISODate, fmtDate, getData } from './data.js';
 import { getRuns, putRun, deleteRun, getSettings, newId, ignoreGarmin } from './store.js';
 import { getSync, garminLinks, garminJobState, GARMIN_SECRET, GARMIN_FILE } from './sync.js';
 import { getGarminState, importFromGarmin, checkGarminNow } from './garmin.js';
-import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles } from './runs.js';
+import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles, settleWeek, openRunDays, isAuto } from './runs.js';
 import { svg, tooltip, yTicks } from './progress.js';
 
 const clock = iso => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -14,6 +15,25 @@ const when = iso => (toISODate(new Date(iso)) === toISODate(new Date()) ? `today
 const dayLabel = iso => { const d = parseISODate(iso); return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${d.getDate()}`; };
 const startClock = t => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'pm' : 'am'}`; };
 const STATUS = { done: '✓ done', today: 'today', open: 'not logged yet', later: '' };
+const shortDay = iso => parseISODate(iso).toLocaleDateString(undefined, { weekday: 'short' });
+
+/** v1.12: after a run is saved, settle again what the app-picked runs in that week count as. */
+export async function resettle(dates) {
+  const { plan, rules } = getData();
+  const settings = await getSettings();
+  const all = await getRuns();
+  const weeks = [...new Set(dates.filter(Boolean).map(d => weekNumber(parseISODate(d), settings.startDate)))];
+  for (const w of weeks) for (const r of settleWeek(all, w, { plan, rules, settings })) await putRun(r);
+}
+
+/** "Thursday or Saturday works." for a planned run whose day passed, or that it drops on Sunday night. */
+export function openRunText(ctx, runId, week, today) {
+  const days = openRunDays({ ...ctx, runId, week, today });
+  if (!days.length) return 'No day left this week. It drops on Sunday night.';
+  const names = days.map(d => (d.today ? 'today' : d.name));
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0];
+  return `${list[0].toUpperCase()}${list.slice(1)} works.`;
+}
 
 // ---- the run form ----
 
@@ -51,6 +71,7 @@ export function runForm(plan, settings, existing, onSaved, preset = {}) {
         rec.week = weekNumber(new Date(rec.date + 'T12:00:00'), settings.startDate);
         rec.pace = paceOf(rec.distance, rec.minutes);
         await putRun(rec);
+        await resettle([rec.date, existing && existing.date]);
         closeModal(); toast('Run saved'); onSaved && onSaved(rec);
       } }, 'Save run')
     ])
@@ -62,7 +83,12 @@ export function runForm(plan, settings, existing, onSaved, preset = {}) {
 // ---- one run, opened ----
 function runSheet(r, ctx) {
   const { plan, rules, settings, refresh, readOnly } = ctx;
-  const save = async patch => { const next = { ...r, ...patch }; await putRun(next); toast('Saved'); refresh(); runSheet(next, ctx); };
+  const save = async patch => {
+    const next = { ...r, ...patch };
+    await putRun(next);
+    if ('type' in patch) await resettle([next.date]);
+    toast('Saved'); refresh(); runSheet(next, ctx);
+  };
   const stat = (label, value) => (value === null || value === undefined || value === '' ? null : el('div', { class: 'run-stat' }, [el('span', {}, label), el('b', {}, value)]));
   const pace = countsMiles(rules, r.type) ? (r.pace || paceOf(r.distance, r.minutes)) : null;
   showModal(el('div', { id: 'run-sheet' }, [
@@ -73,7 +99,8 @@ function runSheet(r, ctx) {
       stat('Avg heart rate', r.hr ? Math.round(r.hr) : null), stat('Max heart rate', r.maxHr ? Math.round(r.maxHr) : null), stat('Climb', r.climbFt ? `${r.climbFt} ft` : null), stat('Cadence', r.cadence ? `${r.cadence} spm` : null)
     ]),
     readOnly ? null : el('h3', { style: 'margin-top:14px' }, 'Counts as'),
-    readOnly ? null : el('div', { class: 'tag-row', id: 'run-type-row' }, plan.runTypes.map(t => el('button', { class: 'tag-btn' + (t === r.type ? ' on' : ''), onclick: () => { const pr = planRunForType(plan, t); save({ type: t, planId: pr ? pr.id : null }); } }, t))),
+    readOnly ? null : el('div', { class: 'tag-row', id: 'run-type-row' }, plan.runTypes.map(t => el('button', { class: 'tag-btn' + (t === r.type ? ' on' : ''), onclick: () => { const pr = planRunForType(plan, t); save({ type: t, planId: pr ? pr.id : null, typeLocked: true, autoType: false, autoWhy: null }); } }, t))),
+    !readOnly && isAuto(r) && r.autoWhy ? el('p', { class: 'muted', id: 'run-auto-why', style: 'margin:-2px 0 12px;font-size:var(--t-small)' }, `The app counted it as ${r.type} because ${r.autoWhy}. Tap another to change it; your pick sticks.`) : null,
     readOnly ? null : el('h3', {}, 'Effort (1 easy, 10 all out)'),
     readOnly ? (r.rpe ? el('p', {}, `Effort ${r.rpe} of 10`) : null) : el('div', { class: 'tag-row', id: 'run-effort-row' }, [3, 4, 5, 6, 7, 8, 9, 10].map(n => el('button', { class: 'tag-btn' + (Number(r.rpe) === n ? ' on' : ''), 'data-rpe': n, onclick: () => save({ rpe: n }) }, String(n)))),
     r.notes ? el('p', { class: 'muted' }, r.notes) : null,
@@ -226,11 +253,12 @@ export async function renderRunsTab(view, ctx) {
           el('div', { class: 'row' }, [
             el('b', {}, row.short),
             row.status === 'done' || !phone
-              ? el('span', { class: 'day-status ' + (row.status === 'done' ? 'done' : '') }, STATUS[row.status])
+              ? el('span', { class: 'day-status ' + (row.status === 'done' ? 'done' : '') }, row.status === 'done' && row.run && !/weekend/i.test(row.day) && row.run.date !== row.date ? `✓ done ${shortDay(row.run.date)}` : STATUS[row.status])
               : (row.status === 'later' ? null : el('button', { class: 'btn small', onclick: () => runForm(plan, settings, null, refresh, { type: row.type }) }, 'Log'))
           ]),
           el('div', { class: 'run-ask' }, row.plan.text),
           el('div', { class: 'muted run-detail' }, row.plan.detail),
+          row.status === 'open' ? el('div', { class: 'run-moved' }, `Not done ${/weekend/i.test(row.day) ? 'yet' : shortDay(row.date)}. ${openRunText({ plan, rules, settings }, row.id, week, today)}`) : null,
           row.run ? el('button', { class: 'run-result', onclick: () => runSheet(row.run, full) }, runLine(row.run, rules, true) || 'Logged') : null
         ])
       ])),

@@ -116,7 +116,7 @@ with sync_playwright() as p:
 
     # ---- the computer ----
     print('Computer: opens with the link, shows the phone data, never uploads')
-    desk = browser.new_context(viewport={'width': 1280, 'height': 900})
+    desk = browser.new_context(viewport={'width': 1280, 'height': 900}, reduced_motion='reduce')
     desk.route('https://api.github.com/**', github)
     dpage = desk.new_page(); dpage.on('pageerror', lambda e: errors.append(str(e)))
     dpage.goto(link); dpage.wait_for_selector('.card.accent h1')

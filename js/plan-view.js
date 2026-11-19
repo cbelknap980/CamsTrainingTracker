@@ -37,13 +37,15 @@ function thisWeekCard(plan, settings, sessions, runs, today, week) {
   const start = parseISODate(settings.startDate);
   start.setDate(start.getDate() + (week - 1) * 7);
   const todayIso = toISODate(today);
+  const weekEndDate = new Date(start); weekEndDate.setDate(start.getDate() + 6);
+  const weekEnd = toISODate(weekEndDate);
   const rows = DAYS.map(([dow], i) => {
     const d = new Date(start); d.setDate(start.getDate() + i);
     const iso = toISODate(d);
     const id = plan.calendar[dow];
     const lift = id ? plan.sessions.find(s => s.id === id) : null;
     const run = id ? plan.runs.find(r => r.id === id) : null;
-    const done = lift ? sessions.find(s => s.sessionId === id && s.week === week) : (run ? runs.find(r => r.date >= toISODate(start) && r.date <= iso && (r.planId === id || r.type === run.type)) : null);
+    const done = lift ? sessions.find(s => s.sessionId === id && s.week === week) : (run ? runs.find(r => r.date >= toISODate(start) && r.date <= weekEnd && (r.planId === id || r.type === run.type)) : null); // v1.12: a run done on another day of the week still counts
     const status = done ? 'done' : (iso < todayIso && (lift || run) ? 'missed' : '');
     return el('div', { class: 'day-row' + (iso === todayIso ? ' today' : '') }, [
       el('span', { class: 'day-name' }, d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })),

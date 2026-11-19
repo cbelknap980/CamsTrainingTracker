@@ -11,8 +11,8 @@ import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './expor
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
 import { weekOwed, owedLines, buildCatchUpSession, slackDays } from './catchup.js';
-import { renderRunsTab, runForm } from './runs-view.js';
-import { weekRuns, runLine } from './runs.js';
+import { renderRunsTab, runForm, openRunText } from './runs-view.js';
+import { weekRuns, runLine, openRunDays } from './runs.js';
 import { importFromGarmin } from './garmin.js';
 import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
 import { renderPlan } from './plan-view.js';
@@ -274,6 +274,23 @@ async function renderHome() {
       : `This waits for your next Slack day (${slack.join(' or ')}). Anything still owed on Sunday night is dropped.`));
   };
 
+  // v1.12: runs follow Cameron off schedule. A planned run whose day passed is offered on a free day that still
+  // works (rules.runSchedule); on other days a card says what is still to run this week.
+  const runRows = week >= 1 && week <= 12 ? weekRuns({ plan: D.plan, settings, runs: await getRuns(), week, today }) : [];
+  const runCtx = { plan: D.plan, rules: D.rules, settings };
+  const movedRun = !session && !run ? runRows.find(r => (r.status === 'open' || r.status === 'today') && openRunDays({ ...runCtx, runId: r.id, week, today }).some(d => d.today)) : null;
+  const runBody = (card, row, primary) => {
+    card.appendChild(el('p', { id: primary ? 'run-ask' : null, style: 'font-weight:600;margin:0 0 4px' }, row.plan.text));
+    card.appendChild(el('p', { class: 'muted' }, row.plan.detail));
+    if (row.run) {
+      card.appendChild(el('p', { id: primary ? 'run-done' : null, style: 'color:var(--good);font-weight:700' }, `✓ Done${row.run.date !== toISODate(today) ? ' ' + fmtDate(row.run.date) : ''} · ${runLine(row.run, D.rules) || 'logged'}`));
+      card.appendChild(el('button', { class: 'btn', onclick: () => showTab('runs') }, 'Open Runs'));
+    } else {
+      card.appendChild(el('button', { class: 'btn ' + (primary ? 'primary' : ''), onclick: () => runForm(D.plan, settings, null, () => renderHome(), { type: row.type }) }, 'Log this run'));
+    }
+  };
+  const movedNote = row => (row.status === 'open' ? `Moved here from ${new Date(row.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long' })}. If you run with your watch, it logs itself.` : 'If you run with your watch, it logs itself.');
+
   const todayCard = el('div', { class: 'card accent' });
   todayCard.appendChild(el('h3', {}, `Today, ${fmtDate(toISODate(today))} · week ${week}${phase.note ? ' · ' + phase.name : ''}`));
   if (session) {
@@ -289,17 +306,21 @@ async function renderHome() {
     if (phase.note) todayCard.appendChild(el('p', { class: 'hero-note' }, phase.note));
     todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => previewSession(session.id, week) }, 'Start'));
   } else if (run) {
-    // v1.10: what the run asks for this week, and its numbers once it is logged (by hand or from Garmin)
-    const row = week >= 1 && week <= 12 ? weekRuns({ plan: D.plan, settings, runs: await getRuns(), week, today }).find(r => r.id === run.id) : null;
+    // v1.10: what the run asks for this week, and its numbers once it is logged (by hand or from Garmin;
+    // v1.12: also when it was done on another day)
+    const row = runRows.find(r => r.id === run.id);
     todayCard.appendChild(el('h1', {}, run.name));
-    if (row) todayCard.appendChild(el('p', { id: 'run-ask', style: 'font-weight:600;margin:0 0 4px' }, row.plan.text));
-    todayCard.appendChild(el('p', { class: 'muted' }, row ? row.plan.detail : run.note));
-    if (row && row.run) {
-      todayCard.appendChild(el('p', { id: 'run-done', style: 'color:var(--good);font-weight:700' }, `✓ Done · ${runLine(row.run, D.rules) || 'logged'}`));
-      todayCard.appendChild(el('button', { class: 'btn', onclick: () => showTab('runs') }, 'Open Runs'));
-    } else {
+    if (row) runBody(todayCard, row, true);
+    else {
+      todayCard.appendChild(el('p', { class: 'muted' }, run.note));
       todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => runForm(D.plan, settings, null, () => renderHome(), { type: run.type }) }, 'Log this run'));
     }
+  } else if (movedRun && !hasOwed) {
+    // v1.12: a free day that suits a run still open this week
+    todayCard.id = 'moved-run-card';
+    todayCard.appendChild(el('h1', {}, movedRun.name));
+    todayCard.appendChild(el('p', { class: 'muted', style: 'font-size:var(--t-small);margin:0 0 8px' }, movedNote(movedRun)));
+    runBody(todayCard, movedRun, true);
   } else if (hasOwed) {
     // v1.8: on a Slack day the catch-up takes the today card
     todayCard.id = 'catchup-card';
@@ -314,6 +335,20 @@ async function renderHome() {
     const c = el('div', { class: 'card', id: 'catchup-card' }, [el('h3', {}, 'Owed this week')]);
     catchUpBody(c, false);
     view.appendChild(c);
+  }
+  if (movedRun && hasOwed) {
+    // the catch-up kept the today card; the run that also fits today goes right under it
+    const c = el('div', { class: 'card', id: 'moved-run-card' }, [el('h3', {}, 'Also today'), el('h2', {}, movedRun.name), el('p', { class: 'muted', style: 'font-size:var(--t-small)' }, movedNote(movedRun))]);
+    runBody(c, movedRun, false);
+    view.appendChild(c);
+  }
+  const stillOpen = runRows.filter(r => r.status === 'open' && r !== movedRun);
+  if (stillOpen.length) {
+    view.appendChild(el('div', { class: 'card', id: 'runs-open-card' }, [
+      el('h3', {}, 'Still to run this week'),
+      ...stillOpen.map(r => el('p', { style: 'margin:0 0 6px' }, [el('b', {}, `${r.name}. `), el('span', { class: 'muted' }, `${r.plan.text}. ${openRunText(runCtx, r.id, week, today)}`)])),
+      el('p', { class: 'muted', style: 'margin:8px 0 0;font-size:var(--t-small)' }, 'Run whenever it suits you. A run from Garmin counts for whichever planned run it most likely is.')
+    ]));
   }
   // v1.4: install card, only while the app is running in a browser tab. v1.6: on a phone it sits right under
   // the today card so it is not missed; on a computer it stays at the bottom.
