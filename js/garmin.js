@@ -10,6 +10,8 @@ import { mergeGarmin, garminList } from './runs.js';
 import { APP_VERSION } from './data.js';
 
 export const getGarminState = async () => (await kvGet('garmin')) || {};
+// v1.12: bump when the merge rules change, so the phone re-reads the last Garmin file once and re-settles the weeks
+const MERGE_VERSION = 2;
 const saveState = async patch => { const next = { ...(await getGarminState()), ...patch }; await kvSet('garmin', next); return next; };
 
 /** What went wrong on Garmin's side, in words Cameron can act on. */
@@ -35,14 +37,14 @@ export async function importFromGarmin({ plan, rules, force } = {}) {
   const state = await getGarminState();
   const problem = explainGarmin(data);
   const base = { found: true, lastCheckedAt: now, fetchedAt: data.fetchedAt || null, activities: garminList(data).length, lastError: problem };
-  if (cfg.role !== 'phone' || (!force && state.importedFetchedAt === data.fetchedAt)) {
+  if (cfg.role !== 'phone' || (!force && state.importedFetchedAt === data.fetchedAt && state.mergeVersion === MERGE_VERSION)) {
     await saveState(base);
     return { ok: true, added: 0, updated: 0, changed: false, ...base, error: problem };
   }
   const settings = await getSettings();
   const merged = mergeGarmin(await getRuns(), data, { plan, rules, settings, ignored: await getGarminIgnored(), appVersion: APP_VERSION });
   for (const r of merged.put) await putRun(r);
-  await saveState({ ...base, importedFetchedAt: data.fetchedAt || null, lastAdded: merged.added, runsSeen: merged.seen });
+  await saveState({ ...base, importedFetchedAt: data.fetchedAt || null, mergeVersion: MERGE_VERSION, lastAdded: merged.added, runsSeen: merged.seen });
   return { ok: true, added: merged.added, updated: merged.updated, changed: merged.put.length > 0, ...base, error: problem };
 }
 

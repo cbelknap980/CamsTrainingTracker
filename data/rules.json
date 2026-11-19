@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.4",
+  "rulesVersion": "1.5",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -250,16 +250,61 @@
   },
   "runLog": {
     "note": "Run types whose distance is not running miles. They still count as the planned run they replace.",
-    "milesExclude": ["Bike/rower sub", "Ski day"]
+    "milesExclude": [
+      "Bike/rower sub",
+      "Ski day"
+    ]
+  },
+  "runSchedule": {
+    "note": "v1.12: days a planned run can move to when its own day passes without it (0 = Sunday ... 6 = Saturday). Lift days are never offered and lifts never move. Like catch-up sets, a run still open on Sunday night is dropped, not carried into next week.",
+    "moveTo": {
+      "run1": [
+        4,
+        6,
+        0
+      ],
+      "run2": [
+        6,
+        0
+      ]
+    }
   },
   "garmin": {
-    "note": "Which Garmin activities become runs in the log. match is tested against Garmin's activity type (lower case). type null means: Intervals on the interval day, Long run on the weekend, otherwise Easy run. Shorter activities than minMinutes are left out. Location fields never leave Garmin's side: the job in the private repo drops them.",
+    "note": "Which Garmin activities become runs in the log. match is tested against Garmin's activity type (lower case). type null means a run: what it counts as is settled for the week by garmin.assign (v1.12). Shorter activities than minMinutes are left out. Location fields never leave Garmin's side: the job in the private repo drops them.",
     "types": [
-      { "match": "run", "type": null, "minMinutes": 5 },
-      { "match": "ski|snowboard", "type": "Ski day", "minMinutes": 30 },
-      { "match": "cycling|biking|rowing", "type": "Bike/rower sub", "minMinutes": 20 }
+      {
+        "match": "run",
+        "type": null,
+        "minMinutes": 5
+      },
+      {
+        "match": "ski|snowboard",
+        "type": "Ski day",
+        "minMinutes": 30
+      },
+      {
+        "match": "cycling|biking|rowing",
+        "type": "Bike/rower sub",
+        "minMinutes": 20
+      }
     ],
     "lookbackDays": 28,
-    "checkWaitSeconds": 150
+    "checkWaitSeconds": 150,
+    "assign": {
+      "note": "v1.12: which planned run a Garmin run counts as, whatever day it was. Clear signs first: an interval-looking run takes the intervals, a run at least as long as this week's long-run target (or longMinutes) takes the long run. Then in date order: a planned run's own day, the intervals while open (intervalMinMinutes to intervalMaxMinutes), the long run if at least longOffDayShare of the target, otherwise Easy run. A type Cameron taps is never changed.",
+      "intervalLabels": [
+        "VO2MAX",
+        "ANAEROBIC_CAPACITY",
+        "SPEED",
+        "LACTATE_THRESHOLD"
+      ],
+      "anaerobicEffectAtLeast": 2.0,
+      "speedRatioAtLeast": 1.45,
+      "longMinutes": 50,
+      "longOnDayShare": 0.6,
+      "longOffDayShare": 0.85,
+      "intervalMinMinutes": 15,
+      "intervalMaxMinutes": 50
+    }
   }
 }

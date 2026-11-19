@@ -182,18 +182,34 @@ export function garminToRun(a, { rules }) {
     hr: num(pick(a, 'averageHR', 'averageHeartRateInBeatsPerMinute', 'summaryDTO.averageHR')),
     maxHr: num(pick(a, 'maxHR', 'maxHeartRateInBeatsPerMinute', 'summaryDTO.maxHR')),
     climbFt: climb === null ? null : Math.round(climb * FEET_PER_METER),
-    cadence: cadence === null ? null : Math.round(cadence)
+    cadence: cadence === null ? null : Math.round(cadence),
+    intervalLike: intervalSignal(a, (cfg.assign || {}))
   };
 }
 
-const MEASURED = ['date', 'startTime', 'distance', 'minutes', 'pace', 'hr', 'maxHr', 'climbFt', 'cadence', 'garminType', 'name'];
+/**
+ * v1.12: does the activity look like an interval session? true / false from whatever Garmin sent, null when it sent
+ * nothing to judge by. Garmin's training-effect label or anaerobic effect when present, else max speed against average.
+ */
+function intervalSignal(a, cfg) {
+  const label = String(pick(a, 'trainingEffectLabel', 'summaryDTO.trainingEffectLabel') || '').toUpperCase();
+  const anaerobic = num(pick(a, 'anaerobicTrainingEffect', 'summaryDTO.anaerobicTrainingEffect'));
+  const avg = num(pick(a, 'averageSpeed', 'averageSpeedInMetersPerSecond', 'summaryDTO.averageSpeed'));
+  const max = num(pick(a, 'maxSpeed', 'maxSpeedInMetersPerSecond', 'summaryDTO.maxSpeed'));
+  if (label) return (cfg.intervalLabels || []).includes(label);
+  if (anaerobic !== null) return anaerobic >= (cfg.anaerobicEffectAtLeast || 99);
+  if (avg && max) return max / avg >= (cfg.speedRatioAtLeast || 99);
+  return null;
+}
+
+const MEASURED = ['date', 'startTime', 'distance', 'minutes', 'pace', 'hr', 'maxHr', 'climbFt', 'cadence', 'garminType', 'name', 'intervalLike'];
 
 /**
  * Work out what the log needs from a Garmin file.
  * - an activity already in the log has its measured numbers refreshed (type, effort and notes stay as Cameron set them)
  * - a run typed in by hand on the same day takes the activity's numbers instead of being logged twice
- * - anything else is a new run: Intervals on the interval day, Long run on the weekend, otherwise Easy run,
- *   and Easy run too when that week's planned run is already logged
+ * - anything else is a new run. v1.12: what it counts as is settled for the whole week by settleWeek, so a run on
+ *   an off day takes the planned run it most likely is. Ski days and bike or rower sessions keep the type rules.garmin gives them.
  * `ignored` = Garmin ids Cameron deleted; they stay out.
  * returns { put: [run records to save], added, updated, seen }
  */
@@ -225,18 +241,104 @@ export function mergeGarmin(runs, activities, { plan, rules, settings, ignored =
       put.set(typed.id, typed); updated += 1;
       continue;
     }
-    let type = g.type;
-    if (g.guess) {
-      const dow = parseISODate(g.date).getDay();
-      const planned = (plan.runs || []).find(r => plan.calendar[dow] === r.id || (/weekend/i.test(r.day || '') && (dow === 0 || dow === 6)));
-      const { start, end } = weekRange(settings, week);
-      const taken = planned && all.some(r => r.date >= start && r.date <= end && r.type === planned.type);
-      type = planned && !taken ? planned.type : 'Easy run';
-    }
+    const type = g.guess ? 'Easy run' : g.type;
     const planRun = planRunForType(plan, type);
-    const rec = { ...g, type, planId: planRun ? planRun.id : null, week, rpe: null, notes: '', appVersion };
+    const rec = { ...g, type, planId: planRun ? planRun.id : null, week, rpe: null, notes: '', appVersion, autoType: !!g.guess };
     delete rec.guess;
     all.push(rec); put.set(rec.id, rec); added += 1;
   }
+  const weeks = [...new Set(all.filter(isAuto).map(r => r.week || weekNumber(parseISODate(r.date), settings.startDate)))];
+  for (const w of weeks) for (const r of settleWeek(all, w, { plan, rules, settings })) put.set(r.id, r);
   return { put: [...put.values()], added, updated, seen };
+}
+
+// ---- v1.12: which planned run each run counts as ----
+
+/**
+ * A run whose type the app chose and may change again: a Garmin run Cameron has not re-typed. A run logged by hand,
+ * or one whose type he tapped (typeLocked), is fixed. A Garmin run saved before v1.12 counts as automatic only while
+ * it still has the old default type, Easy run.
+ */
+export function isAuto(r) {
+  if (!r || r.typeLocked) return false;
+  if (r.autoType !== undefined) return !!r.autoType;
+  return String(r.id || '').startsWith('garmin-') && r.type === 'Easy run';
+}
+
+const WHY = {
+  signal: 'it looked like intervals',
+  long: 'it was long enough for the long run',
+  day: 'it was on that run\'s day',
+  open: 'the week\'s intervals were still open',
+  offLong: 'it was close to the long-run distance',
+  full: 'both planned runs were already done'
+};
+
+/**
+ * Settle what every automatic run in a week counts as, given the runs that are fixed. Runs with a clear sign go first
+ * (looked like intervals; long enough for the long run), then the rest in date order:
+ *   on a planned run's own day (Tuesday intervals; Saturday or Sunday long run, if it is at least longOnDayShare of the target)
+ *   -> the intervals while they are open (most off-day runs replace a planned run; the plan has two a week)
+ *   -> the long run if it is at least longOffDayShare of the target -> otherwise Easy run.
+ * Numbers are in rules.garmin.assign. Returns the records whose type, planId or reason changed (edited in place).
+ */
+export function settleWeek(all, week, { plan, rules, settings }) {
+  const cfg = (rules && rules.garmin && rules.garmin.assign) || {};
+  const { start, end } = weekRange(settings, week);
+  const inWeek = all.filter(r => r.date >= start && r.date <= end);
+  const auto = inWeek.filter(isAuto).sort((a, b) => (`${a.date} ${a.startTime || ''}` < `${b.date} ${b.startTime || ''}` ? -1 : 1));
+  if (!auto.length) return [];
+  const [intervals, long] = [(plan.runs || []).find(r => r.intervals), (plan.runs || []).find(r => r.distance)];
+  const taken = new Set(inWeek.filter(r => !isAuto(r)).map(r => r.planId || (planRunForType(plan, r.type) || {}).id).filter(Boolean));
+  const target = long ? longRunTarget(long, all.filter(r => r.date < start)).miles : null;
+  const dayOf = run => Number(Object.keys(plan.calendar || {}).find(k => plan.calendar[k] === run.id));
+  const isWeekend = d => d === 0 || d === 6;
+  const longEnough = (r, share) => !!(target && ((r.distance || 0) >= share * target));
+  const pickFor = {};
+  const give = (r, run, why) => { pickFor[r.id] = { run, why }; if (run) taken.add(run.id); };
+  const open = run => run && !taken.has(run.id);
+  // first pass: clear signs
+  for (const r of auto) {
+    if (r.intervalLike === true && open(intervals)) give(r, intervals, 'signal');
+    else if (r.intervalLike !== true && open(long) && (longEnough(r, 1) || (r.minutes || 0) >= (cfg.longMinutes || 999))) give(r, long, 'long');
+  }
+  // second pass: the rest, in date order
+  for (const r of auto) {
+    if (pickFor[r.id]) continue;
+    const dow = parseISODate(r.date).getDay();
+    const mins = r.minutes || 0;
+    if (open(intervals) && dow === dayOf(intervals) && mins >= (cfg.intervalMinMinutes || 0)) give(r, intervals, 'day');
+    else if (open(long) && (/weekend/i.test(long.day || '') ? isWeekend(dow) : dow === dayOf(long)) && (longEnough(r, cfg.longOnDayShare || 0) || !r.distance)) give(r, long, 'day');
+    else if (open(intervals) && mins >= (cfg.intervalMinMinutes || 0) && mins <= (cfg.intervalMaxMinutes || 999)) give(r, intervals, 'open');
+    else if (open(long) && longEnough(r, cfg.longOffDayShare || 1)) give(r, long, 'offLong');
+    else give(r, null, 'full');
+  }
+  const changed = [];
+  for (const r of auto) {
+    const { run, why } = pickFor[r.id];
+    const type = run ? run.type : 'Easy run';
+    const planId = run ? run.id : null;
+    const reason = run ? WHY[why] : (taken.size >= (plan.runs || []).length ? WHY.full : 'it did not fit a planned run');
+    if (r.type !== type || (r.planId || null) !== planId || r.autoWhy !== reason || r.autoType !== true) {
+      Object.assign(r, { type, planId, autoWhy: reason, autoType: true });
+      changed.push(r);
+    }
+  }
+  return changed;
+}
+
+/**
+ * v1.12: where an open run can still go this week. rules.runSchedule.moveTo lists, per plan run, the days it can move
+ * to (0 = Sunday). Days already past and lift days are left out. Returns weekday names in week order.
+ */
+export function openRunDays({ plan, rules, settings, runId, week, today }) {
+  const days = ((rules && rules.runSchedule && rules.runSchedule.moveTo) || {})[runId] || [];
+  const { start } = weekRange(settings, week);
+  const todayIso = toISODate(today);
+  const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const lift = id => (plan.sessions || []).some(s => s.id === id);
+  return days.map(d => {
+    const at = parseISODate(start); at.setDate(at.getDate() + ((d + 6) % 7));
+    return { d, iso: toISODate(at) };
+  }).filter(x => x.iso >= todayIso && !lift(plan.calendar[x.d])).sort((a, b) => (a.iso < b.iso ? -1 : 1)).map(x => ({ name: names[x.d], iso: x.iso, today: x.iso === todayIso }));
 }
