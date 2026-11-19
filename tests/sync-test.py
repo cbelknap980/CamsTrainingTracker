@@ -69,7 +69,7 @@ with sync_playwright() as p:
 
     # ---- the phone ----
     print('Phone: set-up and upload')
-    phone = browser.new_context(viewport={'width': 393, 'height': 851}, is_mobile=True, has_touch=True)
+    phone = browser.new_context(viewport={'width': 393, 'height': 851}, reduced_motion='reduce', is_mobile=True, has_touch=True)
     phone.grant_permissions(['clipboard-read', 'clipboard-write'], origin=BASE.rstrip('/'))
     phone.route('https://api.github.com/**', github)
     page = phone.new_page(); page.on('pageerror', lambda e: errors.append(str(e)))
@@ -154,7 +154,7 @@ with sync_playwright() as p:
 
     # ---- a new, empty phone ----
     print('New phone: loads the copy instead of wiping it')
-    phone2 = browser.new_context(viewport={'width': 393, 'height': 851}, is_mobile=True, has_touch=True)
+    phone2 = browser.new_context(viewport={'width': 393, 'height': 851}, reduced_motion='reduce', is_mobile=True, has_touch=True)
     phone2.route('https://api.github.com/**', github)
     p2 = phone2.new_page(); p2.on('pageerror', lambda e: errors.append(str(e)))
     p2.goto(BASE); p2.wait_for_selector('.card.accent h1')

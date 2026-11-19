@@ -114,7 +114,7 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
 with sync_playwright() as p:
     chrome = os.environ.get('CHROME_PATH') or next((c for c in ('/usr/bin/google-chrome', '/opt/pw-browsers/chromium') if os.path.exists(c)), None)
     browser = p.chromium.launch(executable_path=chrome, headless=True, args=['--no-sandbox'])
-    ctx = browser.new_context(viewport={'width': 393, 'height': 851}, device_scale_factor=2, is_mobile=True, has_touch=True, accept_downloads=True)
+    ctx = browser.new_context(viewport={'width': 393, 'height': 851}, reduced_motion='reduce', device_scale_factor=2, is_mobile=True, has_touch=True, accept_downloads=True)
     ctx.grant_permissions(['notifications'], origin='http://localhost:8080')
     page = ctx.new_page()
     errors = []
@@ -312,7 +312,9 @@ with sync_playwright() as p:
     page.screenshot(path=f'{SHOTS}/plan-phone.png', full_page=True)
 
     # ---- Architecture tab + search ----
-    page.click('#tabs button[data-view="architecture"]'); page.wait_for_selector('.arch-svg')
+    # polish: on a phone the Architecture page moved from the tab bar into Settings
+    check('polish: phone tab bar has four tabs', page.locator('#tabs .tab:visible').count() == 4, page.locator('#tabs .tab:visible').count())
+    page.click('#settings-btn'); page.wait_for_selector('#arch-open'); page.click('#arch-open'); page.wait_for_selector('.arch-svg')
     check('architecture draws 18 boxes', page.locator('.arch-svg g[data-part]').count() == 18, page.locator('.arch-svg g[data-part]').count())
     page.fill('input[type="search"]', 'trim'); page.wait_for_timeout(100)
     check('search "trim" highlights Player and Rules', page.locator('.arch-svg .box.hit').count() >= 2, page.locator('.arch-svg .box.hit').count())

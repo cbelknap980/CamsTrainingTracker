@@ -37,7 +37,7 @@ def save_review(page):
 with sync_playwright() as p:
     chrome = os.environ.get('CHROME_PATH') or next((c for c in ('/usr/bin/google-chrome', '/opt/pw-browsers/chromium') if os.path.exists(c)), None)
     browser = p.chromium.launch(executable_path=chrome, headless=True, args=['--no-sandbox'])
-    ctx = browser.new_context(viewport={'width': 393, 'height': 851}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    ctx = browser.new_context(viewport={'width': 393, 'height': 851}, reduced_motion='reduce', device_scale_factor=2, is_mobile=True, has_touch=True)
     page = ctx.new_page(); errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.add_init_script("window.SpeechSynthesisUtterance = function (t) { this.text = t; }; Object.defineProperty(window, 'speechSynthesis', { value: { cancel() {}, speak() {} }, configurable: true });")

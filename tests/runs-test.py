@@ -123,7 +123,7 @@ with sync_playwright() as p:
     chrome = os.environ.get('CHROME_PATH') or next((c for c in ('/usr/bin/google-chrome', '/opt/pw-browsers/chromium') if os.path.exists(c)), None)
     browser = p.chromium.launch(executable_path=chrome, headless=True, args=['--no-sandbox'])
     errors = []
-    phone = browser.new_context(viewport={'width': 393, 'height': 851}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    phone = browser.new_context(viewport={'width': 393, 'height': 851}, reduced_motion='reduce', device_scale_factor=2, is_mobile=True, has_touch=True)
     phone.grant_permissions(['clipboard-read', 'clipboard-write'], origin=BASE.rstrip('/'))
     phone.route('https://api.github.com/**', github)
     page = phone.new_page(); page.on('pageerror', lambda e: errors.append(str(e)))
@@ -234,7 +234,7 @@ with sync_playwright() as p:
     check('the long run target moves up half a mile after 3.6', '4 mi' in page.locator('.run-plan[data-run="run2"]').inner_text() and 'longest so far 3.6 mi' in page.locator('.run-plan[data-run="run2"]').inner_text(), page.locator('.run-plan[data-run="run2"]').inner_text())
 
     print('The computer')
-    comp = browser.new_context(viewport={'width': 1366, 'height': 900}, device_scale_factor=1)
+    comp = browser.new_context(viewport={'width': 1366, 'height': 900}, reduced_motion='reduce', device_scale_factor=1)
     comp.route('https://api.github.com/**', github)
     page2 = comp.new_page(); page2.on('pageerror', lambda e: errors.append(str(e)))
     page2.clock.install(time='2026-11-22T09:00:00')

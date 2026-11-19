@@ -228,6 +228,9 @@ function showTab(name) {
   currentTab = name;
   document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   window.scrollTo(0, 0);
+  // polish: the new page rises in (CSS in polish.css), then the class comes off so later re-renders stay still
+  view.classList.remove('enter'); void view.offsetWidth; view.classList.add('enter');
+  clearTimeout(showTab.t); showTab.t = setTimeout(() => view.classList.remove('enter'), 700);
   view.classList.toggle('wide', name === 'progress' || name === 'plan' || document.body.classList.contains('computer'));
   view.classList.toggle('home-cols', name === 'home' && document.body.classList.contains('computer'));
   if (name === 'home') renderHome();
@@ -276,7 +279,14 @@ async function renderHome() {
   if (session) {
     const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets });
     todayCard.appendChild(el('h1', {}, session.name));
-    todayCard.appendChild(el('p', { class: 'muted' }, `${tl.steps.length} steps · about ${fmtMinutes(tl.plannedSeconds)} · ${phase.note || ''}`));
+    // polish: the facts as chips, a strip with one bar per block (sized by its minutes), the phase note small
+    const blocks = session.blocks.filter(b => b.type !== 'iftime');
+    todayCard.appendChild(el('ul', { class: 'hero-facts' }, [
+      el('li', {}, [el('b', {}, fmtMinutes(tl.plannedSeconds))]),
+      el('li', {}, ['done by', el('b', {}, fmtTime(Date.now() + tl.plannedSeconds * 1000))])
+    ]));
+    todayCard.appendChild(el('div', { class: 'hero-blocks', 'aria-hidden': 'true' }, blocks.map(b => el('span', { class: b.type === 'warmup' || b.type === 'stretch' ? 'soft' : '', style: `flex:${b.minutes || 1}` }))));
+    if (phase.note) todayCard.appendChild(el('p', { class: 'hero-note' }, phase.note));
     todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => previewSession(session.id, week) }, 'Start'));
   } else if (run) {
     // v1.10: what the run asks for this week, and its numbers once it is logged (by hand or from Garmin)
@@ -563,6 +573,7 @@ function offerResume(saved) {
         player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, container: view, onFinish: onSessionFinished });
         player.s = saved; player.finish('ended_early');
       } }, 'Save what I did and stop'),
+      el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
       el('button', { class: 'btn danger', onclick: async () => { await clearInProgress(); showTab('home'); } }, 'Discard it')
     ])
   ]));
@@ -688,6 +699,7 @@ function showSession(s) {
     setsTable(s.sets),
     el('div', { class: 'btn-row', style: 'margin-top:12px' }, [
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close'),
+      el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
       el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Delete this session?', 'Targets already set from it are kept.', 'Delete', true)) { await deleteSession(s.id); toast('Deleted'); renderProgressTab(); } } }, 'Delete')
     ])
   ]));
@@ -837,6 +849,7 @@ async function renderSettings() {
       el('button', { class: 'btn', id: 'sync-open', onclick: () => renderSyncSheet() }, 'Sync with the computer'),
       el('button', { class: 'btn', onclick: () => fileInput.click() }, 'Restore from backup file'),
       fileInput,
+      el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
       el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Wipe all data on this phone?', 'Back up first. This cannot be undone.', 'Wipe', true)) { await wipeAll(); await setPairTotals('none'); toast('Wiped'); closeModal(); showTab('home'); } } }, 'Wipe all data')
     ]),
     el('p', { class: 'muted', style: 'margin-top:14px' }, `Cam's Training Tracker v${APP_VERSION} · plan v${D.plan.planVersion} · rules v${D.rules.rulesVersion}`),

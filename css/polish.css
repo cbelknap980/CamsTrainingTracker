@@ -1,0 +1,117 @@
+/* polish.css (v1.13) - the look-and-feel layer, loaded after app.css so it only overrides.
+   Inter as the typeface, a deeper background with cards that sit on it, sentence-case section titles,
+   a quieter header, a pill on the active tab, and short motion: pages rise in, buttons give under a press,
+   sheets slide up. Everything respects prefers-reduced-motion. */
+@font-face {
+  font-family: "Inter";
+  src: url("../vendor/fonts/inter-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --bg: #0d0f13;
+  --surface-1: #161a20;
+  --surface-2: #20252d;
+  --surface-3: #2a3039;
+  --line: #262b34;
+  --edge: rgba(255, 255, 255, 0.06);
+  --muted: #959cab;
+  --accent-grad: linear-gradient(180deg, #ffb53d 0%, #f29a12 100%);
+  --radius: 18px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 6px 18px rgba(0, 0, 0, 0.22);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+html, body { font-family: "Inter", system-ui, -apple-system, Roboto, "Segoe UI", sans-serif; font-feature-settings: "tnum" 1, "cv11" 1; line-height: 1.4; -webkit-font-smoothing: antialiased; }
+.arch-svg text { font-family: "Inter", system-ui, sans-serif; }
+
+/* type: headings carry weight, section titles are sentence case instead of small caps */
+h1 { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.025em; }
+h2 { font-weight: 750; letter-spacing: -0.015em; }
+h3 { font-size: 0.95rem; text-transform: none; letter-spacing: -0.005em; font-weight: 650; color: var(--muted); margin-bottom: 12px; }
+th, label, .label, .label-inline { letter-spacing: 0.04em; }
+.muted, small { color: var(--muted); }
+
+/* header: a small mark, the week as a pill; the page itself carries the title */
+#topbar { padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: 8px; background: linear-gradient(180deg, var(--bg) 60%, rgba(13, 15, 19, 0)); backdrop-filter: none; }
+.brand { flex-direction: row; align-items: center; gap: 10px; }
+.brand::before { content: ""; width: 30px; height: 30px; border-radius: 9px; background: url("../icons/icon-192.png") center / cover; box-shadow: 0 0 0 1px var(--edge); flex: none; }
+.brand-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.chip { text-transform: none; letter-spacing: 0; font-size: var(--t-small); font-weight: 650; color: var(--text); background: var(--surface-2); padding: 6px 12px; border-radius: 999px; box-shadow: 0 0 0 1px var(--edge) inset; }
+.icon-btn { background: var(--surface-1); box-shadow: 0 0 0 1px var(--edge) inset; transition: transform 0.15s var(--ease), background 0.15s; }
+
+/* tab bar: four tabs, a pill behind the active icon */
+#tabs { background: rgba(13, 15, 19, 0.86); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4); border-top: 1px solid var(--edge); padding-top: 8px; }
+body:not(.computer) #tabs .tab[data-view="architecture"] { display: none; }
+#tabs .tab { gap: 4px; font-size: 0.72rem; transition: color 0.2s; }
+#tabs .tab .ico { width: 56px; height: 30px; border-radius: 999px; transition: background 0.25s var(--ease), transform 0.25s var(--ease); }
+#tabs .tab.active .ico { background: var(--accent-soft); }
+#tabs .tab:active .ico { transform: scale(0.92); }
+body.computer #tabs .tab .ico { width: auto; height: auto; background: none; }
+body.computer #tabs { background: var(--bg); }
+
+/* cards: a hairline edge and a little depth instead of flat grey boxes */
+.card { box-shadow: var(--shadow); border: 1px solid var(--edge); padding: 18px; margin-bottom: 14px; }
+.card.accent { border: 1px solid rgba(245, 165, 36, 0.38); box-shadow: var(--shadow); background: radial-gradient(120% 90% at 0% 0%, rgba(245, 165, 36, 0.13), rgba(245, 165, 36, 0) 60%), var(--surface-1); }
+.card.accent h1 { font-size: 2rem; margin: 2px 0 10px; }
+.card.pr-card { border-color: rgba(245, 165, 36, 0.4); }
+.modal .sheet .card, .card .card { box-shadow: none; }
+
+/* buttons: the main one has a gradient and a soft glow; all of them give a little under a press */
+.btn { transition: transform 0.12s var(--ease), background 0.15s, filter 0.15s, box-shadow 0.15s; -webkit-user-select: none; user-select: none; }
+.btn:active:not(:disabled), .menu-item:active, .icon-btn:active, .chip-btn:active, .stepper button:active { transform: scale(0.97); }
+.btn.primary { background: var(--accent-grad); box-shadow: 0 8px 22px rgba(245, 165, 36, 0.22), 0 1px 0 rgba(255, 255, 255, 0.35) inset; font-weight: 750; letter-spacing: -0.01em; }
+body[data-kind] .btn.primary { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25), 0 1px 0 rgba(255, 255, 255, 0.35) inset; }
+.btn:not(.primary):not(.ghost):not(.danger) { box-shadow: 0 0 0 1px var(--edge) inset; }
+input, select, textarea { box-shadow: 0 0 0 1px var(--edge) inset; transition: outline-color 0.15s; }
+
+/* today card: facts as chips instead of a sentence */
+.hero-facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.hero-facts li { display: inline-flex; align-items: baseline; gap: 5px; background: rgba(255, 255, 255, 0.06); border-radius: 999px; padding: 6px 12px; font-size: var(--t-small); font-weight: 600; color: var(--muted); }
+.hero-facts li b { color: var(--text); font-weight: 750; }
+.hero-note { font-size: var(--t-small); color: var(--muted); margin: 0 0 16px; }
+.hero-blocks { display: flex; gap: 4px; margin: 0 0 16px; }
+.hero-blocks span { height: 6px; border-radius: 3px; background: rgba(245, 165, 36, 0.5); }
+.hero-blocks span.soft { background: rgba(255, 255, 255, 0.14); }
+
+/* session done: the numbers as tiles */
+.done-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin: 14px 0 4px; }
+.done-stat { background: var(--surface-2); border-radius: 14px; padding: 12px 14px; box-shadow: 0 0 0 1px var(--edge) inset; }
+.done-stat b { display: block; font-size: 1.9rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
+.done-stat b small { font-size: 0.95rem; font-weight: 650; color: var(--muted); letter-spacing: 0; margin-left: 2px; }
+.done-stat span { font-size: var(--t-small); color: var(--muted); }
+.done-stat.good b { color: var(--good); }
+.done-trims { font-size: var(--t-small); color: var(--muted); margin: 10px 0 0; }
+.done-check { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: rgba(61, 204, 122, 0.16); color: var(--good); margin-bottom: 12px; }
+.done-check .ico svg { width: 28px; height: 28px; stroke-width: 2.6; }
+
+/* sheets and toasts */
+.modal { background: rgba(5, 6, 8, 0.66); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+.modal .sheet { --surface-1: #161a20; --surface-2: #20252d; --surface-3: #2a3039; --line: #262b34; --muted: #959cab; background: #161a20; border-top: 1px solid var(--edge); box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45); }
+.toast { background: #2a3039; border: 1px solid var(--edge); border-radius: 999px; padding: 10px 18px; }
+.menu-item { box-shadow: 0 0 0 1px var(--edge) inset; transition: transform 0.12s var(--ease), background 0.15s; }
+
+/* motion */
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px) scale(0.96); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes pop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+#view.enter > * { animation: rise 0.36s var(--ease) both; }
+#view.enter > *:nth-child(2) { animation-delay: 0.04s; }
+#view.enter > *:nth-child(3) { animation-delay: 0.08s; }
+#view.enter > *:nth-child(4) { animation-delay: 0.12s; }
+#view.enter > *:nth-child(n+5) { animation-delay: 0.16s; }
+.modal:not([hidden]) { animation: fade 0.2s ease both; }
+.modal:not([hidden]) .sheet { animation: sheet-up 0.3s var(--ease) both; }
+.toast:not([hidden]) { animation: toast-in 0.25s var(--ease) both; }
+.done-check { animation: pop 0.5s var(--ease) 0.1s both; }
+.jd-saved.flash .ico { animation: pop 0.45s var(--ease) both; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* computer: the sidebar keeps the name and the mark */
+body.computer .brand-name { position: static; width: auto; height: auto; clip: auto; overflow: visible; }
+body.computer #topbar { background: var(--bg); }
