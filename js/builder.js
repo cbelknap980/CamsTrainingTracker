@@ -61,6 +61,7 @@ export function buildTimeline({ plan, rules, settings, sessionId, session: custo
       case 'finisher': addFinisher(ctx, block); break;
       case 'stretch': addStretch(ctx, block); break;
       case 'iftime': addIfTime(ctx, block); break;
+      case 'emom': addEmom(ctx, block); break;
       default: throw new Error(`Unknown block type ${block.type}`);
     }
     // retest extras for week 12, upper day
@@ -106,6 +107,7 @@ function push(ctx, step) {
 
 function nextBlockLabel(plan, block) {
   if (block.type === 'stretch') return 'the stretch block';
+  if (block.type === 'emom') return `${block.name.toLowerCase()}${block.room ? ` (${block.room.toLowerCase()})` : ''}`;
   if (block.type === 'finisher') return `${block.name.toLowerCase()}: ${block.items.map(i => plan.exercises[i.exercise].name).join(', ')}`;
   if (block.items && block.items.length) return block.items.map(i => plan.exercises[i.exercise].name).join(' + ');
   return block.name;
@@ -346,6 +348,33 @@ function addFinisher(ctx, block) {
 }
 
 // ---- stretch block ----
+// ---- v1.11 EMOM (the Engine): one 60 s timed step per minute, stations in rotation ----
+// block.schedule = [{ weeks, minutes } | { weeks, test: { name, seconds, cue } }]; weeks not listed use block.minutes.
+export function emomMinutesFor(block, week) {
+  const row = (block.schedule || []).find(r => r.weeks.includes(week));
+  if (row && row.test) return { minutes: 0, test: row.test };
+  return { minutes: row ? row.minutes : block.minutes, test: null };
+}
+function addEmom(ctx, block) {
+  const { minutes, test } = emomMinutesFor(block, ctx.week);
+  if (test) {
+    push(ctx, { kind: 'timed', blockId: block.id, blockName: block.name, blockType: 'emom',
+      name: test.name, seconds: test.seconds, countdown: true, cue: test.cue || '' });
+    return;
+  }
+  const stations = block.stations || [];
+  if (!minutes || !stations.length) return;
+  const n = stations.length;
+  const rounds = Math.ceil(minutes / n);
+  for (let m = 0; m < minutes; m++) {
+    const st = stations[m % n];
+    push(ctx, { kind: 'timed', blockId: block.id, blockName: block.name, blockType: 'emom',
+      name: `Min ${m + 1} of ${minutes}: ${st.name}`, seconds: 60, countdown: true,
+      cue: st.cue || block.cue || '', setIndex: m + 1, setCount: minutes,
+      round: Math.floor(m / n) + 1, roundCount: rounds });
+  }
+}
+
 function addStretch(ctx, block) {
   const sb = ctx.plan.stretchBlock;
   sb.items.forEach(item => {
@@ -407,10 +436,12 @@ export function trimToFit({ steps, fromIdx, overBySeconds, rules }) {
   }
   // 2. finisher rounds, last round first, keep minFinisherRounds
   if (tr.order.includes('finisherRounds') && saved < overBySeconds) {
-    const blockIds = [...new Set(remaining().filter(s => s.blockType === 'finisher').map(s => s.blockId))];
+    // v1.11: Engine (EMOM) rounds trim the same way, a round = one pass through its stations
+    const roundTypes = ['finisher', 'emom'];
+    const blockIds = [...new Set(remaining().filter(s => roundTypes.includes(s.blockType)).map(s => s.blockId))];
     for (const bid of blockIds) {
       if (saved >= overBySeconds) break;
-      const blockSteps = () => out.filter(s => s.blockId === bid && s.blockType === 'finisher' && !s.removed);
+      const blockSteps = () => out.filter(s => s.blockId === bid && roundTypes.includes(s.blockType) && !s.removed);
       let roundsLeft = Math.max(...blockSteps().map(s => s.roundCount || 1));
       const minRounds = tr.minFinisherRounds;
       while (roundsLeft > minRounds && saved < overBySeconds) {

@@ -63,6 +63,12 @@ function sessionCard(plan, s, targets, restAdjust) {
       rows.push(el('tr', { class: 'blk' }, [el('td', { colspan: 3 }, `${b.name} · ${b.minutes} min`)]));
       continue;
     }
+    if (b.type === 'emom') {
+      const st = b.stations || [];
+      rows.push(el('tr', { class: 'blk' }, [el('td', { colspan: 3 }, `${b.name} · EMOM about ${b.minutes} min${b.room ? ` · ${b.room}` : ''}`)]));
+      st.forEach((x, i) => rows.push(el('tr', {}, [el('td', { colspan: 3 }, [el('div', {}, `Minute ${i + 1}: ${x.name}`), x.cue ? el('div', { class: 'muted small' }, x.cue) : null])])));
+      continue;
+    }
     const label = b.type === 'finisher' ? `Finisher · ${b.rounds} rounds` : (b.type === 'iftime' ? 'If there is time' : `${b.name} · ${b.type === 'superset' ? 'superset' : 'straight sets'}`);
     rows.push(el('tr', { class: 'blk' }, [el('td', { colspan: 3 }, label)]));
     for (const it of b.items || []) {

@@ -597,6 +597,7 @@ export class Player {
     if (first.blockType === 'stretch') return 'Stretch';
     if (first.blockType === 'finisher') return first.blockName === 'Last' ? 'Last' : 'Finisher';
     if (first.blockType === 'iftime') return 'If time';
+    if (first.blockType === 'emom') return first.blockName || 'Engine';
     const ids = [...new Set(this.steps.filter(st => st.blockId === blockId && st.kind === 'set' && !st.ramp).map(st => st.exerciseId))];
     const names = ids.map(id => (this.plan.exercises[id] && this.plan.exercises[id].short) || (this.plan.exercises[id] && this.plan.exercises[id].name) || id);
     return names.slice(0, 2).join(' / ');
