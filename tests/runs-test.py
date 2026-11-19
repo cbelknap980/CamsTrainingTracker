@@ -104,6 +104,8 @@ def github(route):
     send(405, {})
 def answer_ok(n): return {**out, 'fetchedAt': f'2026-11-22T15:0{n}:00Z'}
 def answer_bad(n): return {**bad, 'fetchedAt': f'2026-11-22T15:1{n}:00Z'}
+# v1.12: Thursday of week 2, a run after Tuesday's intervals were missed
+def answer_wk2(n): return {**out, 'activities': [act(907, 'running', '2026-11-26 17:30:00', 4600.0, 1750.0, 160, 'Evening Run')] + out['activities'], 'fetchedAt': f'2026-11-26T23:3{n}:00Z'}
 def tracker(): return json.loads(remote['files']['tracker-data.json']) if 'tracker-data.json' in remote['files'] else None
 def runs_in(page): return page.evaluate("import('./js/store.js').then(m => m.getRuns())")
 def wait_until(page, fn, seconds=8):
@@ -233,6 +235,36 @@ with sync_playwright() as p:
     page.click('#tabs button[data-view="runs"]'); page.wait_for_selector('#runs-week')
     check('the long run target moves up half a mile after 3.6', '4 mi' in page.locator('.run-plan[data-run="run2"]').inner_text() and 'longest so far 3.6 mi' in page.locator('.run-plan[data-run="run2"]').inner_text(), page.locator('.run-plan[data-run="run2"]').inner_text())
 
+    print('Off schedule (v1.12)')
+    page.clock.set_system_time('2026-11-25T07:00:00')   # Wednesday of week 2: Tuesday's intervals were not run
+    page.click('#tabs button[data-view="home"]'); page.wait_for_selector('#runs-open-card')
+    card = page.locator('#runs-open-card').inner_text()
+    check('Wednesday: Home lists the intervals as still to run, and the days that still work', 'Run 1: Intervals' in card and 'Thursday, Saturday or Sunday works' in card, card)
+    page.clock.set_system_time('2026-11-26T07:00:00')   # Thursday, a free day
+    page.reload(); page.wait_for_selector('#moved-run-card')
+    card = page.locator('#moved-run-card').inner_text()
+    check('Thursday: the intervals are offered today, moved from Tuesday; lifts are not moved', 'Run 1: Intervals' in card and 'Moved here from Tuesday' in card and page.locator('#moved-run-card button:has-text("Log this run")').count() == 1 and page.locator('#runs-open-card').count() == 0, card)
+    page.screenshot(path=f'{SHOTS}/runs-moved-home.png')   # top of Home only: the today card and the moved run
+    page.click('#tabs button[data-view="runs"]'); page.wait_for_selector('#runs-week')
+    check('the Runs tab says the same', 'Not done Tue. Today, Saturday or Sunday works.' in page.locator('.run-plan[data-run="run1"]').inner_text(), page.locator('.run-plan[data-run="run1"]').inner_text())
+    remote['job_answer'] = answer_wk2
+    check_now(page, '#garmin-check'); page.wait_for_timeout(300)
+    r907 = next((r for r in runs_in(page) if r['id'] == 'garmin-907'), None)
+    check('Thursday\'s Garmin run counts as the missed intervals', r907 and r907['type'] == 'Intervals' and r907['planId'] == 'run1' and r907['week'] == 2, r907)
+    row = page.locator('.run-plan[data-run="run1"]').inner_text()
+    check('the week shows the intervals done on Thursday', '✓ done Thu' in row and 'Not done' not in row, row)
+    page.screenshot(path=f'{SHOTS}/runs-moved-week.png', full_page=False)
+    page.locator('.run-item[data-id="garmin-907"]').click(); page.wait_for_selector('#run-sheet')
+    check('the run says why the app counted it that way', "counted it as Intervals because the week's intervals were still open" in page.locator('#run-auto-why').inner_text(), page.locator('#run-auto-why').inner_text() if page.locator('#run-auto-why').count() else 'none')
+    page.screenshot(path=f'{SHOTS}/runs-moved-sheet.png')
+    page.click('#run-type-row button:has-text("Easy run")'); page.wait_for_timeout(250)
+    check('a type Cameron picks sticks, and the intervals open up again', next(r for r in runs_in(page) if r['id'] == 'garmin-907')['typeLocked'] is True and page.locator('#run-auto-why').count() == 0, next(r for r in runs_in(page) if r['id'] == 'garmin-907'))
+    page.click('#run-type-row button:has-text("Intervals")'); page.wait_for_timeout(250)
+    page.click('#run-sheet button:has-text("Close")')
+    page.click('#tabs button[data-view="home"]'); page.wait_for_selector('.card.accent h1')
+    check('Home: the intervals card now shows done', page.locator('#moved-run-card').count() == 0 and page.locator('#runs-open-card').count() == 0, page.locator('#view').inner_text()[:400])
+    page.clock.run_for(4000); wait_until(page, lambda: tracker() and len(tracker()['runs']) == 3)
+
     print('The computer')
     comp = browser.new_context(viewport={'width': 1366, 'height': 900}, device_scale_factor=1)
     comp.route('https://api.github.com/**', github)
@@ -244,8 +276,8 @@ with sync_playwright() as p:
     page2.click('#tabs button[data-view="runs"]'); page2.wait_for_selector('#runs-week')
     wait_until(page2, lambda: 'Garmin is connected' in page2.locator('#garmin-row').inner_text())
     text = page2.locator('#view').inner_text()
-    check('the computer shows the phone\'s runs and that Garmin is connected', page2.locator('.run-item').count() == 2 and 'Garmin is connected' in text and 'after your phone opens the app' in text, text[:300])
-    check('the computer only views: no Log, no Check now', page2.locator('#log-run').count() == 0 and page2.locator('#garmin-check').count() == 0 and remote['requests'] == 5, remote['requests'])
+    check('the computer shows the phone\'s runs and that Garmin is connected', page2.locator('.run-item').count() == 3 and 'Garmin is connected' in text and 'after your phone opens the app' in text, text[:300])
+    check('the computer only views: no Log, no Check now', page2.locator('#log-run').count() == 0 and page2.locator('#garmin-check').count() == 0 and remote['requests'] == 6, remote['requests'])
     cols = page2.evaluate("getComputedStyle(document.querySelector('.runs-cols')).gridTemplateColumns.split(' ').length")
     check('two columns on a wide screen', cols == 2, cols)
     page2.screenshot(path=f'{SHOTS}/runs-computer.png', full_page=True)

@@ -8,7 +8,7 @@ import { parseRepo, toBase64, fromBase64, setupLink, readSetupLink, explainStatu
 import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks, muscleSets } from '../js/progress.js';
 import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../js/coach.js';
 import { applyRestAdjust } from '../js/builder.js';
-import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList } from '../js/runs.js';
+import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
@@ -394,7 +394,8 @@ console.log('v1.9 muscle groups and coach check-ins');
   const by = Object.fromEntries(m.put.map(r => [r.id, r]));
   check('v1.10 merge: a run typed that day takes the watch\'s numbers and keeps its type, effort and notes', m.updated === 1 && by.run_1.garminId === '11' && by.run_1.distance === 3.17 && by.run_1.type === '5K test' && by.run_1.rpe === 9 && by.run_1.notes === 'windy' && by.run_1.source === 'garmin', by.run_1);
   check('v1.10 merge: Saturday is the long run, a second weekend run is an easy run, and nothing from before the block', m.added === 2 && by['garmin-12'].type === 'Long run' && by['garmin-12'].planId === 'run2' && by['garmin-13'].type === 'Easy run' && by['garmin-13'].planId === null && !by['garmin-10'] && by['garmin-12'].week === 1 && by['garmin-12'].rpe === null, m.put.map(r => [r.id, r.type]));
-  const after = [by.run_1, { ...by['garmin-12'], type: 'Easy run', planId: null, rpe: 4, notes: 'legs heavy' }, by['garmin-13']];
+  const after = [by.run_1, { ...by['garmin-12'], type: 'Easy run', planId: null, rpe: 4, notes: 'legs heavy', typeLocked: true, autoType: false }, by['garmin-13']]; // v1.12: a type Cameron taps is locked
+  settleWeek(after, 1, { plan, rules, settings: st }); // and the sheet settles the rest of that week
   const again = mergeGarmin(after, file, { plan, rules, settings: st, ignored: [], appVersion: 't' });
   check('v1.10 merge: the same file again changes nothing', again.put.length === 0 && again.added === 0 && again.updated === 0 && again.seen === 3, again);
   const fixed = mergeGarmin(after, { activities: [g(12, 'running', '2026-11-21 08:00:00', 6000, 2200)] }, { plan, rules, settings: st, ignored: [], appVersion: 't' });
@@ -403,6 +404,48 @@ console.log('v1.9 muscle groups and coach check-ins');
   check('v1.10 merge: a Garmin run Cameron deleted stays out', gone.added === 2 && !gone.put.some(r => r.garminId === '12'), gone.put.map(r => r.id));
   const links = garminLinks('cam/training-data', 'main', 'name: Garmin runs\non: push\n');
   check('v1.10 set-up links point at the repo: new secret, and a new file with the job filled in', links.secret === 'https://github.com/cam/training-data/settings/secrets/actions/new' && links.job === 'https://github.com/cam/training-data/new/main?filename=.github%2Fworkflows%2Fgarmin.yml&value=name%3A%20Garmin%20runs%0Aon%3A%20push%0A' && GARMIN_JOB === '.github/workflows/garmin.yml', links);
+}
+
+// ---- v1.12: runs off schedule ----
+{
+  const st = { ...settings, startDate: '2026-11-16' };
+  const ctx = { plan, rules, settings: st };
+  const g = (id, start, meters, seconds, extra = {}) => ({ activityId: id, activityName: 'Run', startTimeLocal: start, activityType: { typeKey: 'running' }, distance: meters, duration: seconds, averageHR: 150, ...extra });
+  const merge = (runs, acts, ignored = []) => mergeGarmin(runs, { activities: acts }, { ...ctx, ignored, appVersion: 't' });
+  const byId = m => Object.fromEntries(m.put.map(r => [r.id, r]));
+  // week 2: Mon Nov 23 .. Sun Nov 29. Intervals planned Tue 24, long run Sat 28 / Sun 29.
+  const wed = merge([], [g(1, '2026-11-25 18:00:00', 4500, 1700)]);
+  check('v1.12 a run on Wednesday, with Tuesday missed, counts as the intervals and says why', byId(wed)['garmin-1'].type === 'Intervals' && byId(wed)['garmin-1'].planId === 'run1' && byId(wed)['garmin-1'].autoWhy === 'the week\'s intervals were still open', byId(wed)['garmin-1']);
+  const longTue = merge([], [g(2, '2026-11-24 07:00:00', 6000, 3300)]);
+  check('v1.12 a long run done on Tuesday counts as the long run, not the intervals', byId(longTue)['garmin-2'].type === 'Long run' && byId(longTue)['garmin-2'].autoWhy === 'it was long enough for the long run', byId(longTue)['garmin-2']);
+  const two = merge([], [g(3, '2026-11-26 18:00:00', 4500, 1700), g(4, '2026-11-28 08:00:00', 6400, 3500), g(5, '2026-11-29 08:00:00', 3000, 1200)]);
+  const t = byId(two);
+  check('v1.12 Thursday fills the intervals, Saturday the long run, a third run is an easy run', t['garmin-3'].type === 'Intervals' && t['garmin-4'].type === 'Long run' && t['garmin-5'].type === 'Easy run' && t['garmin-5'].autoWhy === 'both planned runs were already done', [t['garmin-3'].type, t['garmin-4'].type, t['garmin-5'].type]);
+  const signal = merge([], [g(6, '2026-11-25 18:00:00', 4000, 1500), g(7, '2026-11-27 18:00:00', 4800, 1900, { trainingEffectLabel: 'VO2MAX' })]);
+  const sg = byId(signal);
+  check('v1.12 a run that looks like intervals takes the intervals from an earlier run that only filled the slot', sg['garmin-7'].type === 'Intervals' && sg['garmin-7'].autoWhy === 'it looked like intervals' && sg['garmin-6'].type === 'Easy run', [sg['garmin-6'].type, sg['garmin-7'].type]);
+  check('v1.12 interval signs: Garmin\'s label, its anaerobic effect, or max speed well above average', garminToRun(g(8, '2026-11-25 18:00:00', 4000, 1500, { anaerobicTrainingEffect: 2.6 }), { rules }).intervalLike === true
+    && garminToRun(g(9, '2026-11-25 18:00:00', 4000, 1500, { trainingEffectLabel: 'AEROBIC_BASE' }), { rules }).intervalLike === false
+    && garminToRun(g(10, '2026-11-25 18:00:00', 4000, 1500, { averageSpeed: 2.7, maxSpeed: 4.3 }), { rules }).intervalLike === true
+    && garminToRun(g(11, '2026-11-25 18:00:00', 4000, 1500), { rules }).intervalLike === null);
+  const sat = merge([], [g(12, '2026-11-28 08:00:00', 2400, 1000)]);
+  check('v1.12 a short Saturday jog is not taken for the long run; it fills the open intervals', byId(sat)['garmin-12'].type === 'Intervals', byId(sat)['garmin-12']);
+  const short = merge([], [g(13, '2026-11-25 07:00:00', 1600, 720)]);
+  check('v1.12 a 12-minute jog fills nothing', byId(short)['garmin-13'].type === 'Easy run' && byId(short)['garmin-13'].autoWhy === 'it did not fit a planned run', byId(short)['garmin-13']);
+  // Cameron's pick sticks, and the rest of the week follows it
+  const all = [{ ...t['garmin-3'], type: 'Easy run', planId: null, typeLocked: true, autoType: false }, t['garmin-4'], t['garmin-5']];
+  const changed = settleWeek(all, 2, ctx);
+  check('v1.12 when Cameron re-types a run, the others in the week settle around it', changed.length === 1 && changed[0].id === 'garmin-5' && changed[0].type === 'Intervals' && all[0].type === 'Easy run' && all[1].type === 'Long run', changed.map(r => [r.id, r.type]));
+  check('v1.12 settling again changes nothing', settleWeek(all, 2, ctx).length === 0);
+  const hand = merge([{ id: 'run_9', date: '2026-11-24', type: 'Intervals', planId: 'run1', distance: 3, minutes: 30 }], [g(14, '2026-11-26 18:00:00', 4500, 1700)]);
+  check('v1.12 a run logged by hand keeps its slot; the Garmin run goes elsewhere', byId(hand)['garmin-14'].type === 'Easy run' && !byId(hand)['run_9'], hand.put.map(r => [r.id, r.type]));
+  check('v1.12 old Garmin runs: Easy run is still the app\'s pick, anything else was Cameron\'s', isAuto({ id: 'garmin-1', type: 'Easy run' }) && !isAuto({ id: 'garmin-1', type: 'Intervals' }) && !isAuto({ id: 'run_1', type: 'Easy run' }) && !isAuto({ id: 'garmin-1', type: 'Easy run', typeLocked: true }));
+  const ski = merge([], [g(15, '2026-11-28 09:00:00', 30000, 14400, { activityType: { typeKey: 'resort_skiing_snowboarding_ws' } }), g(16, '2026-11-29 08:00:00', 4500, 1700), g(17, '2026-11-29 17:00:00', 6000, 3300)]);
+  check('v1.12 a ski day takes the long run; a 28-minute Sunday run fills the open intervals, an hour-long one is an easy run', byId(ski)['garmin-15'].type === 'Ski day' && byId(ski)['garmin-16'].type === 'Intervals' && byId(ski)['garmin-17'].type === 'Easy run', ski.put.map(r => [r.id, r.type]));
+  const days = (iso, id) => openRunDays({ ...ctx, runId: id, week: 2, today: new Date(iso + 'T09:00:00') }).map(d => d.name + (d.today ? '*' : ''));
+  check('v1.12 open intervals can move to Thursday, Saturday or Sunday; past days and lift days drop off', days('2026-11-25', 'run1').join() === 'Thursday,Saturday,Sunday' && days('2026-11-26', 'run1').join() === 'Thursday*,Saturday,Sunday' && days('2026-11-28', 'run1').join() === 'Saturday*,Sunday' && days('2026-11-29', 'run1').join() === 'Sunday*', [days('2026-11-25', 'run1'), days('2026-11-26', 'run1')]);
+  const moveDays = rules.runSchedule.moveTo;
+  check('v1.12 no run is ever offered on a lift day', Object.values(moveDays).flat().every(d => !plan.sessions.some(s => s.id === plan.calendar[d])));
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
