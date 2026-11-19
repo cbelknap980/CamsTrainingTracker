@@ -170,7 +170,7 @@ with sync_playwright() as p:
     page.click('button:has-text("Lift 2")')
     page.wait_for_selector('#start-workout')
     pre = page.locator('#view').inner_text()
-    check('v1.4 preview shows the session goal and time', 'Upper-body strength' in pre and 'About' in pre and 'min' in pre, pre[:200])
+    check('v1.4 preview shows the session goal and time', 'Upper-body strength' in pre and 'done by' in pre and 'min' in pre, pre[:200])
     check('v1.4 preview: strict press prefilled from the benchmark target', page.locator('input[data-ex="strict_press"]').input_value() == '90', page.locator('input[data-ex="strict_press"]').input_value())
     check('v1.4 preview: pull-up has no weight yet, works up today', 'Work up today' in pre)
     check('v1.5 preview: incline dumbbell press estimate is a total (90 = 2 x 45)', page.locator('input[data-ex="incline_db_press"]').input_value() == '90' and page.locator('.pre-ex .est').count() >= 1 and '2 × 45' in pre, page.locator('input[data-ex="incline_db_press"]').input_value())

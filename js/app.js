@@ -364,22 +364,25 @@ async function renderHome() {
 
   const other = el('div', { class: 'card' }, [
     el('h3', {}, 'Start a different session'),
-    el('div', { class: 'grid3' }, D.plan.sessions.map(s => el('button', { class: 'btn small', style: 'width:100%', onclick: () => previewSession(s.id, week) }, s.name.replace(': ', '\n'))))
+    el('div', { class: 'grid3' }, D.plan.sessions.map(s => { const [k, n] = s.name.includes(': ') ? s.name.split(': ') : ['', s.name]; return el('button', { class: 'btn small sess-btn', style: 'width:100%', onclick: () => previewSession(s.id, week) }, [k ? el('small', {}, k) : null, el('b', {}, n)]); }))
   ]);
   view.appendChild(other);
 
   // next targets
   const rows = Object.entries(D.plan.exercises).filter(([id]) => targets[id] && targets[id].weight != null).map(([id, ex]) => {
     const t = targets[id];
+    // polish: two columns; the badge and e1RM sit under the name so long names do not wrap into a column
     return el('tr', { class: 'tappable', onclick: () => editTarget(id, ex, t) }, [
-      el('td', {}, [ex.name, ' ', t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : null)]),
-      el('td', { class: 'num' }, `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}`),
-      el('td', { class: 'num muted' }, t.e1rm ? `e1RM ${t.e1rm}` : '')
+      el('td', {}, [el('div', { class: 'tgt-name' }, ex.name), (t.e1rm || t.source === 'you' || t.source === 'coach') ? el('div', { class: 'tgt-sub' }, [
+        t.e1rm ? `e1RM ${t.e1rm}` : null,
+        t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : null)
+      ]) : null]),
+      el('td', { class: 'num tgt-val' }, `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}`)
     ]);
   });
   view.appendChild(el('div', { class: 'card', id: 'next-targets' }, [
     el('h3', {}, 'Next targets'),
-    rows.length ? el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, '')]), ...rows]) : el('p', { class: 'muted' }, 'No targets yet. Week 1 sessions work up to a baseline set on each main lift; accessories take the weight you log the first time.'),
+    rows.length ? el('table', { class: 'tgt-table' }, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Weight × reps')]), ...rows]) : el('p', { class: 'muted' }, 'No targets yet. Week 1 sessions work up to a baseline set on each main lift; accessories take the weight you log the first time.'),
     el('p', { class: 'muted', style: 'margin-top:8px' }, 'Tap a row to change a target by hand.')
   ]));
 
@@ -511,9 +514,13 @@ async function previewSession(sessionRef, week) {
     view.appendChild(el('div', { class: 'card accent' }, [
       el('h3', {}, `Week ${week}${phase.name ? ' · ' + phase.name : ''}`),
       el('h1', {}, session.name),
-      session.goal ? el('p', {}, session.goal) : null,
-      phase.note ? el('p', { class: 'muted' }, phase.note) : null,
-      el('p', { class: 'muted', style: 'margin:0' }, `About ${fmtMinutes(tl.plannedSeconds)} · done around ${fmtTime(finish)} if you start now`)
+      // polish: same chips as the Home card; the session goal reads as the lead, the phase note small
+      el('ul', { class: 'hero-facts' }, [
+        el('li', {}, [el('b', {}, fmtMinutes(tl.plannedSeconds))]),
+        el('li', {}, ['done by', el('b', {}, fmtTime(finish))])
+      ]),
+      session.goal ? el('p', { class: 'hero-lead' }, session.goal) : null,
+      phase.note ? el('p', { class: 'hero-note', style: 'margin:0' }, phase.note) : null
     ]));
 
     const blocks = [];
@@ -548,8 +555,9 @@ async function previewSession(sessionRef, week) {
         }
         return el('div', { class: 'pre-ex' }, [el('div', {}, [el('div', { class: 'pre-name' }, e.name), el('div', { class: 'pre-sub' }, sub)]), right]);
       });
+      const mark = /^[A-Z]$/.test(b.name) ? b.name : (b.type === 'warmup' ? 'W' : (b.type === 'stretch' ? 'S' : (b.type === 'finisher' || b.type === 'emom' ? 'F' : '+')));
       card.appendChild(el('div', { class: 'pre-block' }, [
-        el('div', { class: 'row' }, [el('b', {}, title), el('span', { class: 'muted' }, fmtMinutes(b.seconds))]),
+        el('div', { class: 'row pre-head' }, [el('span', { class: 'pre-mark' + (b.type === 'warmup' || b.type === 'stretch' ? ' soft' : '') }, mark), el('b', {}, title), el('span', { class: 'muted' }, fmtMinutes(b.seconds))]),
         ...rows
       ]));
     }
