@@ -26,8 +26,9 @@ console.log('Builder, week 1 (baseline, no targets)');
 for (const sid of ['lift1', 'lift2', 'lift3']) {
   const tl = buildTimeline({ plan, rules, settings, sessionId: sid, week: 1, targets: {} });
   const kinds = tl.steps.map(s => s.kind);
-  const minutes = tl.plannedSeconds / 60;
-  check(`${sid}: planned ${minutes.toFixed(1)} min is within 68 (week 1 has baseline work-ups)`, minutes <= 68 && minutes >= 45, { minutes });
+  // v1.11: the optional if-time block is left out of the cap check
+  const minutes = tl.steps.filter(s => !s.iftime).reduce((a, s) => a + (s.seconds || 0), 0) / 60;
+  check(`${sid}: planned ${minutes.toFixed(1)} min without if-time is within 68 (week 1 has baseline work-ups)`, minutes <= 68 && minutes >= 45, { minutes });
   check(`${sid}: has a baseline top set for each main lift`, tl.steps.filter(s => s.baseline).length >= 1);
   check(`${sid}: ends with stretch steps (or if-time)`, ['stretch', 'decision', 'set', 'rest'].includes(kinds.at(-1)));
   check(`${sid}: stretch block is 6 steps = 300 s`, tl.steps.filter(s => s.kind === 'stretch').length === 6 && tl.steps.filter(s => s.kind === 'stretch').reduce((a, s) => a + s.seconds, 0) === 300);
@@ -48,8 +49,21 @@ const a = l2.steps.filter(s => s.blockId === 'A');
 check('lift2: dead hang after last pull-up set', a.some(s => s.kind === 'timed' && s.name === 'Dead hang'));
 const bb = l2.steps.filter(s => s.blockId === 'B' && s.kind === 'set').map(s => s.exerciseId).join(',');
 check('lift2: B alternates incline press and row, 3 sets each', bb === 'incline_db_press,cs_row,incline_db_press,cs_row,incline_db_press,cs_row', bb);
-const lastBlk = l2.steps.filter(s => s.blockId === 'last' && s.kind === 'set');
-check('lift2: face pull only rounds 1-2', lastBlk.filter(s => s.exerciseId === 'face_pull').length === 2 && lastBlk.length === 8);
+// v1.11: the Engine (EMOM) replaces the old toes-to-bar / calf / face-pull block
+check('lift2: old "last" block is gone', !l2.steps.some(s => s.blockId === 'last'));
+const eng = wk => buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: wk, targets: {} }).steps.filter(s => s.blockId === 'engine' && s.kind === 'timed');
+const e1 = eng(1);
+check('lift2 week 1: Engine = 9 one-minute timed steps rotating 3 stations', e1.length === 9 && e1.every(s => s.kind === 'timed' && s.seconds === 60 && s.countdown && s.blockType === 'emom') && e1[0].name.startsWith('Min 1 of 9: Bike') && e1[3].name.startsWith('Min 4 of 9: Bike') && e1[8].round === 3, e1.map(s => s.name));
+check('lift2: Engine minutes by week: 9, test, 9, 12, 6 (light), 15 (heavy), test', [1, 2, 3, 4, 7, 8, 12].map(w => eng(w).length).join(',') === '9,1,9,12,6,15,1', [1, 2, 3, 4, 7, 8, 12].map(w => eng(w).length));
+check('lift2 weeks 2 and 12: Engine is a 2,000 m ski erg test', /2,000 m ski erg/.test(eng(2)[0].name) && /2,000 m ski erg/.test(eng(12)[0].name));
+check('lift2: transition into the Engine names the functional room', l2.steps.some(s => s.kind === 'transition' && /engine \(functional room\)/.test(s.name)));
+const l2w4 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 4, targets: {} });
+const engFrom = l2w4.steps.findIndex(s => s.blockId === 'engine');
+const trE = trimToFit({ steps: l2w4.steps, fromIdx: engFrom - 1, overBySeconds: 400, rules });
+const engLeft = trE.steps.filter(s => s.blockId === 'engine' && !s.removed);
+check('trim drops Engine rounds (3 min each), keeps at least 1 round', engLeft.length >= 3 && engLeft.length < 12 && trE.notes.some(n => /engine round/.test(n)), { left: engLeft.length, notes: trE.notes });
+const l3calf = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 3, targets: {} }).steps.filter(s => s.exerciseId === 'calf_raise' && s.kind === 'set');
+check('lift3: calf raise is in the finisher, 3 rounds', l3calf.length === 3 && l3calf.every(s => s.blockId === 'finisher'));
 
 const l3 = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 1, targets: {} });
 check('lift3: if-time decision then 2 leg curl sets, after stretch', (() => { const i = l3.steps.findIndex(s => s.kind === 'decision'); return i > 0 && l3.steps[i - 1].kind === 'stretch' && l3.steps.slice(i + 1).filter(s => s.kind === 'set').length === 2; })());
@@ -67,7 +81,7 @@ const w3l2 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 3,
 check('week 3 lift2: press ramps (95 lb target: 45, 50, 65, 80)', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight).join(',') === '45,50,65,80', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight));
 check('week 3 lift2: planned within 62 min', w3l2.plannedSeconds / 60 <= 62, { min: w3l2.plannedSeconds / 60 });
 const w3l3 = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 3, targets });
-check('week 3 lift3: planned within 60 min incl. if-time', w3l3.plannedSeconds / 60 <= 61, { min: w3l3.plannedSeconds / 60 });
+check('week 3 lift3: planned within 62 min without if-time (v1.11: calf raise in the finisher)', w3l3.steps.filter(s => !s.iftime).reduce((a, s) => a + s.seconds, 0) / 60 <= 62, { min: w3l3.plannedSeconds / 60 });
 
 // ---- Builder: week 7 light, week 9 heavy, week 12 retest ----
 console.log('Builder, phases');

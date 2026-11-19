@@ -1,6 +1,6 @@
 // sw.js - service worker: caches the app files so it opens with no signal, and fires the rest-end
 // notification when the app is in the background. Bump VERSION on every publish.
-const VERSION = 'v1.10.0';
+const VERSION = 'v1.11.0';
 const CACHE = `ctt-${VERSION}`;
 const FILES = [
   './',
