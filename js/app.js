@@ -357,7 +357,7 @@ async function renderHome() {
     }));
   }
   const todayCard = el('div', { class: 'card accent', id: 'today-card' });
-  todayCard.appendChild(el('h3', {}, `Today, ${fmtDate(toISODate(today))} · week ${week}${phase.note ? ' · ' + phase.name : ''}`));
+  todayCard.appendChild(el('h3', {}, `Today, ${fmtDate(toISODate(today))}${week >= 1 && week <= 12 ? ` · week ${week}` : ''}${phase.note ? ' · ' + phase.name : ''}`));
   if (session) {
     const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets });
     todayCard.appendChild(el('h1', {}, session.name));
@@ -369,7 +369,10 @@ async function renderHome() {
     ]));
     todayCard.appendChild(el('div', { class: 'hero-blocks', 'aria-hidden': 'true' }, blocks.map(b => el('span', { class: b.type === 'warmup' || b.type === 'stretch' ? 'soft' : '', style: `flex:${b.minutes || 1}` }))));
     if (phase.note) todayCard.appendChild(el('p', { class: 'hero-note' }, phase.note));
-    todayCard.appendChild(el('button', { class: 'btn primary', onclick: () => previewSession(session.id, week) }, 'Start'));
+    // v1.17: once today's lift is saved the card says so (it kept offering Start as if nothing was done)
+    const doneToday = allSessions.find(x => x.sessionId === session.id && x.date === toISODate(today));
+    if (doneToday) todayCard.appendChild(el('p', { id: 'today-done', style: `font-weight:700;color:${doneToday.status === 'complete' ? 'var(--good)' : 'inherit'}` }, doneToday.status === 'complete' ? `✓ Done at ${fmtTime(doneToday.endedAt || doneToday.startedAt)}` : `Ended early at ${fmtTime(doneToday.endedAt || doneToday.startedAt)}. Anything left is on the catch-up list.`));
+    todayCard.appendChild(el('button', { class: 'btn ' + (doneToday ? '' : 'primary'), onclick: () => previewSession(session.id, week) }, doneToday ? 'Start it again' : 'Start'));
   } else if (run) {
     // v1.10: what the run asks for this week, and its numbers once it is logged (by hand or from Garmin;
     // v1.12: also when it was done on another day)
@@ -709,7 +712,8 @@ function offerResume(saved) {
       el('button', { class: 'btn', onclick: async () => {
         const settings = await getSettings();
         player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, container: view, onFinish: onSessionFinished });
-        player.s = saved; player.finish('ended_early');
+        // v1.17: the session ended when the app was last used, not now (it counted the hours away as workout time)
+        player.s = saved; player.finish('ended_early', saved.pausedAt != null ? saved.pausedAt : saved.lastTick);
       } }, 'Save what I did and stop'),
       el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
       el('button', { class: 'btn danger', onclick: async () => { await clearInProgress(); showTab('home'); } }, 'Discard it')
@@ -759,7 +763,7 @@ async function renderHistory() {
   view.innerHTML = '';
   view.appendChild(progressHeader());
   if (!sessions.length) { view.appendChild(el('p', { class: 'muted' }, 'No sessions yet.')); return; }
-  if (progressMode === 'exercises') { renderExerciseLog(sessions); return; }
+  if (progressMode === 'exercises') { renderExerciseLog(sessions, await getSettings()); return; }
   const list = el('div', { class: 'card' });
   sessions.forEach(s => {
     const done = s.sets.filter(x => x.done && !x.ramp).length;
@@ -780,8 +784,7 @@ function exerciseRows(sessions, id) {
   for (const s of sessions) for (const st of s.sets) if (st.exerciseId === id && !st.ramp && st.done && !st.skipped) rows.push({ date: s.date, week: s.week, sessionId: s.id, ...st });
   return rows;
 }
-function renderExerciseLog(sessions) {
-  const settings = D.settingsDefaults;
+function renderExerciseLog(sessions, settings) {
   const ids = [];
   for (const s of sessions) for (const st of s.sets) if (st.exerciseId && !st.ramp && st.done && !ids.includes(st.exerciseId)) ids.push(st.exerciseId);
   ids.sort((a, b) => (D.plan.exercises[a] ? D.plan.exercises[a].name : a).localeCompare(D.plan.exercises[b] ? D.plan.exercises[b].name : b));
@@ -790,8 +793,9 @@ function renderExerciseLog(sessions) {
     const ex = D.plan.exercises[id];
     const rows = exerciseRows(sessions, id);
     const best = rows.reduce((m, r) => Math.max(m, r.weight != null && r.reps && !r.holdSeconds ? epley(r.weight + (ex && ex.equipment === 'weighted_bw' ? (settings.bodyweightLb || 0) : 0), r.reps) : 0), 0);
-    const last = rows[0];
-    card.appendChild(el('div', { class: 'list-item', onclick: () => showExercise(id, sessions) }, [
+    // v1.17: the newest session's top set (it showed that session's first set, often a lighter warm-up weight)
+    const last = rows.filter(r => r.sessionId === rows[0].sessionId).reduce((m, r) => ((r.weight || 0) > (m.weight || 0) || ((r.weight || 0) === (m.weight || 0) && (r.reps || 0) > (m.reps || 0)) ? r : m));
+    card.appendChild(el('div', { class: 'list-item', onclick: () => showExercise(id, sessions, settings) }, [
       el('div', { class: 'row' }, [el('b', {}, ex ? ex.name : id), el('span', { class: 'muted' }, best ? `best e1RM ${best}` : '')]),
       el('div', { class: 'muted' }, `${rows.length} ${rows.length === 1 ? 'set' : 'sets'} · last ${fmtDate(last.date)}: ${last.weight != null ? fmtWeight(last.weight) + ' lb' : 'bw'} × ${last.reps}`)
     ]));
@@ -809,9 +813,10 @@ function sparkline(points) {
   wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${points.map((v, i) => `<circle cx="${xs[i].toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="var(--accent)"/>`).join('')}</svg>`;
   return wrap;
 }
-function showExercise(id, sessions) {
+function showExercise(id, sessions, settings) {
   const ex = D.plan.exercises[id];
-  const bw = ex && ex.equipment === 'weighted_bw' ? (D.settingsDefaults.bodyweightLb || 0) : 0;
+  // v1.17: the bodyweight from Settings (it used the 165 lb default, so pull-up e1RMs did not match Progress)
+  const bw = ex && ex.equipment === 'weighted_bw' ? (((settings || D.settingsDefaults).bodyweightLb) || 0) : 0;
   const rows = exerciseRows(sessions, id);
   // best e1RM per session, oldest first, for the trend
   const perSession = [];
@@ -879,7 +884,7 @@ async function renderProgressTab() {
   };
   const cfg = await getSync();
   renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, targets, muscles: D.muscles, today: new Date() }, {
-    header: progressHeader(), syncOn: !!(cfg && cfg.repo), onExercise: id => showExercise(id, sessions), ...(onComputer() ? { onLoadBackup } : {})
+    header: progressHeader(), syncOn: !!(cfg && cfg.repo), onExercise: id => showExercise(id, sessions, settings), ...(onComputer() ? { onLoadBackup } : {})
   });
 }
 
@@ -979,7 +984,7 @@ async function renderSyncSheet(note) {
 async function renderSettings() {
   const s = await getSettings();
   const toggle = (label, path, val) => el('div', { class: 'toggle' }, [el('span', {}, label), el('input', { type: 'checkbox', checked: val, onchange: async e => { const patch = {}; let o = patch; const keys = path.split('.'); keys.forEach((k, i) => { if (i === keys.length - 1) o[k] = e.target.checked; else { o[k] = {}; o = o[k]; } }); await saveSettings(patch); if (path === 'cues.vibrate') setHaptics(e.target.checked); } })]);
-  const numField = (label, key, step) => el('div', { class: 'field' }, [el('label', {}, label), el('input', { type: 'number', step: String(step), value: s[key], inputmode: 'decimal', onchange: async e => { await saveSettings({ [key]: Number(e.target.value) }); toast('Saved'); } })]);
+  const numField = (label, key, step) => el('div', { class: 'field' }, [el('label', {}, label), el('input', { type: 'number', step: String(step), value: s[key], inputmode: 'decimal', onchange: async e => { const v = Number(e.target.value); if (e.target.value === '' || !(v > 0)) { e.target.value = s[key]; toast('Enter a number above 0'); return; } await saveSettings({ [key]: v }); s[key] = v; toast('Saved'); } })]);
   const fileInput = el('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: async e => {
     const f = e.target.files[0]; if (!f) return;
     if (!(await confirmDialog('Restore from this file?', 'This replaces everything on the phone with the backup.', 'Restore', true))) return;
@@ -998,7 +1003,7 @@ async function renderSettings() {
     toggle('Keep the screen on during a session', 'keepScreenOn', s.keepScreenOn !== false),
     el('div', { style: 'height:10px' }),
     el('div', { class: 'grid2' }, [numField('Bodyweight (lb)', 'bodyweightLb', 0.5), numField('Transition (s)', 'transitionSeconds', 5)]),
-    el('div', { class: 'field' }, [el('label', {}, 'Week 1 start date'), el('input', { type: 'date', value: s.startDate, onchange: async e => { await saveSettings({ startDate: e.target.value }); await updateWeekChip(); toast('Saved'); } })]),
+    el('div', { class: 'field' }, [el('label', {}, 'Week 1 start date'), el('input', { type: 'date', value: s.startDate, onchange: async e => { if (!/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) { e.target.value = s.startDate; toast('Pick a date'); return; } await saveSettings({ startDate: e.target.value }); s.startDate = e.target.value; await updateWeekChip(); toast('Saved'); } })]),
     el('h3', { style: 'margin-top:14px' }, 'Data'),
     el('div', { class: 'stack' }, [
       el('button', { class: 'btn', onclick: () => backupNow(s, D.plan.planVersion) }, 'Back up (share to Drive)'),

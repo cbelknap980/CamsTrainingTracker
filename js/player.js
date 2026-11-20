@@ -430,7 +430,11 @@ export class Player {
   }
   logSet({ auto } = {}) {
     const s = this.step;
-    const v = auto ? { weight: s.target ? s.target.weight : null, reps: s.holdSeconds || (s.target ? s.target.reps : null), rpe: this.defaultRpe(s) } : this.readInputs();
+    // v1.17: when the edit panel is on screen (it opens by itself on a set with no weight), a set that ends on its
+    // timer keeps what was typed there instead of logging the target (the typed weight used to be lost)
+    const panel = this.container.querySelector('#edit-panel');
+    const typed = auto && panel && !panel.hidden ? this.readInputs() : null;
+    const v = auto ? { weight: typed && typed.weight != null ? typed.weight : (s.target ? s.target.weight : null), reps: s.holdSeconds || (typed && typed.reps != null ? typed.reps : (s.target ? s.target.reps : null)), rpe: typed ? typed.rpe : this.defaultRpe(s) } : this.readInputs();
     if (s.holdSeconds && v.reps == null) v.reps = s.holdSeconds;
     const ex = this.plan.exercises[s.exerciseId];
     const needsWeight = ex && ex.equipment !== 'bodyweight' && !s.holdSeconds;
@@ -582,10 +586,11 @@ export class Player {
       ])
     ]));
   }
-  finish(status) {
+  /** endAtMs: v1.17, when the session really stopped (Save what I did and stop, after the app was closed). */
+  finish(status, endAtMs) {
     this.s.status = status;
     this.steps.forEach((s, i) => { if (i >= this.s.idx && !s.done && !s.skipped) { s.skipped = true; if (s.kind === 'set') s.record = { ...this.baseRecord(s), done: false, skipped: true }; } });
-    const endedAt = Date.now();
+    const endedAt = endAtMs && endAtMs > this.s.sessionStart ? Math.min(endAtMs, Date.now()) : Date.now();
     const draft = {
       timeline: this.s.timeline, status, startedAt: this.s.startedISO, endedAt: new Date(endedAt).toISOString(),
       actualSeconds: Math.round((endedAt - this.s.sessionStart - this.s.pausedTotal) / 1000), pausedSeconds: Math.round(this.s.pausedTotal / 1000),
@@ -756,7 +761,8 @@ export class Player {
       el('div', { class: 'jd-name' }, `${p.name}${where ? ', ' + where : ''}`),
       el('div', { class: 'jd-steps' + (hasWeight ? '' : ' one') }, [
         hasWeight ? stepper('w', isPair(ex) ? 'Total lb' : (ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight lb'), rec.weight != null ? fmtWeight(rec.weight) : '?', pairText(ex, rec.weight),
-          () => change({ weight: Math.max(0, (w || 0) - wStep) }), () => change({ weight: (w || 0) + wStep })) : null,
+          // v1.17: with no weight yet, - and + open the type-in sheet (one tap on + used to log 5 lb)
+          () => (w == null ? this.openFix(idx) : change({ weight: Math.max(0, w - wStep) })), () => (w == null ? this.openFix(idx) : change({ weight: w + wStep }))) : null,
         stepper('r', p.holdSeconds ? 'Seconds' : (p.perSide ? 'Reps / side' : 'Reps'), rec.reps != null ? `${rec.reps}` : '?', '',
           () => change({ reps: Math.max(0, (rec.reps || 0) - 1) }), () => change({ reps: (rec.reps || 0) + 1 }))
       ]),
