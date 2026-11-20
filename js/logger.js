@@ -8,6 +8,7 @@ import { el, toast, closeModal, showModal, effortChips, countUp } from './ui.js'
 import { ringsCard } from './rings.js';
 import { sessionNumbers, drawShareCard, shareOrSave } from './share-card.js';
 import { icon } from './icons.js';
+import { numberFlag } from './sanity.js';
 
 /** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
 export async function previewSession(draft, { plan, rules }) {
@@ -106,18 +107,26 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
       el('p', { class: 'muted', style: 'margin:0' }, 'Tap a set to correct it. The arrow is the plan’s verdict for next time; change the next weight if you disagree.')
     ]));
 
-    // v1.5: skipped sets and missing numbers come first, and Save waits for them
-    const open = record.sets.map(st => ({ st, ex: plan.exercises[st.exerciseId], why: setIssue(st, plan.exercises[st.exerciseId]) })).filter(x => x.why);
+    // v1.5: skipped sets and missing numbers come first, and Save waits for them.
+    // v1.16: so do numbers that look wrong (Cameron: "flag it for me to review"), until fixed or confirmed.
+    const open = record.sets.map(st => {
+      const ex = plan.exercises[st.exerciseId];
+      const issue = setIssue(st, ex);
+      const flag = issue ? null : (st.done ? numberFlag(st, ex, rules) : null);
+      return { st, ex, why: issue || (flag ? `${fmtWeight(st.weight)} lb: ${flag.short}` : ''), flag };
+    }).filter(x => x.why);
     const skippedOpen = open.filter(x => x.why === 'skipped');
+    const flaggedOpen = open.filter(x => x.flag);
     if (open.length) {
       container.appendChild(el('div', { class: 'card review-open', id: 'review-open' }, [
         el('h2', {}, `${open.length} ${open.length === 1 ? 'set needs' : 'sets need'} a look`),
-        el('p', { class: 'muted', style: 'margin:0 0 6px' }, gate ? 'Fill each one in, or confirm you skipped it. Then you can save.' : 'Fill each one in, or confirm you skipped it.'),
-        ...open.map(({ st, ex, why }) => el('div', { class: 'open-item', onclick: () => editSet(st, ex) }, [
-          el('span', {}, `${ex ? ex.name : st.name}${st.round ? ', round ' + st.round : (st.setIndex ? ', set ' + st.setIndex : '')}`),
+        el('p', { class: 'muted', style: 'margin:0 0 6px' }, flaggedOpen.length ? 'Fix any number that looks wrong, or confirm it is right, so a typo never moves your targets. Then you can save.' : (gate ? 'Fill each one in, or confirm you skipped it. Then you can save.' : 'Fill each one in, or confirm you skipped it.')),
+        ...open.map(({ st, ex, why, flag }) => el('div', { class: 'open-item' + (flag ? ' num' : ''), onclick: () => editSet(st, ex) }, [
+          el('span', {}, `${ex ? ex.name : st.name}${st.round ? ', round ' + st.round : (st.setIndex ? ', set ' + st.setIndex : (st.baseline ? ', baseline' : ''))}`),
           el('span', { class: 'why' }, `${why} ›`)
         ])),
-        skippedOpen.length ? el('button', { class: 'btn', id: 'confirm-skipped', style: 'margin-top:10px', onclick: () => { skippedOpen.forEach(x => { x.st.skipOk = true; }); paint(); } }, skippedOpen.length === 1 ? 'Yes, I skipped that set' : `Yes, I skipped those ${skippedOpen.length} sets`) : null
+        skippedOpen.length ? el('button', { class: 'btn', id: 'confirm-skipped', style: 'margin-top:10px', onclick: () => { skippedOpen.forEach(x => { x.st.skipOk = true; }); paint(); } }, skippedOpen.length === 1 ? 'Yes, I skipped that set' : `Yes, I skipped those ${skippedOpen.length} sets`) : null,
+        flaggedOpen.length ? el('button', { class: 'btn', id: 'confirm-numbers', style: 'margin-top:10px', onclick: () => { flaggedOpen.forEach(x => { x.st.numberOk = true; }); paint(); } }, flaggedOpen.length === 1 ? 'That number is right' : `Those ${flaggedOpen.length} numbers are right`) : null
       ]));
     } else {
       container.appendChild(el('div', { class: 'card review-open clear', id: 'review-clear' }, [el('b', {}, '✓ Every set is filled in or marked skipped.')]));
@@ -141,7 +150,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
         el('div', {}, [el('b', {}, ex ? ex.name : (sets[0].name || id)), el('div', { class: 'muted', style: 'font-size:var(--t-small)' }, line.reason || '')]),
         v.label ? el('span', { class: 'verdict ' + (ov ? 'you' : v.cls) }, ov ? '✎ set by you' : `${v.arrow} ${v.label}${delta != null && delta !== 0 ? ` ${delta > 0 ? '+' : ''}${fmtWeight(delta)}` : ''}`) : null
       ]));
-      const rows = sets.map((st, i) => el('div', { class: 'review-set' + (st.skipped ? ' skipped' : '') + (setIssue(st, ex) ? ' flag' : ''), onclick: () => editSet(st, ex) }, [
+      const rows = sets.map((st, i) => el('div', { class: 'review-set' + (st.skipped ? ' skipped' : '') + (setIssue(st, ex) || (st.done && numberFlag(st, ex, rules)) ? ' flag' : ''), onclick: () => editSet(st, ex) }, [
         el('span', { class: 'muted' }, st.baseline ? 'Base' : (st.retest ? 'Test' : (st.round ? `R${st.round}` : `${st.setIndex || i + 1}`))),
         setIssue(st, ex) ? el('span', { class: 'flag-text' }, st.skipped ? 'skipped: confirm or fill in' : `${setIssue(st, ex)}: tap to add`) : el('span', {}, st.skipped ? 'skipped' : `${st.weight != null ? weightWithPair(ex, st.weight) : (st.holdSeconds ? '' : (ex && ex.equipment === 'bodyweight' ? 'bw' : '? lb'))} × ${st.reps != null ? st.reps : '?'}${st.holdSeconds ? ' s' : ''}`),
         el('span', { class: 'muted' }, st.rpe != null && !st.skipped ? effortLabel(rules, st.rpe) : ''),
@@ -173,8 +182,10 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     const r = el('input', { type: 'number', step: '1', value: st.reps == null ? '' : st.reps, inputmode: 'numeric' });
     let rpe = st.rpe;
     const chips = effortChips(rules, rpe, lvl => { rpe = lvl.rpe; chips.querySelectorAll('.effort-chip').forEach(b => b.classList.toggle('on', b.dataset.key === lvl.key)); });
+    const flag = st.done ? numberFlag(st, ex, rules) : null;
     showModal(el('div', {}, [
       el('h2', {}, `${st.name}${st.setIndex ? ', set ' + st.setIndex : ''}`),
+      flag ? el('div', { class: 'num-flag', id: 'num-flag' }, [el('b', {}, 'Check this number. '), `${flag.text}.`]) : null,
       el('div', { class: 'grid2' }, [
         isBw ? el('div') : el('div', { class: 'field' }, [el('label', {}, ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight')), w]),
         el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r])
@@ -182,6 +193,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
       st.holdSeconds ? null : el('div', { class: 'field' }, [el('label', {}, 'Effort'), chips]),
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
+        flag ? el('button', { class: 'btn', id: 'number-ok', onclick: () => { st.numberOk = true; closeModal(); paint(); } }, 'It\'s right') : null,
         st.skipped
           ? el('button', { class: 'btn', onclick: () => { st.skipOk = true; closeModal(); paint(); } }, 'I skipped it')
           : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.skipOk = true; st.done = false; closeModal(); paint(); } }, 'Mark skipped'),

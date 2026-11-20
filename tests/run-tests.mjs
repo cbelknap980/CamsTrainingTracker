@@ -10,6 +10,7 @@ import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../j
 import { applyRestAdjust } from '../js/builder.js';
 import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
+import { numberFlag, flaggedGroups, applyNumberFix } from '../js/sanity.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -366,6 +367,43 @@ console.log('v1.9 muscle groups and coach check-ins');
   check('v1.15 catch-up: a lift ended early and then done in full the next day owes nothing', !twice.lifts.some(l => l.id === 'lift1') && owedSetsFor(plan, [mon, tue], 'lift1', 1) === 0, twice.lifts);
   const halfTue = { ...tue, id: 'm3', status: 'ended_early', sets: [S('back_squat', 'A'), S('back_squat', 'A', skip), S('rdl', 'B', skip)] };
   check('v1.15 catch-up: two partial attempts owe what the better one left', owedSetsFor(plan, [mon, halfTue], 'lift1', 1) === 2, weekOwed({ plan, sessions: [mon, halfTue], week: 1, today: thu }).lifts);
+}
+
+// ---- v1.16: numbers that look wrong ----
+{
+  const sq = plan.exercises.back_squat, lr = plan.exercises.lateral_raise, bss = plan.exercises.bss, curl = plan.exercises.leg_curl;
+  const set = (extra = {}) => ({ exerciseId: 'back_squat', done: true, skipped: false, ramp: false, repRange: [4, 6], target: { weight: 170, reps: 4 }, weight: 170, reps: 4, ...extra });
+  const code = (st, ex = sq) => (numberFlag(st, ex, rules) || {}).code || null;
+  check('v1.16 flag: a barbell weight under the empty bar', code(set({ weight: 5, target: { weight: null } })) === 'under-bar' && code(set({ weight: 45 })) !== 'under-bar');
+  check('v1.16 flag: half the target or less, and half again over it', code(set({ weight: 85 })) === 'light' && code(set({ weight: 255 })) === 'heavy' && code(set({ weight: 175 })) === null && code(set({ weight: 120 })) === null);
+  check('v1.16 flag: small weights need a real gap (a 10 lb lateral raise at 15 is fine)', code({ ...set(), exerciseId: 'lateral_raise', repRange: [12, 15], target: { weight: 10, reps: 12 }, weight: 15, reps: 12 }, lr) === null);
+  const one = numberFlag({ ...set(), exerciseId: 'bss', repRange: [8, 10], target: { weight: 70, reps: 8 }, weight: 35, reps: 8 }, bss, rules);
+  check('v1.16 flag: a two-dumbbell lift at exactly half asks if it was one dumbbell', one && one.short === 'one dumbbell?', one);
+  check('v1.16 flag: far more reps than planned, and 0 reps', code(set({ reps: 40 })) === 'reps' && code(set({ reps: 0 })) === 'reps' && code(set({ reps: 6 })) === null);
+  check('v1.16 flag: no target and over 500 lb', code({ ...set(), exerciseId: 'leg_curl', target: { weight: null }, weight: 1000, repRange: [8, 12] }, curl) === 'heavy');
+  check('v1.16 flag: ramp-ups, skipped sets and confirmed numbers are never flagged', code(set({ weight: 5, ramp: true })) === null && code(set({ weight: 5, skipped: true })) === null && code(set({ weight: 5, numberOk: true })) === null);
+
+  // Cameron's Nov 17 Legs: baseline saved as 5 x 5, then 10 x 4 three times; he lifted 195
+  const S = (w, extra = {}) => set({ weight: w, rpe: 8, blockId: 'A', ...extra });
+  const nov17 = { id: 'n17', sessionId: 'lift1', week: 1, date: '2026-11-17', startedAt: '2026-11-17T17:00:00Z', endedAt: '2026-11-17T18:00:00Z', status: 'complete', phase: { id: 'baseline' },
+    sets: [S(5, { baseline: true, repRange: [5, 5], reps: 5, target: { weight: null, reps: 5 }, setIndex: 0 }), S(10, { target: { weight: 5, reps: 4 }, setIndex: 1 }), S(10, { target: { weight: 10, reps: 4 }, setIndex: 2 }), S(10, { target: { weight: 10, reps: 4 }, setIndex: 3 }),
+      { exerciseId: 'rdl', done: true, ramp: false, repRange: [6, 8], target: { weight: null }, weight: 195, reps: 6, rpe: 8, blockId: 'B' }],
+    whatChanged: [{ exerciseId: 'back_squat', text: 'Back squat baseline: 5 lb x 5. Training weight 5 lb through week 2.' }, { exerciseId: 'rdl', text: 'RDL line' }], e1rms: { back_squat: 11 }, prs: [] };
+  const g = flaggedGroups([nov17], plan, rules);
+  check('v1.16 saved sets: one group for the squat, all four sets offered, the RDL left alone', g.length === 1 && g[0].exerciseId === 'back_squat' && g[0].flagged.length === 4 && g[0].sets.join() === '0,1,2,3', g);
+  const tgt = { back_squat: { weight: 5, reps: 4, source: 'baseline', e1rm: 11, bestE1rm: 11, bestWeight: 10, baselineWeight: 5 } };
+  const fix = applyNumberFix({ sessions: [nov17], targets: tgt, recordId: 'n17', exerciseId: 'back_squat', weights: { 0: 195, 1: 195, 2: 195, 3: 195 }, checked: [0, 1, 2, 3], plan, rules, settings });
+  check('v1.16 fix: the target is worked out again from 195 (90% of the baseline, 175 x 4)', fix.retargeted && fix.target.weight === 175 && fix.target.reps === 4 && fix.target.baselineWeight === 195, fix.target);
+  check('v1.16 fix: records and e1RM come from the right numbers', fix.target.bestWeight === 195 && fix.target.bestE1rm === epley(195, 5) && fix.record.e1rms.back_squat === epley(195, 5), [fix.target, fix.record.e1rms]);
+  check('v1.16 fix: what-changed says so, in place, other lines kept; input not changed', fix.record.whatChanged[0].text.includes('195') && fix.record.whatChanged[0].text.includes('corrected') && fix.record.whatChanged[1].text === 'RDL line' && nov17.sets[0].weight === 5, fix.record.whatChanged);
+  check('v1.16 fix: nothing flagged afterwards', flaggedGroups([fix.record], plan, rules).length === 0);
+  const kept = applyNumberFix({ sessions: [nov17], targets: tgt, recordId: 'n17', exerciseId: 'back_squat', weights: {}, checked: [0, 1, 2, 3], plan, rules, settings });
+  check('v1.16 It\'s right: numbers stay and are not flagged again', kept.record.sets[0].weight === 5 && flaggedGroups([kept.record], plan, rules).length === 0);
+  const later = { ...nov17, id: 'n24', date: '2026-11-24', startedAt: '2026-11-24T17:00:00Z', endedAt: '2026-11-24T18:00:00Z', sets: [S(180, { target: { weight: 175, reps: 4 } })], whatChanged: [] };
+  const old = applyNumberFix({ sessions: [later, nov17], targets: { back_squat: { weight: 185, reps: 4, source: 'engine' } }, recordId: 'n17', exerciseId: 'back_squat', weights: { 0: 195, 1: 195, 2: 195, 3: 195 }, checked: [0, 1, 2, 3], plan, rules, settings });
+  check('v1.16 fix of an older session keeps the newer target but updates the records', !old.retargeted && old.target.weight === 185 && old.target.bestWeight === 195, old.target);
+  const hand = applyNumberFix({ sessions: [nov17], targets: { back_squat: { weight: 150, reps: 5, source: 'you', updated: '2026-11-18T09:00:00Z' } }, recordId: 'n17', exerciseId: 'back_squat', weights: { 0: 195 }, checked: [0], plan, rules, settings });
+  check('v1.16 fix keeps a target set by hand after that session', !hand.retargeted && hand.target.weight === 150 && hand.target.source === 'you', hand.target);
 }
 
 // ---- v1.10: runs and Garmin ----

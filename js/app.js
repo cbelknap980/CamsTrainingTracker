@@ -19,6 +19,7 @@ import { renderPlan } from './plan-view.js';
 import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp } from './ui.js';
 import { weekRings, ringsCard } from './rings.js';
+import { flaggedGroups, applyNumberFix } from './sanity.js';
 
 const view = document.getElementById('view');
 let D = null; // { plan, rules, settingsDefaults, architecture }
@@ -350,6 +351,10 @@ async function renderHome() {
   };
   const movedNote = row => (row.status === 'open' ? `Moved here from ${new Date(row.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long' })}. If you run with your watch, it logs itself.` : 'If you run with your watch, it logs itself.');
 
+  // v1.16: numbers that look wrong come first, until Cameron fixes or confirms them
+  const flags = flaggedGroups(allSessions, D.plan, D.rules);
+  if (flags.length) view.appendChild(checkNumbersCard(flags, allSessions));
+
   // v1.14: the week at a glance, above today's card. Each ring opens the page behind it.
   if (week >= 1 && week <= 12) {
     view.appendChild(ringsCard(weekRings({ plan: D.plan, rules: D.rules, settings, sessions: allSessions, runs: allRuns, week, today }), {
@@ -435,7 +440,7 @@ async function renderHome() {
   // v1.15: one Main lifts card in place of Next targets (every exercise) and Benchmarks. Home shows only the lifts the
   // 12 weeks are measured by: the barbell lifts and the weighted pull-up (Cameron, Nov 20: machine weights differ from
   // machine to machine). Every lift's target shows on the start page of its workout instead.
-  view.appendChild(mainLiftsCard(targets, settings));
+  view.appendChild(mainLiftsCard(targets, settings, flags, allSessions));
 
   const last = allSessions[0];
   if (last && last.whatChanged && last.whatChanged.length) {
@@ -464,12 +469,20 @@ function repRangeFor(exerciseId) {
   return null;
 }
 
-function mainLiftsCard(targets, settings) {
+function mainLiftsCard(targets, settings, flags = [], sessions = []) {
   const rows = Object.entries(D.plan.exercises).filter(([, ex]) => ex.benchmark).map(([id, ex]) => {
     const t = targets[id] || {};
     const e1 = t.e1rm != null ? t.e1rm : t.bestE1rm;
     const badge = t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : (t.source === 'benchmark' ? el('span', { class: 'badge you' }, 'bench') : null));
     const has = t.weight != null;
+    // v1.16: a lift whose numbers are waiting for a look shows that instead of a target built on them
+    const flag = flags.find(g => g.exerciseId === id);
+    if (flag) {
+      return el('tr', { class: 'tappable flagged', 'data-ex': id, onclick: () => fixNumbers(flag, sessions) }, [
+        el('td', {}, [el('div', { class: 'tgt-name' }, ex.name), el('div', { class: 'tgt-sub' }, `numbers from ${fmtDate(flag.date)} look wrong`)]),
+        el('td', { class: 'num tgt-val tgt-check' }, 'Check ›')
+      ]);
+    }
     return el('tr', { class: 'tappable', 'data-ex': id, onclick: () => (has ? editTarget(id, ex, t, settings) : editBenchmark(id, ex, t, settings)) }, [
       el('td', {}, [el('div', { class: 'tgt-name' }, ex.name), (e1 != null || badge) ? el('div', { class: 'tgt-sub' }, [e1 != null ? `e1RM ${e1}` : null, badge]) : null]),
       el('td', { class: 'num tgt-val' + (has ? '' : ' tgt-none') }, has ? `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}` : 'Not set yet')
@@ -480,6 +493,63 @@ function mainLiftsCard(targets, settings) {
     el('table', { class: 'tgt-table' }, [el('tr', {}, [el('th', {}, 'Lift'), el('th', { class: 'num' }, 'Next time')]), ...rows]),
     el('p', { class: 'muted', style: 'margin-top:8px' }, 'Other lifts show their targets on the start page of that day\'s workout.')
   ]);
+}
+
+// ---- v1.16: numbers that look wrong ----
+// Cameron, Nov 19: "For any number you think doesn't make sense, flag it for me to review. Don't want bad number
+// impacting plan." One row per session and lift; a tap opens every set of that lift in that session to correct.
+function checkNumbersCard(flags, sessions) {
+  return el('div', { class: 'card check-card', id: 'check-numbers' }, [
+    el('h3', {}, ['Check these numbers', infoBtn('Check these numbers', 'A number gets flagged when it looks like a typo: a barbell weight under the empty bar, a weight half or less of its target or half again over it, or far more reps than planned. Fix it and that lift\'s target is worked out again from the right numbers. If it really was right, tap It\'s right and it is never flagged again.')]),
+    ...flags.map(g => {
+      const rec = sessions.find(s => s.id === g.recordId);
+      const ws = g.sets.map(i => rec.sets[i].weight).filter(w => w != null);
+      return el('button', { type: 'button', class: 'check-row', 'data-ex': g.exerciseId, onclick: () => fixNumbers(g, sessions) }, [
+        el('span', { class: 'cr-main' }, [el('b', {}, g.name), el('span', { class: 'muted' }, ` · ${fmtDate(g.date)}`)]),
+        el('span', { class: 'cr-sub' }, `${ws.map(fmtWeight).join(', ')} lb · ${g.flagged[0].flag.short}`),
+        el('span', { class: 'cr-go' }, 'Fix ›')
+      ]);
+    })
+  ]);
+}
+
+function fixNumbers(g, sessions) {
+  const rec = sessions.find(s => s.id === g.recordId);
+  const ex = D.plan.exercises[g.exerciseId] || {};
+  const flaggedAt = new Map(g.flagged.map(f => [f.index, f.flag]));
+  const inputs = {};
+  const all = el('input', { type: 'number', inputmode: 'decimal', step: '2.5', placeholder: 'lb', id: 'fix-all', 'aria-label': 'Weight for every set' });
+  const rows = g.sets.map((i, n) => {
+    const st = rec.sets[i];
+    const input = inputs[i] = el('input', { type: 'number', inputmode: 'decimal', step: '2.5', value: st.weight == null ? '' : st.weight, 'data-i': i, 'aria-label': `Set ${n + 1} weight` });
+    const f = flaggedAt.get(i);
+    return el('div', { class: 'fix-row' + (f ? ' flagged' : '') }, [
+      el('div', {}, [el('b', {}, st.baseline ? 'Baseline set' : `Set ${st.setIndex || n + 1}`), el('div', { class: 'muted fix-why' }, `${st.reps != null ? st.reps : '?'} reps${f ? ' · ' + f.text : ''}`)]),
+      input
+    ]);
+  });
+  all.addEventListener('input', () => { if (all.value !== '') Object.values(inputs).forEach(x => { x.value = all.value; }); });
+  const save = async keep => {
+    const weights = {};
+    if (!keep) for (const [i, x] of Object.entries(inputs)) if (x.value !== '') weights[i] = Number(x.value);
+    const [allSessions, targets, settings] = await Promise.all([getSessions(), getTargets(), getSettings()]);
+    const r = applyNumberFix({ sessions: allSessions, targets, recordId: g.recordId, exerciseId: g.exerciseId, weights, checked: g.sets, plan: D.plan, rules: D.rules, settings });
+    await putSession(r.record);
+    await setTarget(g.exerciseId, r.target);
+    closeModal();
+    toast(keep ? `${ex.name}: kept as logged` : (r.retargeted && r.target.weight != null ? `${ex.name} fixed. Next time ${weightWithPair(ex, r.target.weight)} × ${r.target.reps}` : `${ex.name} fixed`), 4000);
+    renderHome();
+  };
+  showModal(el('div', { class: 'fix-sheet' }, [
+    el('h2', {}, ex.name || g.name),
+    el('p', { class: 'muted' }, `${rec.sessionName}, ${fmtDate(rec.date)}. Put in what you actually lifted${isPair(ex) ? ' (the total of both dumbbells)' : ''}.`),
+    el('div', { class: 'field' }, [el('label', { for: 'fix-all' }, 'Same weight for every set'), all]),
+    ...rows,
+    el('div', { class: 'btn-row' }, [
+      el('button', { class: 'btn ghost', id: 'fix-keep', onclick: () => save(true) }, 'It\'s right'),
+      el('button', { class: 'btn primary', id: 'fix-save', onclick: () => save(false) }, 'Save')
+    ])
+  ]));
 }
 
 function editBenchmark(id, ex, t, settings) {
