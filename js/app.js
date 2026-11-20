@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { Player } from './player.js';
 import { saveSession, renderSummary, renderReview, setsTable } from './logger.js';
 import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progression.js';
-import { getTargets, setTarget, getSessions, getRuns, deleteSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
+import { getTargets, setTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
@@ -17,7 +17,8 @@ import { importFromGarmin } from './garmin.js';
 import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
 import { renderPlan } from './plan-view.js';
 import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
-import { el, toast, showModal, closeModal, confirmDialog } from './ui.js';
+import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp } from './ui.js';
+import { weekRings, ringsCard } from './rings.js';
 
 const view = document.getElementById('view');
 let D = null; // { plan, rules, settingsDefaults, architecture }
@@ -40,12 +41,21 @@ async function boot() {
     return;
   }
   setSettingsDefaults(D.settingsDefaults);
+  // v1.14: tap buzz (follows the vibrate setting) and the status bar color per workout phase
+  installHaptics();
+  getSettings().then(st => setHaptics(!st.cues || st.cues.vibrate !== false)).catch(() => {});
+  syncStatusBar();
   // v1.9: a computer gets the sidebar layout and full-width pages
   document.body.classList.toggle('computer', onComputer());
   document.getElementById('sync-chip').addEventListener('click', onSyncChip);
   document.querySelectorAll('#tabs .tab').forEach(b => {
     b.prepend(icon(b.dataset.view));
-    b.addEventListener('click', () => { if (b.dataset.view === 'progress' && currentTab !== 'progress') progressMode = 'overview'; showTab(b.dataset.view); });
+    b.addEventListener('click', () => {
+      // v1.14: tapping the tab you are on scrolls it to the top; another tab comes back where you left it
+      if (b.dataset.view === currentTab && !player) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+      if (b.dataset.view === 'progress' && currentTab !== 'progress') progressMode = 'overview';
+      showTab(b.dataset.view, { restore: true });
+    });
   });
   const sb = document.getElementById('settings-btn'); sb.innerHTML = ''; sb.appendChild(icon('settings'));
   sb.addEventListener('click', () => renderSettings());
@@ -162,8 +172,27 @@ async function openApp() {
     offerResume(inProgress);
   } else {
     if (inProgress) clearInProgress().catch(() => {});
-    showTab('home');
+    if (!(await openShortcut())) showTab('home');
   }
+}
+
+/**
+ * v1.14: long-press the app icon on Android for shortcuts (manifest.webmanifest): ?go=today opens today's
+ * session preview (Home on a day without a lift), ?go=runs and ?go=progress open those tabs.
+ */
+async function openShortcut() {
+  const go = new URLSearchParams(location.search).get('go');
+  if (!go) return false;
+  try { history.replaceState(history.state, '', location.pathname + location.hash); } catch (e) { /* ignore */ }
+  if (go === 'runs' || go === 'progress' || go === 'plan') { showTab(go); return true; }
+  if (go === 'today') {
+    const settings = await getSettings();
+    const today = new Date();
+    const id = todaysSessionId(D.plan, today);
+    if (id && sessionById(D.plan, id)) { currentTab = 'home'; previewSession(id, weekNumber(today, settings.startDate)); return true; }
+    if (id && D.plan.runs.some(r => r.id === id)) { showTab('runs'); return true; }
+  }
+  return false;
 }
 
 /**
@@ -223,21 +252,37 @@ async function updateWeekChip() {
   document.getElementById('week-chip').textContent = week >= 1 && week <= 12 ? `Week ${week} · ${phase.name}` : phase.name;
 }
 
-function showTab(name) {
+const TAB_ORDER = ['home', 'progress', 'plan', 'runs', 'architecture'];
+const scrollByTab = {};
+function showTab(name, { restore = false } = {}) {
   if (name === 'history') { progressMode = 'sessions'; name = 'progress'; } // v1.9: the log lives in Progress
+  const from = currentTab;
+  if (from && from !== name) scrollByTab[from] = window.scrollY;
   currentTab = name;
   document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.view === name));
-  window.scrollTo(0, 0);
-  // polish: the new page rises in (CSS in polish.css), then the class comes off so later re-renders stay still
-  view.classList.remove('enter'); void view.offsetWidth; view.classList.add('enter');
-  clearTimeout(showTab.t); showTab.t = setTimeout(() => view.classList.remove('enter'), 700);
-  view.classList.toggle('wide', name === 'progress' || name === 'plan' || document.body.classList.contains('computer'));
-  view.classList.toggle('home-cols', name === 'home' && document.body.classList.contains('computer'));
-  if (name === 'home') renderHome();
-  else if (name === 'progress') renderProgressTab();
-  else if (name === 'plan') renderPlanTab();
-  else if (name === 'runs') renderRunsTab(view, { plan: D.plan, rules: D.rules, onOpenSync: () => renderSyncSheet() });
-  else if (name === 'architecture') renderArchitecture(view, D.architecture, D.plan);
+  // v1.14: Back on any page but Home goes Home, instead of closing the app
+  if (name === 'home') dropBack('page'); else onBack('page', () => showTab('home'));
+  const render = () => {
+    view.classList.toggle('wide', name === 'progress' || name === 'plan' || document.body.classList.contains('computer'));
+    view.classList.toggle('home-cols', name === 'home' && document.body.classList.contains('computer'));
+    if (name === 'home') return renderHome();
+    if (name === 'progress') return renderProgressTab();
+    if (name === 'plan') return renderPlanTab();
+    if (name === 'runs') return renderRunsTab(view, { plan: D.plan, rules: D.rules, onOpenSync: () => renderSyncSheet() });
+    if (name === 'architecture') return renderArchitecture(view, D.architecture, D.plan);
+  };
+  const y = restore ? (scrollByTab[name] || 0) : 0;
+  // v1.14: the page slides toward the tab you picked (a view transition); where those are not supported the
+  // v1.13 rise-in stays
+  const dir = TAB_ORDER.indexOf(name) >= TAB_ORDER.indexOf(from) ? 'fwd' : 'back';
+  const useVT = !!document.startViewTransition && from !== name;
+  if (!useVT) {
+    view.classList.remove('enter'); void view.offsetWidth; view.classList.add('enter');
+    clearTimeout(showTab.t); showTab.t = setTimeout(() => view.classList.remove('enter'), 700);
+  }
+  const done = (useVT ? transition(async () => { await render(); window.scrollTo(0, y); }, dir) : Promise.resolve(render()));
+  if (!useVT) { window.scrollTo(0, 0); Promise.resolve(done).then(() => { if (y) window.scrollTo(0, y); }).catch(() => {}); }
+  return done;
 }
 
 // ---- Home ----
@@ -254,7 +299,9 @@ async function renderHome() {
   view.innerHTML = '';
 
   // v1.8 catch-up: sets skipped or not reached this week, and lifts whose day passed with nothing logged
-  const owed = week >= 1 && week <= 12 ? weekOwed({ plan: D.plan, sessions: await getSessions(), week, today }) : { lifts: [], totalSets: 0, missed: [] };
+  const allSessions = await getSessions();
+  const allRuns = await getRuns();
+  const owed = week >= 1 && week <= 12 ? weekOwed({ plan: D.plan, sessions: allSessions, week, today }) : { lifts: [], totalSets: 0, missed: [] };
   const catchUp = owed.totalSets ? buildCatchUpSession(D.plan, D.rules, owed) : null;
   const hasOwed = !!(catchUp || owed.missed.length);
   const catchUpBody = (card, primary) => {
@@ -269,14 +316,16 @@ async function renderHome() {
       card.appendChild(el('button', { class: 'btn ' + (primary && !catchUp ? 'primary' : ''), 'data-missed': l.id, onclick: () => previewSession(l.id, week) }, `Start ${l.name}`));
     });
     const slack = slackDays(D.plan);
-    card.appendChild(el('p', { class: 'muted', style: 'margin:12px 0 0;font-size:var(--t-small)' }, primary
-      ? 'Skipped sets and missed lifts land here. Anything still owed on Sunday night is dropped, it does not roll into next week.'
-      : `This waits for your next Slack day (${slack.join(' or ')}). Anything still owed on Sunday night is dropped.`));
+    // v1.14: the how-it-works note sits behind an (i) next to the card title
+    // (the day to do it stays in view on other days)
+    if (!primary) card.appendChild(el('p', { class: 'muted', style: 'margin:12px 0 0;font-size:var(--t-small)' }, `For your next Slack day, ${slack.join(' or ')}.`));
+    const h = card.querySelector('h3');
+    if (h) h.appendChild(infoBtn('Catch-up', ['Skipped sets and missed lifts land here, and a catch-up session runs just those sets.', 'Anything still owed on Sunday night is dropped, it does not roll into next week.']));
   };
 
   // v1.12: runs follow Cameron off schedule. A planned run whose day passed is offered on a free day that still
   // works (rules.runSchedule); on other days a card says what is still to run this week.
-  const runRows = week >= 1 && week <= 12 ? weekRuns({ plan: D.plan, settings, runs: await getRuns(), week, today }) : [];
+  const runRows = week >= 1 && week <= 12 ? weekRuns({ plan: D.plan, settings, runs: allRuns, week, today }) : [];
   const runCtx = { plan: D.plan, rules: D.rules, settings };
   const movedRun = !session && !run ? runRows.find(r => (r.status === 'open' || r.status === 'today') && openRunDays({ ...runCtx, runId: r.id, week, today }).some(d => d.today)) : null;
   const runBody = (card, row, primary) => {
@@ -291,7 +340,13 @@ async function renderHome() {
   };
   const movedNote = row => (row.status === 'open' ? `Moved here from ${new Date(row.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long' })}. If you run with your watch, it logs itself.` : 'If you run with your watch, it logs itself.');
 
-  const todayCard = el('div', { class: 'card accent' });
+  // v1.14: the week at a glance, above today's card. Each ring opens the page behind it.
+  if (week >= 1 && week <= 12) {
+    view.appendChild(ringsCard(weekRings({ plan: D.plan, rules: D.rules, settings, sessions: allSessions, runs: allRuns, week, today }), {
+      week, onOpen: k => (k === 'runs' ? showTab('runs') : (k === 'hard' ? showTab('plan') : showTab('progress')))
+    }));
+  }
+  const todayCard = el('div', { class: 'card accent', id: 'today-card' });
   todayCard.appendChild(el('h3', {}, `Today, ${fmtDate(toISODate(today))} · week ${week}${phase.note ? ' · ' + phase.name : ''}`));
   if (session) {
     const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets });
@@ -345,9 +400,8 @@ async function renderHome() {
   const stillOpen = runRows.filter(r => r.status === 'open' && r !== movedRun);
   if (stillOpen.length) {
     view.appendChild(el('div', { class: 'card', id: 'runs-open-card' }, [
-      el('h3', {}, 'Still to run this week'),
-      ...stillOpen.map(r => el('p', { style: 'margin:0 0 6px' }, [el('b', {}, `${r.name}. `), el('span', { class: 'muted' }, `${r.plan.text}. ${openRunText(runCtx, r.id, week, today)}`)])),
-      el('p', { class: 'muted', style: 'margin:8px 0 0;font-size:var(--t-small)' }, 'Run whenever it suits you. A run from Garmin counts for whichever planned run it most likely is.')
+      el('h3', {}, ['Still to run this week', infoBtn('Runs off schedule', 'Run whenever it suits you. A run from Garmin counts for whichever planned run it most likely is.')]),
+      ...stillOpen.map(r => el('p', { style: 'margin:0 0 6px' }, [el('b', {}, `${r.name}. `), el('span', { class: 'muted' }, `${r.plan.text}. ${openRunText(runCtx, r.id, week, today)}`)]))
     ]));
   }
   // v1.4: install card, only while the app is running in a browser tab. v1.6: on a phone it sits right under
@@ -388,7 +442,7 @@ async function renderHome() {
 
   view.appendChild(benchmarksCard(targets, settings));
 
-  const last = (await getSessions())[0];
+  const last = allSessions[0];
   if (last && last.whatChanged && last.whatChanged.length) {
     view.appendChild(el('div', { class: 'card' }, [
       el('h3', {}, `What changed after ${last.sessionName}, ${fmtDate(last.date)}`),
@@ -399,11 +453,13 @@ async function renderHome() {
   if (installCard && onComputer()) view.appendChild(installCard);
   // v1.9: on a computer, the today card across the top, then two columns: next targets on the right
   if (document.body.classList.contains('computer')) {
-    const [first, ...rest] = [...view.children];
+    const kids = [...view.children];
+    const ti = kids.findIndex(c => c.classList.contains('accent'));
+    const top = kids.slice(0, ti + 1), rest = kids.slice(ti + 1);
     const right = rest.filter(c => c.id === 'next-targets');
     const left = rest.filter(c => c.id !== 'next-targets');
     view.innerHTML = '';
-    view.append(first, el('div', { class: 'home-col' }, left), el('div', { class: 'home-col' }, right));
+    view.append(...top, el('div', { class: 'home-col' }, left), el('div', { class: 'home-col' }, right));
   }
 }
 
@@ -508,10 +564,10 @@ async function previewSession(sessionRef, week) {
 
   const paint = () => {
     tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights() });
+    const y = window.scrollY;
     view.innerHTML = '';
-    window.scrollTo(0, 0);
     const finish = Date.now() + tl.plannedSeconds * 1000;
-    view.appendChild(el('div', { class: 'card accent' }, [
+    view.appendChild(el('div', { class: 'card accent', id: 'preview-hero' }, [
       el('h3', {}, `Week ${week}${phase.name ? ' · ' + phase.name : ''}`),
       el('h1', {}, session.name),
       // polish: same chips as the Home card; the session goal reads as the lead, the phase note small
@@ -536,7 +592,7 @@ async function previewSession(sessionRef, week) {
         e.sets += 1;
       }
     }
-    const card = el('div', { class: 'card' }, [el('h3', {}, 'Today')]);
+    const card = el('div', { class: 'card' }, [el('h3', {}, ['Today', infoBtn('Weights on this page', 'Weights are in lb. Lifts with two dumbbells show the total of both. Change any of them here. A number marked Estimate is a rough guess from your main lifts and bodyweight, so set it to what you know. Blank ones get filled in after the first set.')])]);
     for (const b of blocks) {
       const title = b.type === 'warmup' ? 'Warm-up' : (b.type === 'stretch' ? 'Stretch' : (b.type === 'iftime' ? 'If time' : (/^[A-Z]$/.test(b.name) ? `Block ${b.name}` : b.name)));
       const rows = b.ex.map(e => {
@@ -561,7 +617,6 @@ async function previewSession(sessionRef, week) {
         ...rows
       ]));
     }
-    card.appendChild(el('p', { class: 'muted', style: 'margin:10px 0 0' }, 'Weights are in lb. Lifts with two dumbbells show the total of both. Change any of them here. A number marked Estimate is a rough guess from your main lifts and bodyweight, so set it to what you know. Blank ones get filled in after the first set.'));
     view.appendChild(card);
     view.appendChild(el('div', { class: 'stack' }, [
       el('button', { class: 'btn primary', id: 'start-workout', onclick: async () => {
@@ -573,10 +628,14 @@ async function previewSession(sessionRef, week) {
         }
         startSession(session, week, withWeights());
       } }, 'Start workout'),
-      el('button', { class: 'btn ghost', onclick: () => showTab('home') }, 'Back')
+      el('button', { class: 'btn ghost', onclick: () => transition(() => showTab('home'), 'back') }, 'Back')
     ]));
+    // a typed weight repaints in place, so the page stays where it was
+    window.scrollTo(0, y);
   };
-  paint();
+  // v1.14: the Start card grows into this page (a view transition); Back on the phone returns Home
+  onBack('page', () => transition(() => showTab('home'), 'back'));
+  await transition(() => { window.scrollTo(0, 0); paint(); }, 'fwd');
 }
 
 // ---- Session flow ----
@@ -587,8 +646,7 @@ async function startSession(session, week, targetsForToday) {
   const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, history });
   await askNotificationPermission(settings);
   player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
-  window.scrollTo(0, 0);
-  player.start();
+  transition(() => { window.scrollTo(0, 0); player.start(); }, 'fwd');
 }
 
 // Asked from the Start tap (a user gesture), only while the answer is still 'default'.
@@ -624,6 +682,9 @@ function offerResume(saved) {
 
 async function onSessionFinished(draft) {
   player = null;
+  // v1.14: the review is not saved yet, so Back must not leave it
+  const guard = () => { onBack('page', guard); toast('Tap Save at the bottom to keep this session'); };
+  onBack('page', guard);
   try {
     window.scrollTo(0, 0);
     await renderReview(view, draft, { plan: D.plan, rules: D.rules }, {
@@ -631,11 +692,16 @@ async function onSessionFinished(draft) {
         const record = await saveSession(draft, { plan: D.plan, rules: D.rules, overrides });
         await updateWeekChip();
         window.scrollTo(0, 0);
-        const settings = await getSettings();
-        renderSummary(view, record, {
+        const [settings, sessions, runs, cfg] = await Promise.all([getSettings(), getSessions(), getRuns(), getSync()]);
+        // v1.14: the same session last time (for volume) and the week's rings for the done card
+        const prev = sessions.find(x => x.id !== record.id && x.sessionId === record.sessionId && !x.catchUp && (x.startedAt || x.date) < (record.startedAt || record.date)) || null;
+        const rings = record.week >= 1 && record.week <= 12 ? weekRings({ plan: D.plan, rules: D.rules, settings, sessions, runs, week: record.week, today: new Date() }) : null;
+        onBack('page', () => showTab('home'));
+        transition(() => renderSummary(view, record, {
+          prev, rings, syncOn: !!(cfg && cfg.repo && cfg.role !== 'viewer'),
           onDone: () => showTab('home'),
           onBackup: () => backupNow(settings, D.plan.planVersion)
-        });
+        }), 'fade');
       }
     });
   } catch (e) {
@@ -665,7 +731,8 @@ async function renderHistory() {
       el('div', { class: 'muted' }, `Week ${s.week} · ${done} sets · ${fmtMinutes(s.actualSeconds)}${s.status !== 'complete' ? ' · ended early' : ''}${s.trims && s.trims.length ? ' · trimmed' : ''}`)
     ]);
     item.addEventListener('click', () => showSession(s));
-    list.appendChild(item);
+    // v1.14: swipe a session left to delete it, with Undo
+    list.appendChild(swipeToDelete(item, () => removeSession(s)));
   });
   view.appendChild(list);
 }
@@ -743,9 +810,20 @@ function showSession(s) {
     el('div', { class: 'btn-row', style: 'margin-top:12px' }, [
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close'),
       el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
-      el('button', { class: 'btn danger', onclick: async () => { if (await confirmDialog('Delete this session?', 'Targets already set from it are kept.', 'Delete', true)) { await deleteSession(s.id); toast('Deleted'); renderProgressTab(); } } }, 'Delete')
+      el('button', { class: 'btn danger', id: 'session-delete', onclick: () => { closeModal(); removeSession(s); } }, 'Delete')
     ])
   ]));
+}
+
+/** v1.14: delete a session at once and offer Undo, instead of asking first. Targets already set from it are kept. */
+async function removeSession(s) {
+  await deleteSession(s.id);
+  if (currentTab === 'progress') renderProgressTab();
+  toast(`Deleted ${s.sessionName}, ${fmtDate(s.date)}`, 6000, { action: 'Undo', onAction: async () => {
+    await putSession(s);
+    if (currentTab === 'progress') renderProgressTab();
+    toast('Session restored');
+  } });
 }
 
 // ---- Progress (v1.6) ----
@@ -863,7 +941,7 @@ async function renderSyncSheet(note) {
 // ---- Settings ----
 async function renderSettings() {
   const s = await getSettings();
-  const toggle = (label, path, val) => el('div', { class: 'toggle' }, [el('span', {}, label), el('input', { type: 'checkbox', checked: val, onchange: async e => { const patch = {}; let o = patch; const keys = path.split('.'); keys.forEach((k, i) => { if (i === keys.length - 1) o[k] = e.target.checked; else { o[k] = {}; o = o[k]; } }); await saveSettings(patch); } })]);
+  const toggle = (label, path, val) => el('div', { class: 'toggle' }, [el('span', {}, label), el('input', { type: 'checkbox', checked: val, onchange: async e => { const patch = {}; let o = patch; const keys = path.split('.'); keys.forEach((k, i) => { if (i === keys.length - 1) o[k] = e.target.checked; else { o[k] = {}; o = o[k]; } }); await saveSettings(patch); if (path === 'cues.vibrate') setHaptics(e.target.checked); } })]);
   const numField = (label, key, step) => el('div', { class: 'field' }, [el('label', {}, label), el('input', { type: 'number', step: String(step), value: s[key], inputmode: 'decimal', onchange: async e => { await saveSettings({ [key]: Number(e.target.value) }); toast('Saved'); } })]);
   const fileInput = el('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: async e => {
     const f = e.target.files[0]; if (!f) return;

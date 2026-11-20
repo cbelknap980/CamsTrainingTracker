@@ -3,8 +3,10 @@
 
 import { applyProgression, incrementFor } from './progression.js';
 import { getTargets, setTargets, putSession, putRun, newId, getSettings } from './store.js';
-import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, weekNumber, effortLabel, getData, weightWithPair, isPair } from './data.js';
-import { el, toast, closeModal, showModal, effortChips } from './ui.js';
+import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, fmtDate, weekNumber, effortLabel, getData, weightWithPair, isPair } from './data.js';
+import { el, toast, closeModal, showModal, effortChips, countUp } from './ui.js';
+import { ringsCard } from './rings.js';
+import { sessionNumbers, drawShareCard, shareOrSave } from './share-card.js';
 import { icon } from './icons.js';
 
 /** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
@@ -54,7 +56,7 @@ function buildRecord(draft, plan) {
     week: tl.week, phase: tl.phase, planVersion: tl.planVersion, appVersion: APP_VERSION,
     date: toISODate(draft.startedAt), startedAt: draft.startedAt, endedAt: draft.endedAt,
     plannedSeconds: draft.plannedSeconds, actualSeconds: draft.actualSeconds, pausedSeconds: draft.pausedSeconds,
-    trims: draft.trims || [], status: draft.status,
+    trims: draft.trims || [], status: draft.status, engineMinutes: draft.engineMinutes || 0,
     // same objects as the draft, so edits on the Review screen stick across re-renders
     sets: draft.sets.map(s => Object.assign(s, { logName: plan.exercises[s.exerciseId] ? (plan.exercises[s.exerciseId].logName || plan.exercises[s.exerciseId].name) : s.name })),
     whatChanged: [], e1rms: {}, prs: []
@@ -190,27 +192,36 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
   await paint();
 }
 
-export function renderSummary(container, record, { onDone, onBackup }) {
+export function renderSummary(container, record, { onDone, onBackup, prev, rings, syncOn } = {}) {
   container.innerHTML = '';
-  const done = record.sets.filter(s => s.done && !s.ramp).length;
-  const planned = record.sets.filter(s => !s.ramp).length;
+  const n = sessionNumbers(record, prev);
+  const { done, planned } = n;
   const over = record.actualSeconds - record.plannedSeconds;
-  // polish: a check that pops in, then the numbers as tiles
-  const stats = el('div', { class: 'card' }, [
+  // v1.14: one card worth keeping. The numbers roll up, volume is compared with the same session last time,
+  // records get a badge, the week's rings sit underneath, and Save image makes a picture of it.
+  const num = (value, fmt) => { const b = el('b', {}, ''); countUp(b, value, fmt ? { fmt } : {}); return b; };
+  const tile = (cls, value, unit, label, fmt) => el('div', { class: 'done-stat' + cls }, [el('div', { class: 'ds-num' }, [num(value, fmt), el('small', {}, unit)]), el('span', {}, label)]);
+  const stats = el('div', { class: 'card done-card', id: 'done-card' }, [
     record.status === 'complete' ? el('div', { class: 'done-check' }, [icon('check')]) : null,
     el('h1', {}, record.status === 'complete' ? 'Session done' : 'Session ended early'),
-    el('p', { class: 'muted', style: 'margin:0' }, `${record.sessionName} · week ${record.week}`),
+    el('p', { class: 'muted', style: 'margin:0' }, `${record.sessionName} · ${fmtDate(record.date)} · week ${record.week}`),
     (planned - done > 0) ? el('p', { id: 'owed-note', style: 'margin:10px 0 0' }, `${planned - done} ${planned - done === 1 ? 'set was' : 'sets were'} not done. ${planned - done === 1 ? 'It is' : 'They are'} on this week's catch-up list on Home.`) : null,
     el('div', { class: 'done-stats' }, [
-      el('div', { class: 'done-stat' + (done === planned ? ' good' : '') }, [el('b', {}, [String(done), el('small', {}, `/ ${planned}`)]), el('span', {}, 'sets logged')]),
-      el('div', { class: 'done-stat' }, [el('b', {}, [String(Math.round(record.actualSeconds / 60)), el('small', {}, 'min')]), el('span', {}, `plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)}`)]),
-      record.pausedSeconds > 30 ? el('div', { class: 'done-stat' }, [el('b', {}, [String(Math.round(record.pausedSeconds / 60)), el('small', {}, 'min')]), el('span', {}, 'paused')]) : null
+      tile(done === planned ? ' good' : '', done, `/ ${planned}`, 'sets logged'),
+      tile('', Math.round(record.actualSeconds / 60), 'min', `plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)}`),
+      n.volume ? tile(n.change > 0 ? ' good' : '', n.volume, 'lb', n.change != null ? `${n.change >= 0 ? '+' : '−'}${Math.abs(n.change)}% vs last time` : 'lifted', v => Math.round(v).toLocaleString()) : null,
+      record.pausedSeconds > 30 ? tile('', Math.round(record.pausedSeconds / 60), 'min', 'paused') : null
     ]),
-    record.trims.length ? el('p', { class: 'done-trims' }, [el('b', {}, 'Trimmed: '), record.trims.join('; ')]) : null
+    record.trims.length ? el('p', { class: 'done-trims' }, [el('b', {}, 'Trimmed: '), record.trims.join('; ')]) : null,
+    rings ? ringsCard(rings, { compact: true }) : null
   ]);
-  const prs = (record.prs || []).length ? el('div', { class: 'card pr-card' }, [
-    el('h2', {}, `${record.prs.length === 1 ? 'Personal record' : 'Personal records'}`),
-    el('ul', { class: 'lines' }, record.prs.map(p => el('li', {}, p.kind === 'e1rm' ? `${p.name}: estimated 1RM ${p.value} lb (was ${p.prev})` : `${p.name}: heaviest set ${fmtWeight(p.value)} lb (was ${fmtWeight(p.prev)})`)))
+  const prs = (record.prs || []).length ? el('div', { class: 'card pr-card', id: 'pr-card' }, [
+    el('h2', {}, `${record.prs.length === 1 ? 'Personal record' : `${record.prs.length} personal records`}`),
+    el('div', { class: 'pr-rows' }, record.prs.map(p => el('div', { class: 'pr-row' }, [
+      el('span', { class: 'pr-badge big' }, 'PR'),
+      el('div', { class: 'pr-what' }, [el('b', {}, p.name), el('span', { class: 'muted' }, p.kind === 'e1rm' ? `estimated 1RM, was ${p.prev}` : `heaviest set, was ${fmtWeight(p.prev)}`)]),
+      el('div', { class: 'pr-val' }, [num(p.value, v => fmtWeight(Math.round(v * 2) / 2)), el('small', {}, ' lb')])
+    ])))
   ]) : null;
   const changes = el('div', { class: 'card' }, [
     el('h2', {}, 'What changed for next time'),
@@ -225,11 +236,22 @@ export function renderSummary(container, record, { onDone, onBackup }) {
     el('h2', {}, 'Sets'),
     setsTable(record.sets)
   ]);
+  const saveImage = el('button', { class: 'btn', id: 'save-image', onclick: async () => {
+    saveImage.disabled = true;
+    try {
+      const blob = await drawShareCard(record, { prev, rings });
+      const r = await shareOrSave(blob, `${(record.logName || record.sessionName).replace(/[^\w-]+/g, '-').toLowerCase()}-${record.date}.png`);
+      if (r === 'saved') toast('Image saved to Downloads');
+    } catch (e) { toast('Could not make the image'); }
+    saveImage.disabled = false;
+  } }, [icon('share'), 'Save image']);
+  // with sync on the session is already on its way to the computer copy, so Done leads
   const actions = el('div', { class: 'stack' }, [
-    el('button', { class: 'btn primary', onclick: onBackup }, 'Back up to Drive'),
-    el('button', { class: 'btn', onclick: onDone }, 'Done')
+    el('button', { class: 'btn primary', id: 'summary-done', onclick: onDone }, 'Done'),
+    saveImage,
+    el('button', { class: 'btn ' + (syncOn ? 'ghost' : ''), onclick: onBackup }, 'Back up to Drive')
   ]);
-  container.append(stats, prs || '', changes, bench || '', sets, actions);
+  container.append(stats, prs || '', actions, changes, bench || '', sets);
 }
 
 export function setsTable(sets) {

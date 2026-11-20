@@ -45,7 +45,7 @@
         "Start, Done, edit a set, review,",
         "benchmarks, pause, skip, run form"
       ],
-      "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore. v1.9: coach check-ins on the Plan tab: a note with quick tags (Too heavy, Too light, Rest too long, Need more rest, Pain, Slept badly, Felt good). Weight tags move that lift's next target one step; rest tags move its rest 15 s, at most 45 s either way (settings.restAdjust, applied by the Session Builder)."
+      "description": "Everything Cameron does in the app: start a session, tap Done on a set, edit weight/reps/RPE, pause, skip a step, go back one step, trim to fit, end early, fill the run form, edit a target, back up, export, restore. v1.9: coach check-ins on the Plan tab: a note with quick tags (Too heavy, Too light, Rest too long, Need more rest, Pain, Slept badly, Felt good). Weight tags move that lift's next target one step; rest tags move its rest 15 s, at most 45 s either way (settings.restAdjust, applied by the Session Builder). v1.14: every press gives a short buzz on Android (follows the vibrate setting); long-press the app icon for Today, Runs and Progress shortcuts."
     },
     {
       "id": "garmin",
@@ -100,7 +100,7 @@
         "end-of-session review"
       ],
       "file": "js/logger.js",
-      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. When the session ends it opens the Review screen: every exercise with its sets (tap to correct), the engine's verdict (Up / Hold / Drop / Set) with its reason, and the next weight and reps as editable fields; Save runs the engine on the corrected sets, applies any overrides (tagged 'set by you') and stores the session. Then the summary. The run log form moved to the Runs page in v1.10. v1.5: the Review screen lists skipped sets and sets missing a weight or reps first and keeps Save locked until each is filled in or confirmed as skipped."
+      "description": "Records each set: Done accepts the pre-filled target weight and reps; Edit opens weight, reps and RPE. When the session ends it opens the Review screen: every exercise with its sets (tap to correct), the engine's verdict (Up / Hold / Drop / Set) with its reason, and the next weight and reps as editable fields; Save runs the engine on the corrected sets, applies any overrides (tagged 'set by you') and stores the session. Then the summary. The run log form moved to the Runs page in v1.10. v1.5: the Review screen lists skipped sets and sets missing a weight or reps first and keeps Save locked until each is filled in or confirmed as skipped. v1.14: Session done shows sets, minutes and volume against the same session last time, records with a badge, the week's rings, and Save image (js/share-card.js draws the card on the phone and opens the Android share sheet; nothing is uploaded)."
     },
     {
       "id": "progression",
@@ -151,10 +151,10 @@
       "column": "outputs",
       "name": "Guided session screen",
       "lines": [
-        "step, target, countdown,",
+        "one big number per set,",
         "what's next, ahead/behind"
       ],
-      "description": "What Cameron sees at the gym: the current exercise, set number, target weight and reps, effort target, a countdown or count-up, what comes next, and the session clock. v1.5: Pause in the header, a Set-up done tap before each new block, Equipment taken, finisher exercises in the top bar, and a last-set card kept apart from Up next."
+      "description": "What Cameron sees at the gym: the current exercise, set number, target weight and reps, effort target, a countdown or count-up, what comes next, and the session clock. v1.5: Pause in the header, a Set-up done tap before each new block, Equipment taken, finisher exercises in the top bar, and a last-set card kept apart from Up next. v1.14: on a work set the weight is the one big number with reps and effort on a line under it; cues fold away after an exercise's first set; the buttons stay at the bottom of the screen; Undo on the last-set card and after Skip or Equipment taken; Android Back opens the workout menu; the phone's status bar takes the phase color."
     },
     {
       "id": "history",
@@ -164,7 +164,7 @@
         "sessions, exercises over time, PRs,",
         "benchmarks and next targets"
       ],
-      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it. v1.9: the Log tab moved inside Progress as Sessions and Exercises next to Overview."
+      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it. v1.9: the Log tab moved inside Progress as Sessions and Exercises next to Overview. v1.14: swipe a session left to delete it, with Undo."
     },
     {
       "id": "progress",
@@ -175,7 +175,7 @@
         "PRs, sets per week (big screen)"
       ],
       "file": "js/progress.js",
-      "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser. v1.9: with one session a lift card shows the best set and the next target instead of a lone dot; clicking a card opens every set of that lift; a card for work sets per muscle group this week against what the plan holds and a 10-set mark (data/muscles.json); sync status moved to the header."
+      "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser. v1.9: with one session a lift card shows the best set and the next target instead of a lone dot; clicking a card opens every set of that lift; a card for work sets per muscle group this week against what the plan holds and a 10-set mark (data/muscles.json); sync status moved to the header. v1.14: explanations sit behind (i) buttons; Home has three week rings (js/rings.js: lifts, runs, hard efforts; rules.json weekRings)."
     },
     {
       "id": "runs",

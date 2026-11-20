@@ -3,7 +3,7 @@
 // The helpers at the top are pure (tested in node); the rendering is below them.
 
 import { epley } from './progression.js';
-import { el } from './ui.js';
+import { el, infoBtn } from './ui.js';
 import { fmtWeight, fmtDate, weekNumber, phaseForWeek, parseISODate } from './data.js';
 import { owedSetsFor } from './catchup.js';
 
@@ -284,7 +284,7 @@ function strengthCard(s, target, onOpen) {
     el('div', { class: 'row' }, [el('b', {}, s.name), el('span', { class: 'e1rm-now' }, [`${s.last}`, el('small', {}, ' lb')])]),
     el('div', { class: 'muted change' + (!one && !flat ? (up ? ' up' : ' down') : '') }, [!one && !flat ? el('span', { class: 'arrow' }, up ? '↑ ' : '↓ ') : null, change]),
     one ? baseline : lineChart(s.points, `${s.name} estimated 1RM`),
-    el('div', { class: 'muted card-foot' }, one ? 'The trend line starts with the second session. Click or tap for every set.' : 'Click or tap for every set.')
+    one ? el('div', { class: 'muted card-foot' }, 'The trend line starts with the second session.') : null
   ]);
   if (onOpen) {
     card.addEventListener('click', e => { if (!e.target.closest('.viz-hit')) onOpen(s.id); });
@@ -300,7 +300,7 @@ function muscleCard(rows, week, muscles) {
   const pct = v => `${(100 * v / max).toFixed(1)}%`;
   const fmt = v => (Math.round(v * 2) / 2).toString();
   return el('div', { class: 'card', id: 'muscle-sets' }, [
-    el('h3', {}, `Sets per muscle group, week ${week}`),
+    el('h3', {}, [`Sets per muscle group, week ${week}`, infoBtn('Sets per muscle group', [`Main muscle counts a set, a helper half (rows help biceps, presses help triceps). The line is ${mark} sets a week, a common mark for size (Schoenfeld 2017).`])]),
     el('div', { class: 'muscle-list' }, rows.map(r => el('div', { class: 'muscle-row' + (r.arms ? ' arms' : ''), 'data-group': r.id, title: `${r.name}: ${fmt(r.done)} done this week, ${fmt(r.planned)} in the plan, ${fmt(r.lastWeek)} last week` }, [
       el('span', { class: 'muscle-name' }, r.name),
       el('span', { class: 'muscle-track' }, [
@@ -314,8 +314,7 @@ function muscleCard(rows, week, muscles) {
       el('span', {}, [el('span', { class: 'sw done' }), 'done this week']),
       el('span', {}, [el('span', { class: 'sw plan' }), 'in the plan each week']),
       el('span', {}, [el('span', { class: 'sw mark' }), `${mark} sets`])
-    ]),
-    el('div', { class: 'muted card-foot', title: muscles.weeklyTarget.source }, `Main muscle counts a set, a helper half (rows help biceps, presses help triceps). The line is ${mark} sets a week, a common mark for size (Schoenfeld 2017).`)
+    ])
   ]);
 }
 
@@ -350,8 +349,8 @@ export function renderProgress(view, data, opts = {}) {
 
   const series = strengthSeries(sessions, plan, settings);
   if (series.length) {
-    view.appendChild(el('h2', { class: 'section-title' }, 'Strength: estimated 1RM'));
-    view.appendChild(el('p', { class: 'muted section-note' }, `Your likely one-rep max, worked out from each session's best set (weight × (1 + reps ÷ 30)).${series.some(s => s.addsBodyweight) ? ' Weighted pull-up counts bodyweight plus the added weight.' : ''}`));
+    // v1.14: the how-it's-worked-out note sits behind an (i), so the numbers lead
+    view.appendChild(el('h2', { class: 'section-title' }, ['Strength: estimated 1RM', infoBtn('Estimated 1RM', [`Your likely one-rep max, worked out from each session's best set (weight × (1 + reps ÷ 30)).${series.some(s => s.addsBodyweight) ? ' Weighted pull-up counts bodyweight plus the added weight.' : ''}`, 'Tap a lift for every set behind it.'])]));
     view.appendChild(el('div', { class: 'strength-grid', id: 'strength-grid' }, series.map(x => strengthCard(x, (data.targets || {})[x.id], opts.onExercise))));
   }
 
@@ -360,9 +359,8 @@ export function renderProgress(view, data, opts = {}) {
   const lower = el('div', { class: 'progress-lower' });
   if (data.muscles) lower.appendChild(muscleCard(muscleSets(sessions, plan, data.muscles, Math.max(1, Math.min(WEEKS, a.current))), Math.max(1, Math.min(WEEKS, a.current)), data.muscles));
   lower.appendChild(el('div', { class: 'card', id: 'weekly-sets' }, [
-    el('h3', {}, 'Work sets per week'),
-    weekBars(weeklySets(sessions), a.current),
-    el('div', { class: 'muted', style: 'font-size:var(--t-small)' }, 'Sets you finished, not counting ramp-ups. Week number along the bottom.')
+    el('h3', {}, ['Work sets per week', infoBtn('Work sets per week', 'Sets you finished, not counting ramp-ups. Week number along the bottom.')]),
+    weekBars(weeklySets(sessions), a.current)
   ]));
   lower.appendChild(el('div', { class: 'card', id: 'pr-list' }, [
     el('h3', {}, 'Personal records'),
@@ -375,8 +373,7 @@ export function renderProgress(view, data, opts = {}) {
   if (acc.length) {
     const cell = t => (t.holdSeconds ? `${t.reps} s` : `${t.weight != null ? fmtWeight(t.weight) + ' × ' : ''}${t.reps}`);
     lower.appendChild(el('div', { class: 'card', id: 'accessories' }, [
-      el('h3', {}, 'Accessories: first session to latest'),
-      el('div', { class: 'muted', style: 'font-size:var(--t-small);margin-bottom:4px' }, 'Top set each time, as lb × reps. Two-dumbbell lifts show the total.'),
+      el('h3', {}, ['Accessories: first session to latest', infoBtn('Accessories', 'Top set each time, as lb × reps. Two-dumbbell lifts show the total.')]),
       el('table', { class: 'acc-table' }, [
         el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'First'), el('th', { class: 'num' }, 'Latest')]),
         ...acc.map(r => el('tr', {}, [el('td', {}, r.name), el('td', { class: 'num muted' }, cell(r.first)), el('td', { class: 'num' }, r.sessions > 1 ? cell(r.last) : '–')]))
