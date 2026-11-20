@@ -107,13 +107,16 @@ async function updateSyncChip() {
   const cfg = await getSync();
   if (!cfg || !cfg.repo) { chip.hidden = true; return; }
   chip.hidden = false;
-  let text, bad = !!cfg.lastError;
-  if (cfg.role === 'viewer') text = bad ? 'Could not reach the phone copy' : (cfg.lastPulledExport ? `From phone · ${dayClock(cfg.lastPulledExport)}` : 'Nothing from the phone yet');
-  else text = bad || cfg.dirty ? 'Upload waiting' : (cfg.lastPushedAt ? `Synced · ${dayClock(cfg.lastPushedAt)}` : 'Sync on');
-  chip.className = 'sync-chip' + (bad ? ' bad' : '');
+  // v1.15: the word and the time are separate, so a narrow phone can show just the time (the chip used to squeeze
+  // the week pill onto three lines)
+  let word, when = null, bad = !!cfg.lastError;
+  if (cfg.role === 'viewer') { word = bad ? 'Could not reach the phone copy' : (cfg.lastPulledExport ? 'From phone' : 'Nothing from the phone yet'); if (!bad && cfg.lastPulledExport) when = dayClock(cfg.lastPulledExport); }
+  else { word = bad || cfg.dirty ? 'Upload waiting' : (cfg.lastPushedAt ? 'Synced' : 'Sync on'); if (!bad && !cfg.dirty && cfg.lastPushedAt) when = dayClock(cfg.lastPushedAt); }
+  chip.className = 'sync-chip' + (bad ? ' bad' : '') + (when ? ' has-time' : '');
   chip.title = (cfg.lastError || '') + (cfg.role === 'viewer' ? ' Click to load the newest copy from the phone.' : ' Tap to upload now.');
+  chip.setAttribute('aria-label', when ? `${word} at ${when}` : word);
   chip.innerHTML = '';
-  chip.append(el('span', { id: 'sync-chip-text' }, text), icon('refresh'));
+  chip.append(el('span', { id: 'sync-chip-text' }, [el('span', { class: 'sc-word' }, word), when ? el('span', { class: 'sc-time' }, [el('span', { class: 'sc-dot' }, ' · '), when]) : null]), icon('refresh'));
 }
 async function onSyncChip() {
   const chip = document.getElementById('sync-chip');
@@ -206,41 +209,48 @@ async function pairPrompt(then) {
   if (!found.length) { await setPairTotals('none'); return false; }
   view.innerHTML = '';
   window.scrollTo(0, 0);
-  // v1.7.1: one answer per lift, because the saved numbers can be a mix of one-dumbbell weights and totals
+  // v1.7.1: one answer per lift, because the saved numbers can be a mix of one-dumbbell weights and totals.
+  // v1.15: the choices name the dumbbells (Two 35s / Two 70s), the tab bar hides until it is answered (leaving by a
+  // tab brought it back on every open), Save stays in view, and "Leave them as they are" answers it in one tap.
+  document.body.classList.add('asking');
   const picks = {};
-  const save = async () => {
-    const toDouble = found.filter(f => picks[f.id] === 'one').map(f => f.id);
+  const finish = async toDouble => {
     if (toDouble.length) await doublePairWeights(toDouble);
     await setPairTotals(toDouble.length === found.length ? 'doubled' : (toDouble.length ? 'mixed' : 'kept'));
+    document.body.classList.remove('asking');
     toast(toDouble.length ? `Doubled ${toDouble.length} of ${found.length}. Dumbbell weights are totals now.` : 'Left as they were.');
     then();
   };
+  const save = () => finish(found.filter(f => picks[f.id] === 'one').map(f => f.id));
   const saveBtn = el('button', { class: 'btn primary', id: 'pair-save', disabled: true, onclick: save }, 'Save');
+  const left = el('span', { class: 'pair-left' }, `${found.length} to answer`);
   const rows = found.map(f => {
     const w = f.weight;
-    const result = el('div', { class: 'pair-result muted' }, 'Pick one');
+    const result = el('div', { class: 'pair-result muted' }, 'Pick the pair you held');
     const seg = el('div', { class: 'segmented' });
     const draw = () => {
       seg.innerHTML = '';
-      [['one', 'One dumbbell'], ['total', 'Both together']].forEach(([k, label]) => seg.appendChild(el('button', { type: 'button', class: picks[f.id] === k ? 'on' : '', 'data-pick': k, onclick: () => {
+      [['total', `Two ${fmtWeight(w / 2)}s`], ['one', `Two ${fmtWeight(w)}s`]].forEach(([k, label]) => seg.appendChild(el('button', { type: 'button', class: picks[f.id] === k ? 'on' : '', 'data-pick': k, onclick: () => {
         picks[f.id] = k; draw();
         result.textContent = k === 'one' ? `Becomes ${fmtWeight(w * 2)} lb total (2 × ${fmtWeight(w)})` : `Stays ${fmtWeight(w)} lb total (2 × ${fmtWeight(w / 2)})`;
         result.classList.remove('muted');
-        saveBtn.disabled = !found.every(x => picks[x.id]);
+        const n = found.filter(x => !picks[x.id]).length;
+        saveBtn.disabled = n > 0;
+        left.textContent = n ? `${n} to answer` : 'All answered';
       } }, label)));
     };
     draw();
     return el('div', { class: 'pair-row', 'data-ex': f.id }, [
-      el('div', { class: 'row' }, [el('b', {}, D.plan.exercises[f.id].name), el('span', { class: 'pair-saved' }, `${fmtWeight(w)} lb`)]),
+      el('div', { class: 'row' }, [el('b', {}, D.plan.exercises[f.id].name), el('span', { class: 'pair-saved muted' }, `saved as ${fmtWeight(w)} lb`)]),
       seg, result
     ]);
   });
   view.appendChild(el('div', { class: 'card accent', id: 'pair-prompt' }, [
-    el('h1', {}, 'Dumbbell weights are now totals'),
-    el('p', {}, 'Lifts that use two dumbbells now show the total of both, so two 40s read as 80 lb (2 × 40).'),
-    el('p', { class: 'muted' }, 'For each saved number below, was it the weight of one dumbbell, or both together?'),
+    el('h1', {}, 'Which dumbbells did you use?'),
+    el('p', {}, 'Lifts with two dumbbells now save the total of both. Pick the pair you held for each one so your targets come out right. You only answer this once.'),
     ...rows,
-    saveBtn
+    el('div', { class: 'pair-bar' }, [left, saveBtn]),
+    el('button', { class: 'btn ghost', id: 'pair-keep', onclick: () => finish([]) }, 'Not sure, leave them as they are')
   ]));
   return true;
 }
@@ -422,25 +432,10 @@ async function renderHome() {
   ]);
   view.appendChild(other);
 
-  // next targets
-  const rows = Object.entries(D.plan.exercises).filter(([id]) => targets[id] && targets[id].weight != null).map(([id, ex]) => {
-    const t = targets[id];
-    // polish: two columns; the badge and e1RM sit under the name so long names do not wrap into a column
-    return el('tr', { class: 'tappable', onclick: () => editTarget(id, ex, t) }, [
-      el('td', {}, [el('div', { class: 'tgt-name' }, ex.name), (t.e1rm || t.source === 'you' || t.source === 'coach') ? el('div', { class: 'tgt-sub' }, [
-        t.e1rm ? `e1RM ${t.e1rm}` : null,
-        t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : null)
-      ]) : null]),
-      el('td', { class: 'num tgt-val' }, `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}`)
-    ]);
-  });
-  view.appendChild(el('div', { class: 'card', id: 'next-targets' }, [
-    el('h3', {}, 'Next targets'),
-    rows.length ? el('table', { class: 'tgt-table' }, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Weight × reps')]), ...rows]) : el('p', { class: 'muted' }, 'No targets yet. Week 1 sessions work up to a baseline set on each main lift; accessories take the weight you log the first time.'),
-    el('p', { class: 'muted', style: 'margin-top:8px' }, 'Tap a row to change a target by hand.')
-  ]));
-
-  view.appendChild(benchmarksCard(targets, settings));
+  // v1.15: one Main lifts card in place of Next targets (every exercise) and Benchmarks. Home shows only the lifts the
+  // 12 weeks are measured by: the barbell lifts and the weighted pull-up (Cameron, Nov 20: machine weights differ from
+  // machine to machine). Every lift's target shows on the start page of its workout instead.
+  view.appendChild(mainLiftsCard(targets, settings));
 
   const last = allSessions[0];
   if (last && last.whatChanged && last.whatChanged.length) {
@@ -469,25 +464,21 @@ function repRangeFor(exerciseId) {
   return null;
 }
 
-function benchmarksCard(targets, settings) {
-  const ids = Object.entries(D.plan.exercises).filter(([, ex]) => ex.benchmark).map(([id]) => id);
-  const rows = ids.map(id => {
-    const ex = D.plan.exercises[id];
+function mainLiftsCard(targets, settings) {
+  const rows = Object.entries(D.plan.exercises).filter(([, ex]) => ex.benchmark).map(([id, ex]) => {
     const t = targets[id] || {};
-    const bench = t.benchmarkWeight != null ? `${fmtWeight(t.benchmarkWeight)}` : '–';
-    const now = t.e1rm != null ? `${t.e1rm}` : (t.bestE1rm != null ? `${t.bestE1rm}` : '–');
-    const next = t.weight != null ? `${fmtWeight(t.weight)} × ${t.reps != null ? t.reps : '-'}` : '–';
-    return el('tr', { class: 'tappable', onclick: () => editBenchmark(id, ex, t, settings) }, [
-      el('td', {}, [ex.name, ' ', t.source === 'benchmark' ? el('span', { class: 'badge you' }, 'bench') : null]),
-      el('td', { class: 'num' }, bench),
-      el('td', { class: 'num' }, now),
-      el('td', { class: 'num' }, next)
+    const e1 = t.e1rm != null ? t.e1rm : t.bestE1rm;
+    const badge = t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : (t.source === 'benchmark' ? el('span', { class: 'badge you' }, 'bench') : null));
+    const has = t.weight != null;
+    return el('tr', { class: 'tappable', 'data-ex': id, onclick: () => (has ? editTarget(id, ex, t, settings) : editBenchmark(id, ex, t, settings)) }, [
+      el('td', {}, [el('div', { class: 'tgt-name' }, ex.name), (e1 != null || badge) ? el('div', { class: 'tgt-sub' }, [e1 != null ? `e1RM ${e1}` : null, badge]) : null]),
+      el('td', { class: 'num tgt-val' + (has ? '' : ' tgt-none') }, has ? `${weightWithPair(ex, t.weight)} × ${t.reps != null ? t.reps : '-'}` : 'Not set yet')
     ]);
   });
-  return el('div', { class: 'card' }, [
-    el('h3', {}, 'Benchmarks'),
-    el('table', {}, [el('tr', {}, [el('th', {}, 'Lift'), el('th', { class: 'num' }, '5 w/ 2 left'), el('th', { class: 'num' }, 'e1RM'), el('th', { class: 'num' }, 'Next')]), ...rows]),
-    el('p', { class: 'muted', style: 'margin-top:8px' }, 'Tap a lift to enter a benchmark: the weight you can do for 5 with 2 reps left. Targets update from it right away (90% in weeks 1–2) and keep moving with your sessions. Pull-up: added weight.')
+  return el('div', { class: 'card', id: 'next-targets' }, [
+    el('h3', {}, ['Main lifts', infoBtn('Main lifts', 'Next time is the weight and reps the app will ask for the next time you do the lift. It comes from your last session: hit the top of the rep range on every set at Solid or easier and the weight goes up, otherwise it holds. e1RM is your estimated one-rep max from your best set. Tap a lift to change its target by hand, or to enter a benchmark (the weight you can do for 5 with 2 left). Pull-up weights are the weight you add.')]),
+    el('table', { class: 'tgt-table' }, [el('tr', {}, [el('th', {}, 'Lift'), el('th', { class: 'num' }, 'Next time')]), ...rows]),
+    el('p', { class: 'muted', style: 'margin-top:8px' }, 'Other lifts show their targets on the start page of that day\'s workout.')
   ]);
 }
 
@@ -521,12 +512,13 @@ function editBenchmark(id, ex, t, settings) {
   ]));
 }
 
-function editTarget(id, ex, t) {
+function editTarget(id, ex, t, settings) {
   const w = el('input', { type: 'number', step: '2.5', value: t.weight, inputmode: 'decimal' });
   const r = el('input', { type: 'number', step: '1', value: t.reps == null ? '' : t.reps, inputmode: 'numeric' });
   showModal(el('div', {}, [
     el('h2', {}, ex.name),
     el('div', { class: 'grid2' }, [el('div', { class: 'field' }, [el('label', {}, 'Target weight (lb)'), w]), el('div', { class: 'field' }, [el('label', {}, 'Target reps'), r])]),
+    ex.benchmark && settings ? el('button', { class: 'link-btn', id: 'use-benchmark', onclick: () => { closeModal(); editBenchmark(id, ex, t, settings); } }, 'Enter a benchmark instead') : null,
     el('div', { class: 'btn-row' }, [
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
       el('button', { class: 'btn primary', onclick: async () => {
@@ -542,6 +534,7 @@ function editTarget(id, ex, t) {
 async function previewSession(sessionRef, week) {
   const settings = await getSettings();
   const targets = await getTargets();
+  const lastTime = lastResults(await getSessions());
   // v1.8: a session id from the plan, or a session object (the catch-up session is built on the fly)
   const session = typeof sessionRef === 'string' ? sessionById(D.plan, sessionRef) : sessionRef;
   const phase = phaseForWeek(D.plan, week);
@@ -578,6 +571,8 @@ async function previewSession(sessionRef, week) {
       session.goal ? el('p', { class: 'hero-lead' }, session.goal) : null,
       phase.note ? el('p', { class: 'hero-note', style: 'margin:0' }, phase.note) : null
     ]));
+
+    view.appendChild(targetsToday(tl, weights, estimated, lastTime));
 
     const blocks = [];
     for (const st of tl.steps) {
@@ -636,6 +631,48 @@ async function previewSession(sessionRef, week) {
   // v1.14: the Start card grows into this page (a view transition); Back on the phone returns Home
   onBack('page', () => transition(() => showTab('home'), 'back'));
   await transition(() => { window.scrollTo(0, 0); paint(); }, 'fwd');
+}
+
+/**
+ * v1.15: the day's targets at a glance, at the top of the start page: one line per weighted lift in the order they
+ * come, today's weight x the target reps, and what was done last time. (Home now lists only the main lifts.)
+ */
+function targetsToday(tl, weights, estimated, lastTime) {
+  const seen = new Set();
+  const rows = [];
+  for (const st of tl.steps) {
+    if (st.kind !== 'set' || st.ramp || !st.exerciseId || seen.has(st.exerciseId)) continue;
+    if (['warmup', 'stretch'].includes(st.blockType)) continue;
+    const ex = D.plan.exercises[st.exerciseId];
+    if (!ex || ex.equipment === 'bodyweight' || st.holdSeconds) continue;
+    seen.add(st.exerciseId);
+    const id = st.exerciseId;
+    const work = tl.steps.find(x => x.kind === 'set' && x.exerciseId === id && !x.ramp && !x.baseline) || st;
+    const reps = work.target && work.target.reps != null ? work.target.reps : (work.repRange ? work.repRange[0] : null);
+    const w = weights[id];
+    const last = lastTime[id];
+    const lastSets = last ? (last.sets.length ? last.sets : (last.topSet ? [last.topSet] : [])) : [];
+    const sameReps = lastSets.length > 1 && lastSets.every(x => x.reps === lastSets[0].reps);
+    const lastText = lastSets.length && lastSets[0].weight != null
+      ? `last ${fmtWeight(Math.max(...lastSets.map(x => x.weight || 0)))} × ${sameReps ? `${lastSets[0].reps} (${lastSets.length} sets)` : lastSets.map(x => x.reps).join(', ')}` : null;
+    let value, sub;
+    if (w == null && st.baseline) { value = 'Work up'; sub = 'baseline set today'; }
+    else if (w == null) { value = 'Your pick'; sub = lastText || 'first time, log what you use'; }
+    else {
+      // kept short so the name keeps its room: a dumbbell pair says "two 35s" on the line under the name
+      value = `${fmtWeight(w)} lb${reps != null ? ` × ${reps}${st.perSide ? '/side' : ''}` : ''}`;
+      sub = [isPair(ex) ? `two ${fmtWeight(w / 2)}s` : null, estimated[id] ? 'estimate, change it below' : (lastText || 'first time')].filter(Boolean).join(' · ');
+    }
+    rows.push(el('tr', { 'data-ex': id }, [
+      el('td', {}, [el('div', { class: 'tgt-name' }, ex.name), el('div', { class: 'tgt-sub' }, sub)]),
+      el('td', { class: 'num tgt-val' + (w == null ? ' tgt-none' : '') }, value)
+    ]));
+  }
+  if (!rows.length) return el('span');
+  return el('div', { class: 'card', id: 'targets-today' }, [
+    el('h3', {}, ['Targets today', infoBtn('Targets today', 'The weight and reps the app will ask for on each lift today, worked out from what you logged last time. Change any weight in the list below before you start; it saves as your new target.')]),
+    el('table', { class: 'tgt-table compact' }, rows)
+  ]);
 }
 
 // ---- Session flow ----

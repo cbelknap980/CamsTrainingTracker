@@ -219,7 +219,7 @@ check('spoken duration', spokenDuration(165) === '2 minutes 45 seconds' && spoke
 {
   const set = (exerciseId, weight, reps, extra = {}) => ({ exerciseId, weight, reps, done: true, ...extra });
   const sess = [
-    { id: 'b', sessionId: 'lift1', week: 2, date: '2026-11-24', startedAt: '2026-11-24T06:00:00', status: 'complete', sets: [set('back_squat', 135, 5, { ramp: true }), set('back_squat', 190, 5), set('back_squat', 190, 4), set('leg_curl', 80, 12), set('back_squat', 250, 1, { skipped: true })], prs: [{ exerciseId: 'back_squat', name: 'Box squat', kind: 'e1rm', value: 222, prev: 216 }] },
+    { id: 'b', sessionId: 'lift1', week: 2, date: '2026-11-24', startedAt: '2026-11-24T06:00:00', status: 'complete', sets: [set('back_squat', 135, 5, { ramp: true }), set('back_squat', 190, 5), set('back_squat', 190, 4), set('leg_curl', 80, 12), set('back_squat', 250, 1, { skipped: true })], prs: [{ exerciseId: 'back_squat', name: 'Back squat', kind: 'e1rm', value: 222, prev: 216 }] },
     { id: 'a', sessionId: 'lift1', week: 1, date: '2026-11-17', startedAt: '2026-11-17T06:00:00', status: 'complete', sets: [set('back_squat', 185, 5), set('back_squat', 185, 5), set('leg_curl', 70, 12), set('leg_curl', 70, 10)], prs: [] },
     { id: 'c', sessionId: 'lift2', week: 1, date: '2026-11-18', startedAt: '2026-11-18T06:00:00', status: 'ended_early', sets: [set('weighted_pullup', 25, 5), set('curl', 50, 10), set('strict_press', null, null, { blockId: 'A', done: false, skipped: true })], prs: [] }
   ];
@@ -354,6 +354,18 @@ console.log('v1.9 muscle groups and coach check-ins');
   const a2 = adherence([lift1, made, { ...made, id: 'c2', sets: [S('oh_tri_ext', 'lift1:finisher')] }], plan, { ...settings, startDate: '2026-11-16' }, thu);
   const a1 = adherence([lift1, made], plan, { ...settings, startDate: '2026-11-16' }, thu);
   check('v1.8 Progress: ended early stays partial until everything is made up, then counts as done', a1.rows[0].cells[2].status === 'partial' && a2.rows[0].cells[2].status === 'done', [a1.rows[0].cells[2], a2.rows[0].cells[2]]);
+  // v1.15: Cameron's week-1 Upper day ended early in a block the plan later dropped (the old Wednesday "last" block),
+  // so nothing is owed for it; it was still ended early, not done
+  const oldBlock = { id: 'u1', sessionId: 'lift2', week: 1, date: '2026-11-18', status: 'ended_early', sets: [
+    S('strict_press', 'A', { weight: 95, reps: 5 }), S('t2b', 'last', { reps: 8 }), S('t2b', 'last', skip), S('face_pull', 'last', skip)] };
+  const a3 = adherence([oldBlock], plan, { ...settings, startDate: '2026-11-16' }, thu);
+  check('v1.15 Progress: ended early in a block no longer in the plan still shows as ended early', owedSetsFor(plan, [oldBlock], 'lift2', 1) === 0 && a3.rows[1].cells[0].status === 'partial', a3.rows[1].cells[0]);
+  const mon = { id: 'm1', sessionId: 'lift1', week: 1, date: '2026-11-16', status: 'ended_early', sets: [S('back_squat', 'A', skip), S('back_squat', 'A', skip), S('rdl', 'B', skip)] };
+  const tue = { id: 'm2', sessionId: 'lift1', week: 1, date: '2026-11-17', status: 'complete', sets: [S('back_squat', 'A'), S('back_squat', 'A'), S('rdl', 'B')] };
+  const twice = weekOwed({ plan, sessions: [mon, tue], week: 1, today: thu });
+  check('v1.15 catch-up: a lift ended early and then done in full the next day owes nothing', !twice.lifts.some(l => l.id === 'lift1') && owedSetsFor(plan, [mon, tue], 'lift1', 1) === 0, twice.lifts);
+  const halfTue = { ...tue, id: 'm3', status: 'ended_early', sets: [S('back_squat', 'A'), S('back_squat', 'A', skip), S('rdl', 'B', skip)] };
+  check('v1.15 catch-up: two partial attempts owe what the better one left', owedSetsFor(plan, [mon, halfTue], 'lift1', 1) === 2, weekOwed({ plan, sessions: [mon, halfTue], week: 1, today: thu }).lifts);
 }
 
 // ---- v1.10: runs and Garmin ----
