@@ -383,3 +383,33 @@ tr.flagged .tgt-sub { color: var(--accent); }
 .fix-sheet .fix-row input { text-align: center; font-weight: 700; }
 .fix-sheet .fix-why { font-size: var(--t-small); margin-top: 2px; }
 .fix-sheet .btn-row { margin-top: 14px; }
+
+/* ---- v1.17 compact: smaller type and tighter spacing on every screen except the workout ----
+   Cameron asked to see more without scrolling. Outside a session the root size drops from 16 to 14.5 px,
+   so everything sized in rem shrinks about 9%; spacing in px is tightened by hand below. Tap targets stay
+   at 44 px or more. The workout (body.in-session, including its sheets) keeps the full size. */
+html { font-size: 14.5px; }
+html:has(body.in-session) { font-size: 16px; }
+body:not(.in-session) { --tap: 48px; --radius: 16px; line-height: 1.38; }
+body:not(.in-session) #topbar { padding-top: calc(8px + env(safe-area-inset-top)); padding-bottom: 6px; }
+body:not(.in-session) .brand::before { width: 28px; height: 28px; border-radius: 8px; }
+body:not(.in-session) .icon-btn { width: 40px; height: 40px; }
+body:not(.in-session) #view { padding-top: 4px; }
+body:not(.in-session) h1 { font-size: 1.6rem; margin-bottom: 6px; }
+body:not(.in-session) .card.accent h1 { font-size: 1.75rem; margin: 0 0 8px; }
+body:not(.in-session) h3 { margin-bottom: 8px; }
+body:not(.in-session) p { margin-bottom: 8px; }
+body:not(.in-session) .card { padding: 14px; margin-bottom: 10px; }
+body:not(.in-session) td { padding: 8px 6px; }
+body:not(.in-session) .btn.primary { min-height: 54px; font-size: 1.1rem; }
+body:not(.in-session) .toggle { padding: 9px 0; }
+body:not(.in-session) .hero-facts { margin-bottom: 10px; }
+body:not(.in-session) .hero-blocks { margin-bottom: 12px; }
+body:not(.in-session) .hero-note { margin-bottom: 12px; }
+body:not(.in-session) .pre-block { padding: 10px 0; }
+body:not(.in-session) .pre-ex { padding-top: 6px; padding-bottom: 6px; }
+body:not(.in-session) .section-title { margin-top: 16px; }
+body:not(.in-session) .strength-grid { gap: 10px; }
+#tabs .tab { font-size: 11.5px; }
+#tabs { padding-top: 6px; }
+body.computer #tabs .tab { font-size: 0.95rem; }
