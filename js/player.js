@@ -10,7 +10,8 @@ import { trimToFit, remainingSeconds } from './builder.js';
 import { setInProgress, clearInProgress } from './store.js';
 import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText } from './data.js';
 import { incrementFor, checkPR } from './progression.js';
-import { el, showModal, closeModal, toast, hideToast, effortChips, onBack, dropBack, countUp } from './ui.js';
+import { el, showModal, closeModal, toast, hideToast, effortChips, onBack, dropBack, countUp, haptic } from './ui.js';
+import { numberFlag } from './sanity.js';
 import { icon } from './icons.js';
 
 const RING_R = 92;
@@ -430,7 +431,7 @@ export class Player {
   }
   logSet({ auto } = {}) {
     const s = this.step;
-    // v1.17: when the edit panel is on screen (it opens by itself on a set with no weight), a set that ends on its
+    // v1.15.1: when the edit panel is on screen (it opens by itself on a set with no weight), a set that ends on its
     // timer keeps what was typed there instead of logging the target (the typed weight used to be lost)
     const panel = this.container.querySelector('#edit-panel');
     const typed = auto && panel && !panel.hidden ? this.readInputs() : null;
@@ -440,10 +441,26 @@ export class Player {
     const needsWeight = ex && ex.equipment !== 'bodyweight' && !s.holdSeconds;
     if (needsWeight && v.weight == null && !auto && !this.isAutoSet(s)) { toast('Enter the weight you used'); this.openEdit(); return; }
     if (v.reps == null && !auto && !s.holdSeconds) { toast('Enter reps'); this.openEdit(); return; }
+    // v1.16: a number that looks wrong waits for a second Done (Cameron: flag it, don't let a typo move the plan).
+    // Sets that log themselves are checked on the review screen instead.
+    let numberOk = false;
+    if (!auto) {
+      const f = numberFlag({ ramp: s.ramp, holdSeconds: s.holdSeconds, target: s.target, repRange: s.repRange, weight: v.weight, reps: v.reps, done: true }, ex, this.rules);
+      const key = `${this.s.idx}:${v.weight}:${v.reps}`;
+      if (f && this.flag && this.flag.key === key) numberOk = true;
+      else if (f) {
+        this.flag = { key, idx: this.s.idx, text: f.text, weight: v.weight, reps: v.reps };
+        haptic('warn');
+        this.editOpen = true; this.s.manual = true; this.renderStep();
+        return;
+      }
+    }
+    this.flag = null;
     // v1.14: what Undo needs to put back (PR list, the in-session best, weights carried to later sets)
     s.undo = { prs: this.s.prs.length, target: this.targets[s.exerciseId] ? { ...this.targets[s.exerciseId] } : null, carried: this.steps.map((o, i) => [i, o.target ? { ...o.target } : o.target]).filter(([i]) => i > this.s.idx && this.steps[i].exerciseId === s.exerciseId) };
     s.done = true; s.skipped = false; s.actualSeconds = Math.round(this.elapsedInStep());
     s.record = { ...this.baseRecord(s), weight: v.weight, reps: v.reps, rpe: v.rpe, done: true, skipped: false, at: new Date().toISOString() };
+    if (numberOk) s.record.numberOk = true;
 
     // live PR check (work sets only; baseline/retest top sets count too, ramp-ups do not)
     if (!s.ramp && !s.holdSeconds && ex && v.weight != null && v.reps) {
@@ -586,7 +603,7 @@ export class Player {
       ])
     ]));
   }
-  /** endAtMs: v1.17, when the session really stopped (Save what I did and stop, after the app was closed). */
+  /** endAtMs: v1.15.1, when the session really stopped (Save what I did and stop, after the app was closed). */
   finish(status, endAtMs) {
     this.s.status = status;
     this.steps.forEach((s, i) => { if (i >= this.s.idx && !s.done && !s.skipped) { s.skipped = true; if (s.kind === 'set') s.record = { ...this.baseRecord(s), done: false, skipped: true }; } });
@@ -761,7 +778,7 @@ export class Player {
       el('div', { class: 'jd-name' }, `${p.name}${where ? ', ' + where : ''}`),
       el('div', { class: 'jd-steps' + (hasWeight ? '' : ' one') }, [
         hasWeight ? stepper('w', isPair(ex) ? 'Total lb' : (ex && ex.equipment === 'weighted_bw' ? 'Added lb' : 'Weight lb'), rec.weight != null ? fmtWeight(rec.weight) : '?', pairText(ex, rec.weight),
-          // v1.17: with no weight yet, - and + open the type-in sheet (one tap on + used to log 5 lb)
+          // v1.15.1: with no weight yet, - and + open the type-in sheet (one tap on + used to log 5 lb)
           () => (w == null ? this.openFix(idx) : change({ weight: Math.max(0, w - wStep) })), () => (w == null ? this.openFix(idx) : change({ weight: w + wStep }))) : null,
         stepper('r', p.holdSeconds ? 'Seconds' : (p.perSide ? 'Reps / side' : 'Reps'), rec.reps != null ? `${rec.reps}` : '?', '',
           () => change({ reps: Math.max(0, (rec.reps || 0) - 1) }), () => change({ reps: (rec.reps || 0) + 1 }))
@@ -1011,12 +1028,15 @@ export class Player {
 
   editPanel(s, ex, open) {
     const rec = s.record || {};
-    const wVal = rec.weight != null ? rec.weight : (s.target && s.target.weight != null ? s.target.weight : '');
-    const rVal = rec.reps != null ? rec.reps : (s.holdSeconds ? s.holdSeconds : (s.target && s.target.reps != null ? s.target.reps : ''));
+    // v1.16: a flagged number stays in the boxes while it waits for a fix or a second Done
+    const held = this.flag && this.flag.idx === this.s.idx ? this.flag : null;
+    const wVal = held ? (held.weight == null ? '' : held.weight) : (rec.weight != null ? rec.weight : (s.target && s.target.weight != null ? s.target.weight : ''));
+    const rVal = held ? (held.reps == null ? '' : held.reps) : (rec.reps != null ? rec.reps : (s.holdSeconds ? s.holdSeconds : (s.target && s.target.reps != null ? s.target.reps : '')));
     const pVal = this.pendingRpe != null ? this.pendingRpe : (rec.rpe != null ? rec.rpe : this.defaultRpe(s));
     const wStep = ex ? incrementFor(this.rules, s.exerciseId, ex) : 5;
     const isBw = ex && ex.equipment === 'bodyweight';
     const panel = el('div', { class: 'edit-panel', id: 'edit-panel', hidden: !open });
+    if (held) panel.appendChild(el('div', { class: 'num-flag', id: 'num-flag', role: 'alert' }, [el('b', {}, 'Check this number. '), `${held.text}. Fix it, or tap Done again to keep it.`]));
     // v1.15: on a barbell lift, + on an empty box starts at the empty bar (one tap used to log 5 lb)
     const bar = ex && ex.equipment === 'barbell' && this.rules.rampUp ? this.rules.rampUp.barWeightLb : null;
     if (!isBw) panel.appendChild(field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight (lb)'), 'in-weight', wVal, wStep || 2.5, bar));

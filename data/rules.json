@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.6",
+  "rulesVersion": "1.7",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -311,5 +311,13 @@
     "note": "v1.14 Home rings. Lifts: a saved session per plan lift this week. Runs: planned runs done (runs.js weekRuns). Hard efforts: the Engine finisher in engineSession plus the run with id hardRun.",
     "engineSession": "lift2",
     "hardRun": "run1"
+  },
+  "numberCheck": {
+    "note": "v1.16, Cameron Nov 19: any number that doesn't make sense is flagged for him to review before it can move the plan. A work set is flagged when a barbell weight is under the empty bar (rampUp.barWeightLb), when the weight is at most lighterThan or at least heavierThan times its target and at least minGapLb away from it, when a weight with no target is over maxLb, or when reps are more than max(2 x the top of the rep range, the top + extraReps). A set he confirms (numberOk) is never flagged again.",
+    "lighterThan": 0.5,
+    "heavierThan": 1.5,
+    "minGapLb": 15,
+    "maxLb": 500,
+    "extraReps": 10
   }
 }

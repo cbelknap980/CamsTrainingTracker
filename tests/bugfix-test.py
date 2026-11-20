@@ -1,4 +1,4 @@
-# bugfix-test.py - v1.17 bug hunt: each check below failed before the fix. Phone size, Denver time.
+# bugfix-test.py - v1.15.1 bug hunt: each check below failed before the fix. Phone size, Denver time.
 # Run: python3 tests/bugfix-test.py
 import os, subprocess, sys, time, datetime
 from playwright.sync_api import sync_playwright

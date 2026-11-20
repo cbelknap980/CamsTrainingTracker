@@ -50,7 +50,7 @@ export function hideToast() { const t = document.getElementById('toast'); if (t)
 // Follows Settings > "Vibrate when a set or rest ends". ----
 let hapticsOn = true;
 export function setHaptics(on) { hapticsOn = !!on; }
-const PATTERNS = { tap: 8, press: 14, undo: [10, 40, 10], delete: 22 };
+const PATTERNS = { tap: 8, press: 14, undo: [10, 40, 10], delete: 22, warn: [30, 60, 30] };
 export function haptic(kind = 'tap') {
   if (!hapticsOn || !navigator.vibrate) return;
   try { navigator.vibrate(PATTERNS[kind] || kind); } catch (e) { /* ignore */ }
