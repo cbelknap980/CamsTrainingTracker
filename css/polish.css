@@ -332,3 +332,31 @@ body.in-session:not(.computer) .player-actions { position: sticky; bottom: 0; z-
 .done-card .done-stat { padding: 12px; }
 .done-card .done-stat .ds-num { flex-wrap: wrap; }
 .done-card .done-stat .ds-num b { font-size: 1.6rem; }
+
+/* v1.15 header on a narrow phone: the week pill stays on one line and keeps its room; the sync chip makes do with
+   what is left (word and time, then just the time, then just the icon; the full text stays in its label) */
+#topbar { gap: 8px; }
+.brand { flex: 0 1 auto; min-width: 0; }
+#week-chip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.top-actions { flex: 1 1 0; min-width: 92px; justify-content: flex-end; container: topact / inline-size; }
+.top-actions .icon-btn { flex: none; }
+.sync-chip { flex: 0 1 auto; min-width: 42px; max-width: 100%; }
+#sync-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sync-chip .ico { flex: none; }
+@container topact (max-width: 239px) { .sync-chip.has-time .sc-word, .sync-chip.has-time .sc-dot { display: none; } }
+@container topact (max-width: 145px) { #sync-chip-text { display: none; } .sync-chip { padding: 0; width: 42px; justify-content: center; } }
+/* v1.15 the dumbbell question: no tab bar until it is answered, Save stays at the bottom of the screen */
+body.asking #tabs { display: none; }
+#pair-prompt .pair-saved { font-size: var(--t-small); }
+#pair-prompt .pair-bar { position: sticky; bottom: calc(12px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; margin-top: 16px;
+  padding: 10px 10px 10px 16px; border-radius: 16px; background: var(--surface-2); box-shadow: 0 0 0 1px var(--edge) inset, 0 8px 24px rgba(0, 0, 0, 0.45); }
+#pair-prompt .pair-bar .pair-left { flex: 1; color: var(--muted); font-weight: 600; }
+#pair-prompt .pair-bar .btn { width: auto; min-width: 120px; margin: 0; }
+#pair-prompt #pair-keep { margin-top: 8px; width: 100%; }
+/* v1.15 Main lifts on Home and Targets today on the start page */
+.tgt-val.tgt-none { color: var(--muted); font-weight: 600; font-size: var(--t-small); }
+#targets-today .tgt-table.compact td { padding-top: 9px; padding-bottom: 9px; }
+#targets-today .tgt-sub { font-size: 0.78rem; }
+#targets-today .tgt-val { font-size: 0.98rem; white-space: nowrap; padding-left: 10px; }
+#targets-today td:first-child { width: 100%; }
+#next-targets .link-btn, .modal #use-benchmark { margin-top: 4px; }

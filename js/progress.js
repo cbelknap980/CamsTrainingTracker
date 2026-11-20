@@ -5,7 +5,7 @@
 import { epley } from './progression.js';
 import { el, infoBtn } from './ui.js';
 import { fmtWeight, fmtDate, weekNumber, phaseForWeek, parseISODate } from './data.js';
-import { owedSetsFor } from './catchup.js';
+import { owedSetsFor, CATCHUP_ID } from './catchup.js';
 
 const WEEKS = 12;
 const isWork = st => !st.ramp && st.done && !st.skipped;
@@ -36,6 +36,9 @@ export function strengthSeries(sessions, plan, settings) {
   return out;
 }
 
+const madeUpOnCatchUp = (sessions, liftId, week) => sessions.some(s => s.week === week && s.sessionId === CATCHUP_ID &&
+  (s.sets || []).some(st => isWork(st) && String(st.blockId || '').startsWith(liftId + ':')));
+
 /**
  * One cell per planned lift per week: 'done', 'partial' (ended early), 'missed' (a past week with nothing logged),
  * 'open' (this week, not done yet) or 'later'.
@@ -48,7 +51,9 @@ export function adherence(sessions, plan, settings, today) {
       const recs = sessions.filter(s => s.sessionId === l.id && s.week === w);
       let status;
       if (recs.some(r => r.status === 'complete')) status = 'done';
-      else if (recs.length) status = owedSetsFor(plan, sessions, l.id, w) === 0 ? 'done' : 'partial'; // v1.8: made up on a catch-up day
+      // v1.8: made up on a catch-up day. v1.15: only when a catch-up this week actually made up sets for this lift;
+      // nothing owed on its own is not enough (sets skipped in a block the plan has since dropped are never owed).
+      else if (recs.length) status = madeUpOnCatchUp(sessions, l.id, w) && owedSetsFor(plan, sessions, l.id, w) === 0 ? 'done' : 'partial';
       else status = w < current ? 'missed' : (w === current ? 'open' : 'later');
       cells.push({ week: w, status, date: recs.length ? recs[0].date : null });
     }

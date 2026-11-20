@@ -19,7 +19,7 @@ TARGETS = {'back_squat': {'weight': 170, 'reps': 4}, 'rdl': {'weight': 150, 'rep
            'leg_curl': {'weight': 80, 'reps': 8}, 'curl': {'weight': 50, 'reps': 10}, 'oh_tri_ext': {'weight': 40, 'reps': 10}}
 PREV = {'id': 'ses_prev', 'sessionId': 'lift1', 'sessionName': 'Lift 1: Legs', 'logName': 'Lift 1', 'week': 2, 'date': '2026-11-23', 'startedAt': '2026-11-23T13:00:00.000Z',
         'endedAt': '2026-11-23T14:00:00.000Z', 'plannedSeconds': 3500, 'actualSeconds': 3400, 'pausedSeconds': 0, 'trims': [], 'status': 'complete', 'engineMinutes': 0,
-        'sets': [{'exerciseId': 'back_squat', 'name': 'Box squat', 'setIndex': i, 'weight': 165, 'reps': 4, 'rpe': 8, 'done': True, 'skipped': False, 'blockId': 'lift1:A'} for i in (1, 2, 3)],
+        'sets': [{'exerciseId': 'back_squat', 'name': 'Back squat', 'setIndex': i, 'weight': 165, 'reps': 4, 'rpe': 8, 'done': True, 'skipped': False, 'blockId': 'lift1:A'} for i in (1, 2, 3)],
         'whatChanged': [], 'e1rms': {}, 'prs': []}
 
 def secs(page):
@@ -62,6 +62,9 @@ with sync_playwright() as p:
     check('rings count this week only (last week\'s Lift 1 is not in it)', '0/3' in page.locator('[data-ring=lifts] .wk-ring-num').inner_text().replace(' ', ''), page.locator('[data-ring=lifts]').inner_text())
     check('the rings sit above today\'s card', page.evaluate("document.querySelector('#week-rings').compareDocumentPosition(document.querySelector('#today-card')) & 4") > 0)
     page.screenshot(path=f'{SHOTS}/v114-home.png')
+    mains = page.locator('#next-targets tr.tappable')
+    check('v1.15 Home lists the main lifts only (7 rows, no leg curl or curls)', mains.count() == 7 and page.locator('#next-targets', has_text='Seated leg curl').count() == 0 and page.locator('#next-targets', has_text='Standing dumbbell curl').count() == 0 and 'Back squat' in mains.first.inner_text(), page.locator('#next-targets').inner_text()[:300])
+    check('v1.15 a main lift with no target says so', 'Not set yet' in page.locator('#next-targets tr[data-ex=power_clean]').inner_text(), page.locator('#next-targets tr[data-ex=power_clean]').inner_text())
     page.click('.tab[data-view=plan]'); page.wait_for_timeout(100)
     page.tap('#tabs .tab[data-view=home]'); page.wait_for_timeout(100)
     check('a tap buzzes the phone', len(page.evaluate('window.__buzz')) >= 1, page.evaluate('window.__buzz'))
@@ -84,6 +87,12 @@ with sync_playwright() as p:
     check('?go=progress opens Progress and the address loses the ?go', active_tab(page) == 'progress' and '?go' not in page.url, (active_tab(page), page.url))
     page.goto(f'http://localhost:{PORT}/?go=today'); page.wait_for_selector('#start-workout')
     check('?go=today opens today\'s session page', 'Lift 1' in page.locator('#preview-hero h1').inner_text())
+    tt = page.locator('#targets-today')
+    check('v1.15 start page: Targets today right under the title', tt.count() == 1 and page.evaluate("document.querySelector('#preview-hero').nextElementSibling.id") == 'targets-today')
+    sq = page.locator('#targets-today tr[data-ex=back_squat]').inner_text() if page.locator('#targets-today tr[data-ex=back_squat]').count() else ''
+    check('v1.15 Targets today: back squat 170 x 4 and last time', '170 lb × 4' in sq and 'last 165 × 4 (3 sets)' in sq, sq)
+    check('v1.15 Targets today: every weighted lift of the day, dumbbell totals shown', all(page.locator(f'#targets-today tr[data-ex={x}]').count() == 1 for x in ('rdl', 'calf_raise', 'bss', 'leg_curl', 'curl', 'oh_tri_ext')) and '50 lb × 10' in page.locator('#targets-today tr[data-ex=curl]').inner_text() and 'two 25s' in page.locator('#targets-today tr[data-ex=curl]').inner_text() and page.locator('#targets-today tr[data-ex=ab_wheel]').count() == 0, tt.inner_text()[:400])
+    page.screenshot(path=f'{SHOTS}/v115-targets-today.png')
     m = json.load(open(os.path.join(ROOT, 'manifest.webmanifest')))
     check('manifest offers three long-press shortcuts', [s['url'] for s in m.get('shortcuts', [])] == ['./?go=today', './?go=runs', './?go=progress'])
 
@@ -91,7 +100,7 @@ with sync_playwright() as p:
     page.click('#start-workout'); page.wait_for_selector('.player')
     bar = lambda: page.evaluate("document.querySelector('meta[name=theme-color]').content")
     for _ in range(40):
-        if kind(page) == 'work' and name(page) == 'Box squat': break
+        if kind(page) == 'work' and name(page) == 'Back squat': break
         step(page)
     check('status bar takes the work color', bar() == '#12432f', bar())
     check('hero: 170 big, 4 reps and the effort on one line', page.locator('#hero-readout .hw-num').inner_text().strip() == '170' and page.locator('.hl-reps b').inner_text().strip() == '4' and 'tank' in page.locator('.hl-effort').inner_text(), page.locator('#hero-readout').inner_text())
@@ -100,6 +109,10 @@ with sync_playwright() as p:
     page.screenshot(path=f'{SHOTS}/v114-work-set.png')
     small = small_targets(page)
     check('workout buttons are at least 40 px', not small, small)
+    page.click('.player-actions .secondary button:has-text("Edit")'); page.wait_for_selector('#in-weight')
+    page.fill('#in-weight', ''); page.click('.stepper:has(#in-weight) button[aria-label=more]')
+    check('v1.15 barbell: + on an empty weight box starts at the 45 lb bar', page.locator('#in-weight').input_value() == '45', page.locator('#in-weight').input_value())
+    page.fill('#in-weight', '170'); page.click('.player-actions .secondary button:has-text("Hide")'); page.wait_for_timeout(60)
     page.click('.player-actions button.btn.primary'); page.wait_for_selector('#jd-undo')
     check('rest screen offers Undo for the set just logged', page.locator('#jd-undo').is_visible())
     page.screenshot(path=f'{SHOTS}/v114-rest-undo.png')
@@ -155,6 +168,23 @@ with sync_playwright() as p:
     page.screenshot(path=f'{SHOTS}/v114-swipe-undo.png')
     page.click('#toast-action'); page.wait_for_timeout(400)
     check('Undo puts it back', page.locator('.swipe-wrap').count() == before, page.locator('.swipe-wrap').count())
+
+    print('v1.15 header and the dumbbell question')
+    page.evaluate("() => import('./js/store.js').then(async m => { await m.kvDel('pairTotals'); await m.kvSet('sync', { repo: 'x/y', role: 'phone', token: 't', lastPushedAt: '2026-11-30T05:09:00' }); })")
+    page.goto(f'http://localhost:{PORT}/'); page.wait_for_selector('#pair-prompt')
+    chip = page.locator('#week-chip').bounding_box(); sync = page.locator('#sync-chip').bounding_box()
+    check('header: the week pill is one line and clear of the sync chip', chip['height'] < 40 and chip['x'] + chip['width'] <= sync['x'], (chip, sync, page.locator('#sync-chip').inner_text()))
+    check('header: the sync chip fits its time at 393 px', page.locator('#sync-chip .sc-time').is_visible() and not page.locator('#sync-chip .sc-word').is_visible(), page.locator('#sync-chip').inner_text())
+    page.screenshot(path=f'{SHOTS}/v115-pair-question.png')
+    check('the question hides the tab bar until it is answered', not page.locator('#tabs').is_visible())
+    check('the choices name the dumbbells', page.locator('.pair-row[data-ex=bss] [data-pick=total]').inner_text() == 'Two 30s' and page.locator('.pair-row[data-ex=bss] [data-pick=one]').inner_text() == 'Two 60s', page.locator('.pair-row[data-ex=bss]').inner_text())
+    bar_box = page.locator('.pair-bar').bounding_box()
+    check('Save is in view without scrolling', bar_box['y'] + bar_box['height'] <= 851 and page.locator('#pair-save').is_disabled(), bar_box)
+    page.click('#pair-keep'); page.wait_for_selector('#pair-prompt', state='detached'); page.wait_for_timeout(150)
+    check('Not sure leaves the numbers, brings the tabs back and is not asked again', page.locator('#tabs').is_visible() and page.evaluate("() => import('./js/store.js').then(m => m.getPairTotals())") == 'kept', page.evaluate("() => import('./js/store.js').then(m => m.getPairTotals())"))
+    page.reload(); page.wait_for_timeout(800)
+    check('a reload does not bring the question back', page.locator('#pair-prompt').count() == 0)
+    page.evaluate("() => import('./js/store.js').then(m => m.kvDel('sync'))"); page.reload(); page.wait_for_timeout(600)
 
     print('Tap sizes')
     for tab in ('home', 'progress', 'plan', 'runs'):

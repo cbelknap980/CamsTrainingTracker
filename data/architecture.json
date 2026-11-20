@@ -164,7 +164,7 @@
         "sessions, exercises over time, PRs,",
         "benchmarks and next targets"
       ],
-      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it. v1.9: the Log tab moved inside Progress as Sessions and Exercises next to Overview. v1.14: swipe a session left to delete it, with Undo."
+      "description": "The Log tab lists past sessions (tap for all sets and what changed) and, in its Exercises view, every exercise with its sets by date, PR markers and an estimated-1RM trend line. The Home screen shows next targets (editable) and a Benchmarks table for the seven benchmark lifts: the benchmark you entered (a set of 5 with 2 reps left), current estimated 1RM, and the next target the plan derives from it. v1.15: Home has one Main lifts card for the seven benchmark lifts (next weight x reps, e1RM; tap to change a target or enter a benchmark); every other lift's target shows in Targets today on its session's start page. v1.9: the Log tab moved inside Progress as Sessions and Exercises next to Overview. v1.14: swipe a session left to delete it, with Undo."
     },
     {
       "id": "progress",

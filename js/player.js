@@ -1011,7 +1011,9 @@ export class Player {
     const wStep = ex ? incrementFor(this.rules, s.exerciseId, ex) : 5;
     const isBw = ex && ex.equipment === 'bodyweight';
     const panel = el('div', { class: 'edit-panel', id: 'edit-panel', hidden: !open });
-    if (!isBw) panel.appendChild(field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight (lb)'), 'in-weight', wVal, wStep || 2.5));
+    // v1.15: on a barbell lift, + on an empty box starts at the empty bar (one tap used to log 5 lb)
+    const bar = ex && ex.equipment === 'barbell' && this.rules.rampUp ? this.rules.rampUp.barWeightLb : null;
+    if (!isBw) panel.appendChild(field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight (lb)'), 'in-weight', wVal, wStep || 2.5, bar));
     panel.appendChild(field(s.holdSeconds ? 'Seconds' : 'Reps', 'in-reps', rVal, 1));
     if (isBw) panel.appendChild(el('div'));
     if (!s.holdSeconds && !s.ramp) {
@@ -1093,9 +1095,9 @@ function modalOpen() {
   return !!(m && !m.hidden);
 }
 
-function field(label, id, value, step) {
+function field(label, id, value, step, start) {
   const input = el('input', { type: 'number', id, value: value === '' ? '' : String(value), step: String(step), inputmode: 'decimal' });
   const minus = el('button', { type: 'button', 'aria-label': 'less', onclick: () => { input.value = String(Math.max(0, (Number(input.value) || 0) - step)); } }, '−');
-  const plus = el('button', { type: 'button', 'aria-label': 'more', onclick: () => { input.value = String((Number(input.value) || 0) + step); } }, '+');
+  const plus = el('button', { type: 'button', 'aria-label': 'more', onclick: () => { input.value = String(input.value === '' && start ? start : (Number(input.value) || 0) + step); } }, '+');
   return el('div', { class: 'field' }, [el('label', { for: id }, label), el('div', { class: 'stepper' }, [minus, input, plus])]);
 }

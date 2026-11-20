@@ -52,8 +52,10 @@ export function weekOwed({ plan, sessions, week, today }) {
       const items = [];
       for (const item of block.items) {
         if (!item.exercise) continue;
-        const mine = recs.flatMap(r => (r.sets || []).filter(st => st.exerciseId === item.exercise && st.blockId === block.id && isWorkStep(st)));
-        const skipped = mine.filter(st => st.skipped || !st.done).length;
+        // v1.15: a lift done twice in a week owes only what is still missing after the better attempt (Cameron ended
+        // Monday's Legs early with nothing done, then did all of it Tuesday; it used to owe Monday's sets as well)
+        const per = recs.map(r => (r.sets || []).filter(st => st.exerciseId === item.exercise && st.blockId === block.id && isWorkStep(st))).filter(a => a.length);
+        const skipped = per.length ? Math.min(...per.map(a => a.filter(st => st.skipped || !st.done).length)) : 0;
         const left = skipped - (madeUp[`${lift.id}:${block.id}:${item.exercise}`] || 0);
         if (left <= 0) continue;
         const ex = plan.exercises[item.exercise];
