@@ -10,7 +10,7 @@ import { trimToFit, remainingSeconds } from './builder.js';
 import { setInProgress, clearInProgress } from './store.js';
 import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText } from './data.js';
 import { incrementFor, checkPR } from './progression.js';
-import { el, showModal, closeModal, toast, effortChips } from './ui.js';
+import { el, showModal, closeModal, toast, hideToast, effortChips, onBack, dropBack, countUp } from './ui.js';
 import { icon } from './icons.js';
 
 const RING_R = 92;
@@ -58,6 +58,9 @@ export class Player {
     this.renderStep();
     this.timer = setInterval(() => this.tick(), 250);
     this.persist();
+    // v1.14: Android Back during a workout opens the menu (Pause, End early) instead of leaving the app
+    const onBackPress = () => { onBack('workout', onBackPress); if (!modalOpen()) this.openMenu(); };
+    onBack('workout', onBackPress);
   }
 
   teardown() {
@@ -66,6 +69,7 @@ export class Player {
     document.body.classList.remove('in-session');
     document.body.removeAttribute('data-kind');
     this.cancelScheduledNotification();
+    dropBack('workout');
     try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
     if (this.wakeLock) { try { this.wakeLock.release(); } catch (e) { /* ignore */ } this.wakeLock = null; }
   }
@@ -331,9 +335,26 @@ export class Player {
   }
   skip() {
     const s = this.step;
+    const idx = this.s.idx;
+    const before = { done: s.done, skipped: s.skipped, record: s.record };
     if (s.kind === 'set') { s.skipped = true; s.done = false; s.record = { ...this.baseRecord(s), done: false, skipped: true }; }
     else { s.skipped = true; s.done = true; }
     this.goTo(this.s.idx + 1);
+    // v1.14: a skip by mistake comes back with one tap
+    if (s.kind === 'set') toast(`Skipped ${s.name}`, 5000, { action: 'Undo', onAction: () => { if (this.s.idx !== idx + 1) return; Object.assign(s, before); if (before.record === undefined) delete s.record; this.goTo(idx); } });
+  }
+  /** v1.14: take back the set just logged (from the rest screen): back to that set, as it was before Done. */
+  undoLast() {
+    const idx = this.s.idx - 1;
+    const p = this.steps[idx];
+    if (!p || p.kind !== 'set' || !p.record || !p.record.done || !p.undo) return;
+    const u = p.undo;
+    if (u.prs != null) this.s.prs.length = u.prs;
+    if (u.target !== undefined) { if (u.target) this.targets[p.exerciseId] = u.target; else delete this.targets[p.exerciseId]; }
+    if (u.carried) u.carried.forEach(([i, t]) => { if (this.steps[i]) this.steps[i].target = t; });
+    p.done = false; p.skipped = false; delete p.record; delete p.pr; delete p.undo;
+    hideToast();
+    this.goTo(idx);
   }
   back() {
     if (this.s.idx === 0) return;
@@ -415,7 +436,8 @@ export class Player {
     const needsWeight = ex && ex.equipment !== 'bodyweight' && !s.holdSeconds;
     if (needsWeight && v.weight == null && !auto && !this.isAutoSet(s)) { toast('Enter the weight you used'); this.openEdit(); return; }
     if (v.reps == null && !auto && !s.holdSeconds) { toast('Enter reps'); this.openEdit(); return; }
-    if (!auto) this.cue('tap');
+    // v1.14: what Undo needs to put back (PR list, the in-session best, weights carried to later sets)
+    s.undo = { prs: this.s.prs.length, target: this.targets[s.exerciseId] ? { ...this.targets[s.exerciseId] } : null, carried: this.steps.map((o, i) => [i, o.target ? { ...o.target } : o.target]).filter(([i]) => i > this.s.idx && this.steps[i].exerciseId === s.exerciseId) };
     s.done = true; s.skipped = false; s.actualSeconds = Math.round(this.elapsedInStep());
     s.record = { ...this.baseRecord(s), weight: v.weight, reps: v.reps, rpe: v.rpe, done: true, skipped: false, at: new Date().toISOString() };
 
@@ -518,9 +540,17 @@ export class Player {
       if (between) st.name = `Set up for ${names.join(' + ')}`;
       if (st.setupFor) st.setupFor = nx.name;
     });
+    const prev = { steps, names: steps.map(st => [st.name, st.setupFor]) };
     this.s.timeline.steps = next;
-    toast(`Doing ${c.title.split(':')[0]} now`);
     this.goTo(this.s.idx);
+    // v1.14: Undo puts the blocks back in their planned order
+    const at = this.s.idx;
+    toast(`Doing ${c.title.split(':')[0]} now`, 5000, { action: 'Undo', onAction: () => {
+      if (this.s.idx !== at) return;
+      prev.steps.forEach((st, i) => { st.idx = i; st.name = prev.names[i][0]; st.setupFor = prev.names[i][1]; });
+      this.s.timeline.steps = prev.steps;
+      this.goTo(at);
+    } });
   }
 
   // ---- menu (L5) ----
@@ -560,6 +590,8 @@ export class Player {
       timeline: this.s.timeline, status, startedAt: this.s.startedISO, endedAt: new Date(endedAt).toISOString(),
       actualSeconds: Math.round((endedAt - this.s.sessionStart - this.s.pausedTotal) / 1000), pausedSeconds: Math.round(this.s.pausedTotal / 1000),
       plannedSeconds: this.s.timeline.plannedSeconds, trims: this.s.trims, livePrs: this.s.prs,
+      // v1.14: minutes of the Engine finisher actually done, for the Hard efforts ring on Home
+      engineMinutes: Math.round(this.steps.filter(x => x.blockType === 'emom' && x.done && !x.skipped).reduce((m, x) => m + (x.actualSeconds || x.seconds || 0), 0) / 60),
       sets: this.steps.filter(s => s.kind === 'set' && s.record).map(s => s.record)
     };
     this.teardown();
@@ -646,6 +678,31 @@ export class Player {
       el('div', { class: 'tile tile-effort' }, [el('div', { class: 'tile-label' }, 'Effort'), el('div', { class: 'tile-value small' }, [lvl && effortText ? el('span', { class: 'dot effort-' + lvl.key }) : null, (effortText || '–').replace(' in the tank', '\nin the tank').replace('close: ', 'close:\n')])])
     ]);
   }
+  /**
+   * v1.14: the work-set readout. The weight is the one big number (readable from the floor mid-set); reps and
+   * effort follow on one line.
+   */
+  heroReadout(weightText, repsLabel, repsText, effortText, rpe, pairSub) {
+    const lvl = effortLevel(this.rules, rpe);
+    const m = /^([+]?[\d.]+)\s*lb$/.exec(weightText || '');
+    const num = m ? m[1] : weightText;
+    return el('div', { class: 'readout step-target hero', id: 'hero-readout' }, [
+      el('div', { class: 'hero-weight tile-weight' + (m ? '' : ' word') }, [
+        el('span', { class: 'hw-num' }, num), m ? ' ' : null, m ? el('span', { class: 'hw-unit' }, pairSub ? 'lb total' : 'lb') : null,
+        pairSub ? el('div', { class: 'tile-sub' }, pairSub + ' lb') : null
+      ]),
+      el('div', { class: 'hero-line' }, [
+        el('span', { class: 'hl-reps' }, [el('b', {}, repsText), ' ', repsLabel.toLowerCase()]),
+        effortText ? el('span', { class: 'hl-sep', 'aria-hidden': 'true' }, '·') : null,
+        effortText ? el('span', { class: 'hl-effort' }, [lvl ? el('span', { class: 'dot effort-' + lvl.key }) : null, effortText]) : null
+      ])
+    ]);
+  }
+  cuesOpen(s) {
+    const mem = this.s.cuesOpen && this.s.cuesOpen[s.exerciseId];
+    if (mem != null) return mem;
+    return !!(s.baseline || s.retest || s.setIndex === 1 || s.round === 1 || s.holdSeconds);
+  }
   /** Effort target in plain words for a set ("Leave 2-3 in the tank"). */
   effortWords(x) {
     if (x.ramp) return 'Easy';
@@ -675,7 +732,7 @@ export class Player {
     const hasWeight = !isBw && !p.holdSeconds;
     const needs = hasWeight && rec.weight == null;
     const wStep = (ex ? incrementFor(this.rules, p.exerciseId, ex) : 5) || 5;
-    const change = patch => { this.fixRecord(idx, patch); this.cue('tap'); this.renderStep(); };
+    const change = patch => { this.fixRecord(idx, patch); this.renderStep(); };
     const stepper = (key, label, value, sub, minus, plus) => el('div', { class: 'jd-step' }, [
       el('div', { class: 'jd-step-label' }, label),
       el('div', { class: 'jd-step-row' }, [
@@ -689,8 +746,12 @@ export class Player {
     const where = p.round ? `round ${p.round}` : (p.ramp ? 'ramp-up' : (p.setIndex ? `set ${p.setIndex}` : ''));
     return el('div', { class: 'just-done', id: 'just-done' }, [
       el('div', { class: 'row' }, [
-        el('div', { class: 'label' }, 'Last set · fix it here'),
-        el('div', { class: 'jd-saved' + (fresh ? ' flash' : ''), id: 'jd-saved' }, [icon('check'), rec.edited ? 'Saved' : 'Logged'])
+        el('div', { class: 'label' }, p.undo && idx === this.s.idx - 1 ? 'Last set' : 'Last set · fix it here'),
+        el('div', { class: 'jd-right' }, [
+          el('div', { class: 'jd-saved' + (fresh ? ' flash' : ''), id: 'jd-saved' }, [icon('check'), rec.edited ? 'Saved' : 'Logged']),
+          // v1.14: Done by mistake: back to that set as it was
+          p.undo && idx === this.s.idx - 1 ? el('button', { type: 'button', class: 'jd-undo', id: 'jd-undo', onclick: () => this.undoLast() }, 'Undo') : null
+        ])
       ]),
       el('div', { class: 'jd-name' }, `${p.name}${where ? ', ' + where : ''}`),
       el('div', { class: 'jd-steps' + (hasWeight ? '' : ' one') }, [
@@ -845,17 +906,33 @@ export class Player {
         const w = s.target && s.target.weight != null ? `${fmtWeight(s.target.weight)} lb` : (ex && ex.equipment === 'bodyweight' ? 'BW' : (ex && ex.equipment === 'weighted_bw' ? '+0 lb' : '?'));
         const rl = s.holdSeconds ? (s.perSide ? 'Sec / side' : 'Seconds') : (s.perSide ? 'Reps / side' : 'Reps');
         const r = s.holdSeconds ? `${s.holdSeconds}` : (s.target && s.target.reps != null ? `${s.target.reps}` : (s.repRange ? repsText(s.repRange) : 'max'));
-        main.appendChild(this.readout(w, rl, r, this.effortWords(s), true, s.rpeDefault, s.target ? pairText(ex, s.target.weight) : ''));
+        main.appendChild(this.heroReadout(w, rl, r, this.effortWords(s), s.rpeDefault, s.target ? pairText(ex, s.target.weight) : ''));
         if (s.auto && !s.holdSeconds) {
           main.appendChild(el('div', { class: 'pace', id: 'pace' }, [
             el('div', { class: 'pace-row' }, [el('span', { class: 'pace-text', id: 'pace-text' }, ''), el('span', { class: 'pace-clock', id: 'timer' }, '0:00')]),
             el('div', { class: 'pace-track' }, [el('div', { class: 'pace-fill', id: 'pace-fill' })])
           ]));
         }
-        if (s.repRange && !s.holdSeconds && s.repRange[0] !== s.repRange[1]) main.appendChild(el('div', { class: 'step-effort' }, `Range ${repsText(s.repRange)} reps`));
-        if ((s.baseline || s.retest) && s.effortText) main.appendChild(el('div', { class: 'step-effort' }, s.effortText));
-        const tips = tipList(s);
-        if (tips) main.appendChild(tips);
+        let cuesEl = null;
+        // v1.14: cues fold behind a tap. They start open on an exercise's first work set (and on baseline and
+        // retest sets, whose instructions matter); after that they stay how Cameron last left them for that lift.
+        const cueBits = [
+          s.repRange && !s.holdSeconds && s.repRange[0] !== s.repRange[1] ? el('div', { class: 'step-effort' }, `Range ${repsText(s.repRange)} reps`) : null,
+          (s.baseline || s.retest) && s.effortText ? el('div', { class: 'step-effort' }, s.effortText) : null,
+          tipList(s)
+        ].filter(Boolean);
+        if (cueBits.length) {
+          const open = this.cuesOpen(s);
+          const n = ((s.tips && s.tips.length) || 0) + (s.cue ? 1 : 0);
+          const det = el('details', { class: 'cues', id: 'cues', open: open || null }, [
+            el('summary', {}, [el('span', {}, n ? `Cues (${n})` : 'Cues'), el('span', { class: 'cues-hint' }, open ? 'Hide' : 'Show')]),
+            ...cueBits
+          ]);
+          // only a tap is remembered (a <details> built open also fires 'toggle')
+          det.querySelector('summary').addEventListener('click', () => { (this.s.cuesOpen = this.s.cuesOpen || {})[s.exerciseId] = !det.open; this.persist(); });
+          det.addEventListener('toggle', () => { const h = det.querySelector('.cues-hint'); if (h) h.textContent = det.open ? 'Hide' : 'Show'; });
+          cuesEl = det;
+        }
         // L2: last time
         if (s.last && ((s.last.sets && s.last.sets.length) || s.last.topSet) && !s.ramp) {
           const l = s.last.sets && s.last.sets.length ? s.last : { ...s.last, sets: [s.last.topSet] };
@@ -867,12 +944,13 @@ export class Player {
           const txt = sameW && l.sets[0].weight != null ? `${fmtWeight(l.sets[0].weight)} lb × ${reps}${rpe}` : l.sets.map(x => `${x.weight != null ? fmtWeight(x.weight) : 'bw'} × ${x.reps == null ? '?' : x.reps}`).join(', ') + rpe;
           main.appendChild(el('div', { class: 'last-time' }, [el('span', { class: 'label-inline' }, 'Last time'), ' ', txt]));
         }
+        if (cuesEl) main.appendChild(cuesEl);
         if (!(s.auto && !s.holdSeconds)) main.appendChild(this.timerBlock(this.isCountdown(s)));
       } else {
         if (s.cue) main.appendChild(el('div', { class: 'step-cue' }, s.cue));
         main.appendChild(this.timerBlock(this.isCountdown(s)));
       }
-      if (next) main.appendChild(el('div', { class: 'next' }, [el('b', {}, 'Next: '), this.describe(next), (next.kind === 'rest' || next.kind === 'transition') && this.steps[this.s.idx + 2] ? el('span', { class: 'muted' }, ` → ${this.describe(this.steps[this.s.idx + 2])}`) : null]));
+      if (next && s.kind !== 'set') main.appendChild(el('div', { class: 'next' }, [el('b', {}, 'Next: '), this.describe(next), (next.kind === 'rest' || next.kind === 'transition') && this.steps[this.s.idx + 2] ? el('span', { class: 'muted' }, ` → ${this.describe(this.steps[this.s.idx + 2])}`) : null]));
     }
     if (paused) main.insertBefore(el('button', { class: 'paused-banner', id: 'paused-banner', onclick: () => this.unpause() }, [icon('play'), 'Paused. Tap to resume']), main.firstChild);
 

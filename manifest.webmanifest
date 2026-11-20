@@ -1,14 +1,20 @@
 {
+  "id": "./",
   "name": "Cam's Training Tracker",
   "short_name": "Training",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#121418",
-  "theme_color": "#121418",
+  "background_color": "#0d0f13",
+  "theme_color": "#0d0f13",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Start today's session", "short_name": "Today", "url": "./?go=today", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Runs", "short_name": "Runs", "url": "./?go=runs", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Progress", "short_name": "Progress", "url": "./?go=progress", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]
 }

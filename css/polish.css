@@ -208,3 +208,127 @@ label { text-transform: none; letter-spacing: 0; font-size: 0.85rem; }
 body.computer .brand-name { position: static; width: auto; height: auto; clip: auto; overflow: visible; }
 body.computer #topbar { background: var(--bg); }
 .btn.primary:disabled { background: var(--surface-2); color: var(--muted); box-shadow: 0 0 0 1px var(--edge) inset; opacity: 1; }
+
+/* ---- v1.14: feel ---- */
+
+/* toasts can carry an Undo; they sit above the tab bar and take taps */
+.toast { display: flex; align-items: center; gap: 14px; bottom: calc(84px + env(safe-area-inset-bottom)); }
+.toast.has-action { padding: 6px 6px 6px 18px; }
+.toast-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+.toast-action { flex: none; min-height: 40px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: inherit; font-weight: 800; cursor: pointer; }
+body.in-session .toast { bottom: calc(24px + env(safe-area-inset-bottom)); }
+
+/* (i): explanations one tap away. The visible dot is small; the tap area is 44 px. */
+.info-btn { position: relative; display: inline-grid; place-items: center; width: 22px; height: 22px; margin-left: 8px; vertical-align: 2px; border: 0; border-radius: 50%; padding: 0;
+  background: var(--surface-2); color: var(--muted); font: 700 0.8rem/1 Georgia, "Times New Roman", serif; font-style: italic; cursor: pointer; box-shadow: 0 0 0 1px var(--edge) inset; }
+.info-btn::after { content: ""; position: absolute; inset: -11px; }
+.info-btn:active { background: var(--surface-3); }
+.info-sheet p { line-height: 1.5; }
+
+/* workout: one hero number. The weight reads from a few feet away; reps and effort on one line under it. */
+.readout.hero { display: block; margin: 6px 0 6px; text-align: center; }
+.hero-weight { display: inline-block; background: none !important; box-shadow: none !important; color: var(--text); padding: 0; line-height: 0.95; }
+.hero-weight .hw-num { font-size: clamp(4.6rem, 25vw, 6.6rem); font-weight: 800; letter-spacing: -0.05em; }
+.hero-weight.word .hw-num { font-size: clamp(3rem, 15vw, 4.2rem); }
+.hero-weight .hw-unit { font-size: 1.6rem; font-weight: 750; color: var(--muted); letter-spacing: -0.01em; margin-left: 2px; }
+.hero-weight .tile-sub { font-size: 1rem; font-weight: 650; color: var(--muted); margin-top: 6px; line-height: 1.2; }
+.hero-line { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 4px 10px; margin-top: 10px; font-size: 1.25rem; font-weight: 650; }
+.hero-line .hl-reps b { font-size: 2rem; font-weight: 800; letter-spacing: -0.03em; }
+.hero-line .hl-sep { color: var(--muted); }
+.hero-line .hl-effort { color: var(--text); }
+.hero-line .dot { width: 11px; height: 11px; }
+
+/* cues fold away after an exercise's first set */
+details.cues { width: 100%; margin-top: 10px; text-align: left; border-radius: 14px; background: rgba(255, 255, 255, 0.06); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset; padding: 0 14px; }
+details.cues > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; min-height: 48px; font-weight: 700; cursor: pointer; }
+details.cues > summary::-webkit-details-marker { display: none; }
+details.cues .cues-hint { color: var(--muted); font-weight: 650; font-size: var(--t-small); }
+details.cues[open] { padding-bottom: 12px; }
+details.cues .step-effort { text-align: left; margin: 0 0 6px; }
+
+/* last-set card: Logged and Undo */
+.jd-right { display: flex; align-items: center; gap: 8px; }
+.jd-undo { min-height: 44px; min-width: 64px; padding: 0 14px; border-radius: 999px; border: 0; background: rgba(255, 255, 255, 0.12); color: var(--text); font: inherit; font-weight: 750; font-size: var(--t-small); cursor: pointer; }
+.jd-undo:active { transform: scale(0.96); }
+
+/* swipe a session left to delete */
+.swipe-wrap { position: relative; overflow: hidden; border-radius: 12px; transition: max-height 0.25s var(--ease), opacity 0.2s; max-height: 200px; }
+.swipe-wrap.collapsed { max-height: 0; opacity: 0; }
+.swipe-under { position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; padding-right: 22px; background: rgba(255, 107, 107, 0.2); color: var(--bad); font-weight: 800; }
+.swipe-wrap.armed .swipe-under { background: var(--bad); color: #2a0606; }
+.list-item.swipeable { position: relative; background: var(--surface-1); transition: transform 0.22s var(--ease); }
+.list-item.swipeable.dragging { transition: none; }
+
+/* the week at a glance */
+.wk-rings h3 { margin-bottom: 8px; }
+.wk-ring-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ring-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: 0; padding: 6px 0; color: var(--text); font: inherit; cursor: pointer; border-radius: 14px; min-height: 48px; }
+button.ring-btn:active { background: rgba(255, 255, 255, 0.05); }
+.wk-ring-wrap { position: relative; width: 64px; height: 64px; display: grid; place-items: center; }
+.wk-ring { position: absolute; inset: 0; width: 64px; height: 64px; }
+.wk-ring-bg { fill: none; stroke: rgba(255, 255, 255, 0.09); stroke-width: 7; }
+.wk-ring-fg { fill: none; stroke-width: 7; stroke-linecap: round; transition: stroke-dashoffset 0.8s var(--ease); }
+.r-lifts .wk-ring-fg { stroke: #f5a524; } .r-runs .wk-ring-fg { stroke: #6ea8ff; } .r-hard .wk-ring-fg { stroke: #ff7a59; }
+.wk-ring-fg[stroke-dashoffset="163.4"] { stroke: none; }
+.wk-ring-num { position: relative; font-weight: 800; font-size: 1.1rem; letter-spacing: -0.02em; }
+.wk-ring-num small { font-size: 0.75rem; font-weight: 650; color: var(--muted); }
+.wk-ring-label { font-size: 0.82rem; font-weight: 650; color: var(--muted); }
+.ring-btn.full .wk-ring-label { color: var(--text); }
+.wk-rings.compact { margin: 16px 0 0; padding: 12px 6px 6px; background: var(--surface-2); border: 0; }
+@keyframes ring-in { from { stroke-dashoffset: 163.4; } }
+.wk-ring-fg { animation: ring-in 0.9s var(--ease) 0.15s both; }
+
+/* session done: a card worth keeping */
+.done-stat .ds-num { display: flex; align-items: baseline; gap: 3px; }
+.done-stat .ds-num b { display: inline; font-size: 1.9rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
+.done-stat .ds-num small { font-size: 0.95rem; font-weight: 650; color: var(--muted); }
+.pr-rows { display: flex; flex-direction: column; gap: 10px; }
+.pr-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 12px; border-radius: 14px; background: rgba(245, 165, 36, 0.1); }
+.pr-badge.big { margin: 0; font-size: 0.8rem; padding: 4px 10px; }
+.pr-what { display: flex; flex-direction: column; min-width: 0; }
+.pr-what b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-what span { font-size: var(--t-small); }
+.pr-val b { font-size: 1.6rem; font-weight: 800; color: var(--accent); letter-spacing: -0.03em; }
+.pr-val small { color: var(--muted); font-weight: 650; }
+#save-image .ico svg { width: 20px; height: 20px; }
+
+/* screen changes: tabs slide toward the one picked, the Start card grows into the session page;
+   the header and tab bar hold still. Chrome on Android and Safari 18; others swap instantly. */
+#topbar { view-transition-name: topbar; }
+#tabs { view-transition-name: tabbar; }
+#today-card, #preview-hero { view-transition-name: hero; }
+::view-transition-group(hero) { animation-duration: 0.34s; animation-timing-function: var(--ease); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.24s; animation-timing-function: var(--ease); }
+@keyframes vt-out-left { to { opacity: 0; transform: translateX(-28px); } }
+@keyframes vt-in-right { from { opacity: 0; transform: translateX(28px); } }
+@keyframes vt-out-right { to { opacity: 0; transform: translateX(28px); } }
+@keyframes vt-in-left { from { opacity: 0; transform: translateX(-28px); } }
+html[data-nav="fwd"]::view-transition-old(root) { animation-name: vt-out-left; }
+html[data-nav="fwd"]::view-transition-new(root) { animation-name: vt-in-right; }
+html[data-nav="back"]::view-transition-old(root) { animation-name: vt-out-right; }
+html[data-nav="back"]::view-transition-new(root) { animation-name: vt-in-left; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+
+/* v1.14 tap sizes: everything you press is at least 40-44 px tall */
+.segmented button { min-height: 40px; }
+.tag-btn { min-height: 44px; }
+.link-btn { min-height: 44px; }
+.run-plan-body .btn.small { min-height: 42px; }
+.run-notes > summary { min-height: 44px; display: flex; align-items: center; }
+.readout.hero .hero-weight { color: var(--text); }
+/* v1.14 gym-distance floor: no workout text under about 12.5 px */
+body[data-kind] .label, body[data-kind] .tile-label, body[data-kind] .jd-step-label, body[data-kind] .label-inline { font-size: 0.78rem; }
+body[data-kind] .ec-hint, body[data-kind] small { font-size: 0.8rem; }
+/* v1.14: the workout's buttons stay in reach at the bottom of the screen, over a fade of the phase color */
+body[data-kind="work"] { --bar-bg: #081c14; } body[data-kind="rest"] { --bar-bg: #08152c; } body[data-kind="ready"] { --bar-bg: #251800; } body[data-kind="calm"] { --bar-bg: #0e1118; }
+body.in-session:not(.computer) .player-actions { position: sticky; bottom: 0; z-index: 5; margin-left: -16px; margin-right: -16px; padding: 22px 16px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, transparent 0, var(--bar-bg, var(--bg)) 22px); }
+.hero-line .hl-reps { color: var(--muted); }
+.hero-line .hl-reps b { color: var(--accent); }
+.hero-weight .hw-num { font-size: clamp(4.2rem, 23vw, 6.2rem); }
+.done-card .done-stats { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+.done-card .done-stat { padding: 12px; }
+.done-card .done-stat .ds-num { flex-wrap: wrap; }
+.done-card .done-stat .ds-num b { font-size: 1.6rem; }

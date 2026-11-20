@@ -20,6 +20,8 @@ Tests for the Session Builder and Progression Engine:
 node tests/run-tests.mjs
 ```
 
+Phone-sized browser checks (Playwright; each serves the repo on its own port): `tests/browser-test.py`, `sync-test.py`, `catchup-test.py`, `runs-test.py`, `feel-test.py`.
+
 ## Install on the phone
 
 1. Open the GitHub Pages URL in Chrome on Android.
@@ -40,7 +42,9 @@ node tests/run-tests.mjs
 | `js/store.js` | IndexedDB wrapper, settings, backup and restore |
 | `js/export.js` | Backup JSON (share sheet or download), Excel export |
 | `js/architecture.js` | Architecture tab: diagram drawn from `data/architecture.json`, searchable |
-| `js/data.js`, `js/ui.js` | Data loading and small helpers |
+| `js/data.js`, `js/ui.js` | Data loading and small helpers; since v1.14 `ui.js` also holds the feel helpers (tap buzz, Undo toasts, (i) sheets, view transitions, the Android Back gesture, swipe to delete, status bar color) |
+| `js/rings.js` | v1.14: the week's rings on Home and Session done (lifts, runs, hard efforts) |
+| `js/share-card.js` | v1.14: Session done drawn as a 1080 x 1350 image for Save image |
 | `data/plan.json` | The plan as data: sessions, blocks, exercises, calendar, phases, stretch block |
 | `data/rules.json` | Progression, phase overrides, ramp-up, trim order, timing estimates |
 | `data/settings.json` | Default settings (overridden in the app's Settings screen) |

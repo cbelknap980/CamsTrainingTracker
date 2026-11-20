@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.5",
+  "rulesVersion": "1.6",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -306,5 +306,10 @@
       "intervalMinMinutes": 15,
       "intervalMaxMinutes": 50
     }
+  },
+  "weekRings": {
+    "note": "v1.14 Home rings. Lifts: a saved session per plan lift this week. Runs: planned runs done (runs.js weekRuns). Hard efforts: the Engine finisher in engineSession plus the run with id hardRun.",
+    "engineSession": "lift2",
+    "hardRun": "run1"
   }
 }
