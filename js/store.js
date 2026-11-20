@@ -104,6 +104,9 @@ export function setSettingsDefaults(d) { defaults = d; }
 export async function getSettings() {
   const overrides = (await kvGet('settings')) || {};
   const merged = deepMerge(defaults || {}, overrides);
+  // v1.17: a cleared date or bodyweight falls back to the default (a blank start date made every week number NaN)
+  if (defaults && !/^\d{4}-\d{2}-\d{2}$/.test(String(merged.startDate || ''))) merged.startDate = defaults.startDate;
+  if (defaults && !(Number(merged.bodyweightLb) > 0)) merged.bodyweightLb = defaults.bodyweightLb;
   return merged;
 }
 export async function saveSettings(partial) {
