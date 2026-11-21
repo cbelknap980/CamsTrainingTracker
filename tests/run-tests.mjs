@@ -146,9 +146,15 @@ r = applyProgression({ session: mkSession(5, [ws('back_squat', 185, 4, 9, [4, 6]
 check('v1.18.1 R4: third flat session -> 175 x 5 (5% off, rounded to 5 lb), count back to 0, says why', r.targets.back_squat.weight === 175 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 0 && r.lines[0].verdict === 'drop' && /3 flat sessions in a row/.test(r.lines[0].text), [r.targets.back_squat, r.lines[0]]);
 r = applyProgression({ session: mkSession(5, [ws('strict_press', 45, 4, 9, [4, 6]), ws('strict_press', 45, 4, 9, [4, 6]), ws('strict_press', 45, 3, 10, [4, 6])]), targets: { strict_press: { weight: 45, reps: 5, stall: 2 } }, rules, plan, settings });
 check('v1.18.1 R4 rule 4: a reset stops at the empty bar (45 lb) and the reps go to the bottom of the range', r.targets.strict_press.weight === 45 && r.targets.strict_press.reps === 4 && r.targets.strict_press.stall === 0, r.targets.strict_press);
-r = applyProgression({ session: mkSession(4, [ws('back_squat', 185, 5, 9, [4, 6]), ws('back_squat', 185, 5, 9, [4, 6]), ws('back_squat', 185, 5, 9, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 0 } }, rules, plan, settings });
-check('v1.18.1 R4: target reps made but a set rated Hard (RPE 9) to make them is flat too', r.targets.back_squat.weight === 185 && r.targets.back_squat.stall === 1, r.targets.back_squat);
-check('v1.18.1 flat words read from the rules', /Three flat sessions in a row/.test(flatWords(rules)) && /5%/.test(flatWords(rules)), flatWords(rules));
+// v1.18.2 (Cameron, Nov 21: "Only missed reps"): rules.stall.flatAtRpe is null, so a Hard day that made its reps holds
+r = applyProgression({ session: mkSession(4, [ws('back_squat', 185, 5, 9, [4, 6]), ws('back_squat', 185, 5, 9, [4, 6]), ws('back_squat', 185, 5, 9, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 1 } }, rules, plan, settings });
+check('v1.18.2 only missed reps count: the target reps made with Hard sets hold the weight and leave the count at 1', rules.stall.flatAtRpe === null && r.targets.back_squat.weight === 185 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 1 && r.lines[0].verdict === 'hold' && /Hard or Maxed. Same target next time\.$/.test(r.lines[0].text), [r.targets.back_squat, r.lines[0].text]);
+r = applyProgression({ session: mkSession(4, [ws('back_squat', 185, 5, 10, [4, 6]), ws('back_squat', 185, 5, 10, [4, 6]), ws('back_squat', 185, 5, 10, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 2 } }, rules, plan, settings });
+check('v1.18.2 only missed reps count: even Maxed sets that made the reps do not take 5% off after two flat sessions', r.targets.back_squat.weight === 185 && r.targets.back_squat.stall === 2, r.targets.back_squat);
+const rules9 = { ...rules, stall: { ...rules.stall, flatAtRpe: 9 } };
+r = applyProgression({ session: mkSession(4, [ws('back_squat', 185, 5, 9, [4, 6]), ws('back_squat', 185, 5, 9, [4, 6]), ws('back_squat', 185, 5, 9, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 0 } }, rules: rules9, plan, settings });
+check('v1.18.1 R4 switch: with flatAtRpe 9, the target reps made with a Hard set count as flat', r.targets.back_squat.weight === 185 && r.targets.back_squat.stall === 1, r.targets.back_squat);
+check('v1.18.2 flat words read from the rules: short of the target reps only', flatWords(rules) === 'Three flat sessions in a row (short of the target reps) take 5% off.' && /Hard or Maxed/.test(flatWords(rules9)), [flatWords(rules), flatWords(rules9)]);
 // v1.18 (rules R4, rule 1): a set the timer logged before an effort was picked does not move the target or the count
 {
   const un = { unconfirmed: true };
@@ -520,7 +526,7 @@ console.log('v1.9 muscle groups and coach check-ins');
   const one = rateSavedSet({ sessions: [two], targets: a2, recordId: 'u2', index: 1, rpe: 8, plan, rules, settings });
   check('v1.18.1 rate after Save: one of two rated, the other still holds it (185 x 6, count 1)', one.stillUnrated === 1 && one.target.weight === 185 && one.target.stall === 1 && !/rated after saving/.test(one.record.whatChanged[0].text), [one.target, one.record.whatChanged[0].text]);
   const both = rateSavedSet({ sessions: [one.record], targets: { back_squat: one.target }, recordId: 'u2', index: 2, rpe: 9, plan, rules, settings });
-  check('v1.18.1 rate after Save: the second rated Hard: every set made 6, but Hard at the top is flat (185 x 6, count 2)', both.stillUnrated === 0 && both.target.weight === 185 && both.target.stall === 2, both.target);
+  check('v1.18.2 rate after Save: the second rated Hard: every set made 6 with a Hard set, so the target holds (185 x 6) and the count stays 1', both.stillUnrated === 0 && both.target.weight === 185 && both.target.reps === 6 && both.target.stall === 1, both.target);
   const newer = mkRec('u3', 4, [W(190, 4, 8, { target: { weight: 190, reps: 4 }, setIndex: 1 })], '2026-12-08T17:00:00Z');
   const late = rateSavedSet({ sessions: [newer, un], targets: { back_squat: { weight: 190, reps: 5, stall: 0 } }, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
   check('v1.18.1 rate after Save: on an older session the rating is kept and the newer target is left alone', late.why === 'later' && !late.retargeted && late.target.weight === 190 && late.target.reps === 5 && late.record.sets[2].rpe === 8, late);
