@@ -20,7 +20,7 @@ Tests for the Session Builder and Progression Engine:
 node tests/run-tests.mjs
 ```
 
-Phone-sized browser checks (Playwright; each serves the repo on its own port): `tests/browser-test.py`, `sync-test.py`, `catchup-test.py`, `runs-test.py`, `feel-test.py`, `bugfix-test.py`.
+Phone-sized browser checks (Playwright; each serves the repo on its own port): `tests/browser-test.py`, `sync-test.py`, `catchup-test.py`, `runs-test.py`, `feel-test.py`, `bugfix-test.py`, `workout-test.py` (a whole Friday session at 360 x 698). `runs-test.py` and `feel-test.py` share a port, so run those two one after the other.
 
 ## Install on the phone
 
@@ -40,6 +40,7 @@ Phone-sized browser checks (Playwright; each serves the repo on its own port): `
 | `js/logger.js` | Saves the session record, runs progression, renders the summary; run log form |
 | `js/progression.js` | Progression Engine: rules applied after each session, e1RM, what-changed |
 | `js/sanity.js` | v1.16: flags numbers that look wrong (under the bar, far off the target, odd reps) and fixes a saved session's weights, recomputing target, records and what-changed |
+| `js/pacing.js` | v1.18: set times and set-up times that follow his pace (learned from the saved sessions; rests never change) |
 | `js/store.js` | IndexedDB wrapper, settings, backup and restore |
 | `js/export.js` | Backup JSON (share sheet or download), Excel export |
 | `js/architecture.js` | Architecture tab: diagram drawn from `data/architecture.json`, searchable |

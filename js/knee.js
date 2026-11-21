@@ -125,7 +125,7 @@ export function kneeHeld(rules, sets) {
   const worst = scored.length ? Math.max(...scored) : null;
   if (swapped.length) {
     const fb = k.fallbacks && k.fallbacks[swapped[0].exerciseId];
-    return { text: `Knee${worst != null ? ` ${worst}/10` : ''}: ${swapped.length} ${swapped.length === 1 ? 'set' : 'sets'} done as ${fb ? fb.name.toLowerCase() : 'the knee version'}.`, reason: 'knee: swapped lift' };
+    return { text: `Knee${worst != null ? ` ${worst}/10` : ''}: ${swapped.length} ${swapped.length === 1 ? 'set' : 'sets'} done as ${fb ? fb.name.toLowerCase() : 'the knee version'}.`, reason: `knee${worst != null ? ` ${worst}/10` : ''}: ${fb ? fb.name.split(',')[0].toLowerCase() : 'knee version'}` };
   }
   if (worst != null && worst >= k.swapAt) return { text: `Knee ${worst}/10 today.`, reason: `knee ${worst}/10` };
   return null;

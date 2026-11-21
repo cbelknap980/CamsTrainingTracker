@@ -20,6 +20,8 @@ export function upNextNote(step) {
 // ---- the all-out set ----
 /** The pill over the readout: 'All-out' for an all-out set, else null (the player keeps its own label). */
 export function allOutLabel(step) { return step && step.kind === 'set' && step.amrap ? 'All-out' : null; }
+/** The effort words for an all-out set (in place of "Leave 2-3 in the tank"). */
+export function allOutWords() { return 'As many good reps as you can'; }
 /** Reps as shown on the readout: '5+' for an all-out set, else null. */
 export function allOutReps(step) { return amrapRepsText(step); }
 /** The spoken target: 'at least 5 reps, then as many good reps as you can', else null. */
@@ -33,12 +35,12 @@ export function recordFlags(step) {
   return { ...(step && step.amrap ? { amrap: true, amrapFloor: step.amrapFloor } : {}), ...(step && step.kneeSwap ? { kneeSwap: true } : {}) };
 }
 
-// ---- the knee check: one row under the last-set card after the first squat or RDL work set ----
+// ---- the knee check: a pill in the last-set card's top row after the first squat or RDL work set ----
 /**
  * player: the Player (uses steps, rules, plan, s.idx, s.startedISO, persist(), renderStep()). idx: the set the
  * last-set card shows. Returns a button, or null when this set is not the one to ask after.
  */
-export function kneeAskRow(player, idx) {
+export function kneeAskPill(player, idx) {
   const { rules, plan, steps } = player;
   if (!rules.knee || idx !== askIdx(rules, steps)) return null;
   const st = steps[idx];
@@ -53,7 +55,9 @@ export function kneeAskRow(player, idx) {
     } else if (undoKneeSwap(steps, { fromIdx: from })) toast('Back to the regular lift');
     player.persist(); player.renderStep();
   };
-  return el('button', { type: 'button', class: 'knee-ask' + (cur != null ? ' done' : ''), id: 'knee-ask',
-    onclick: () => askKnee({ rules, when: 'set', title: 'Knee after that set?', current: cur, extra: { exerciseId: st.exerciseId, stepKey: `${player.s.startedISO}:${idx}` }, onSaved })
-  }, cur != null ? `Knee ${cur}/10 · tap to change` : 'Knee? Tap to rate 0-10');
+  const high = cur != null && cur >= rules.knee.swapAt;
+  return el('button', { type: 'button', class: 'knee-pill' + (cur != null ? ' done' : '') + (high ? ' high' : ''), id: 'knee-ask',
+    'aria-label': cur != null ? `Knee ${cur} out of 10, tap to change` : 'Rate the knee, 0 to 10',
+    onclick: e => { e.stopPropagation(); askKnee({ rules, when: 'set', title: 'Knee after that set?', current: cur, extra: { exerciseId: st.exerciseId, stepKey: `${player.s.startedISO}:${idx}` }, onSaved }); }
+  }, cur != null ? `Knee ${cur}` : 'Knee?');
 }

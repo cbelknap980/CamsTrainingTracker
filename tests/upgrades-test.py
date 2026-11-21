@@ -36,6 +36,28 @@ def at(page, iso):
 def store(page, js):
     return page.evaluate(f"() => import('./js/store.js').then(m => {js})")
 
+def kind(page): return page.locator('.step-kind').inner_text().strip().lower() if page.locator('.step-kind').count() else '?'
+def name(page): return page.locator('.step-main .step-name').first.inner_text().strip() if page.locator('.step-main .step-name').count() else ''
+def secs(page):
+    t = page.locator('#timer').inner_text() if page.locator('#timer').count() else '0:00'
+    m, s = t.split(':'); return int(m) * 60 + int(s)
+def walk(page, done, limit=400):
+    """Taps through the workout (Set-up done, Done, Skip rest, timed steps run out) until done() is true."""
+    for _ in range(limit):
+        if done(): return True
+        if page.locator('#confirm-btn').count(): page.click('#confirm-btn')
+        elif kind(page) in ('timed', 'stretch'): page.clock.run_for((secs(page) + 1) * 1000)
+        else: page.click('.player-actions button.btn.primary')
+        page.clock.run_for(700)   # v1.18: a second main-button tap within 0.6 s is ignored
+        page.wait_for_timeout(30)
+    return False
+def fits(page):
+    return page.evaluate("() => { const p = document.querySelector('.player'); const m = p && p.querySelector('.step-main'); return !!m && !p.classList.contains('overflowing') && m.scrollHeight <= m.clientHeight + 1 && document.documentElement.scrollWidth <= window.innerWidth + 1; }")
+def end_early(page):
+    page.click('#more-btn'); page.wait_for_selector('.menu')
+    page.click('.menu-item:has-text("End session")'); page.click('.modal button:has-text("End session")')
+    page.wait_for_selector('h1:has-text("Review and save")')
+
 with sync_playwright() as p:
     chrome = os.environ.get('CHROME_PATH') or next((c for c in ('/usr/bin/google-chrome', '/opt/pw-browsers/chromium') if os.path.exists(c)), None)
     browser = p.chromium.launch(executable_path=chrome, headless=True, args=['--no-sandbox'])
@@ -110,6 +132,56 @@ with sync_playwright() as p:
     check('Progress shows the knee scores', '2/10' in kt and '2 days rated' in kt, kt)
     page.locator('#knee-trend').screenshot(path=os.path.join(SHOTS, 'v119-knee-trend.png'))
     check('no page errors', not errors, errors)
+
+    print('In the workout (Lift 1, week 4, 360 x 640)')
+    ctx2 = browser.new_context(viewport={'width': 360, 'height': 640}, reduced_motion='reduce', device_scale_factor=2, is_mobile=True, has_touch=True, timezone_id='America/Denver')
+    page = ctx2.new_page(); errors = []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.add_init_script("window.SpeechSynthesisUtterance = function (t) { this.text = t; }; window.__said = []; Object.defineProperty(window, 'speechSynthesis', { value: { cancel() {}, speak(u) { window.__said.push(u.text); } }, configurable: true });")
+    page.clock.install(time=datetime.datetime.fromisoformat('2026-12-07T06:00:00-07:00'))
+    page.goto(f'http://localhost:{PORT}/'); page.wait_for_selector('.card.accent h1')
+    T2 = dict(TARGETS, strict_press={'weight': 95, 'reps': 5}, weighted_pullup={'weight': 25, 'reps': 5}, incline_db_press={'weight': 70, 'reps': 8}, cs_row={'weight': 100, 'reps': 8}, incline_curl={'weight': 30, 'reps': 10})
+    page.evaluate("([t]) => import('./js/store.js').then(async m => { await m.setTargets(t); await m.setPairTotals('none'); await m.setExNote('back_squat', 'Pins at 7, narrow stance'); })", [T2])
+    page.reload(); page.wait_for_selector('.card.accent h1')
+    page.click('#today-card .btn.primary'); page.wait_for_selector('#start-workout'); page.click('#start-workout'); page.wait_for_selector('.player')
+    check('the set-up screen for the squat shows his note', walk(page, lambda: page.locator('#up-next .upnext-note').count() > 0 and 'Back squat' in page.locator('#up-next').inner_text()), page.locator('#up-next').inner_text() if page.locator('#up-next').count() else '')
+    check('the note reads as typed, and the screen still fits', 'Pins at 7, narrow stance' in page.locator('#up-next .upnext-note').inner_text() and fits(page))
+    page.screenshot(path=os.path.join(SHOTS, 'v119-setup-note.png'))
+    check('reached the first squat work set', walk(page, lambda: kind(page) == 'work' and name(page) == 'Back squat'), (kind(page), name(page)))
+    check('no knee question before the first work set is done', page.locator('#knee-ask').count() == 0)
+    page.click('.player-actions button.btn.primary'); page.clock.run_for(700); page.wait_for_timeout(100)
+    check('after it, the last-set card asks about the knee in its top row', page.locator('#just-done #knee-ask').count() == 1 and page.locator('#knee-ask').inner_text().strip() == 'Knee?', page.locator('#just-done').inner_text() if page.locator('#just-done').count() else '')
+    check('the rest screen still fits with the knee button', fits(page))
+    page.screenshot(path=os.path.join(SHOTS, 'v119-knee-ask.png'))
+    page.click('#knee-ask'); page.wait_for_selector('.knee-sheet')
+    page.screenshot(path=os.path.join(SHOTS, 'v119-knee-sheet.png'))
+    page.click('.knee-sheet [data-score="5"]'); page.wait_for_timeout(200)
+    check('a 5 switches the rest of the squat sets to the box squat', 'Box squat' in page.locator('#up-next').inner_text() and page.locator('#knee-ask').inner_text().strip() == 'Knee 5', (page.locator('#up-next').inner_text(), page.locator('#knee-ask').inner_text()))
+    check('the score is saved with the set and in the knee log', page.evaluate("() => import('./js/store.js').then(m => m.getKneeLog())")[0]['score'] == 5)
+    check('reached the all-out set (box squat, set 3)', walk(page, lambda: kind(page) == 'all-out'), (kind(page), name(page)))
+    hero = page.locator('#hero-readout').inner_text()
+    check('the all-out set reads 5+, names the box squat, and opens the reps box', '5+' in hero and 'As many good reps as you can' in hero and 'tank' not in hero and name(page).startswith('Box squat') and page.locator('#edit-panel:not([hidden])').count() == 1, (hero, name(page)))
+    check('its voice line asks for as many good reps as he can', any('as many good reps as you can' in x for x in page.evaluate('window.__said')), page.evaluate('window.__said')[-3:])
+    check('the all-out screen fits', fits(page))
+    page.screenshot(path=os.path.join(SHOTS, 'v119-allout.png'))
+    page.fill('#in-reps', '9'); page.click('.player-actions button.btn.primary'); page.clock.run_for(700); page.wait_for_timeout(150)
+    end_early(page)
+    rev = page.locator('.review-card', has_text='Back squat').first.inner_text()
+    check('review: the box squat sets hold the squat weight because of the knee', 'knee 5/10: box squat' in rev and 'Hold' in rev, rev)
+    page.screenshot(path=os.path.join(SHOTS, 'v119-review-knee.png'), full_page=True)
+
+    print('In the workout (Lift 2, week 4): an all-out press')
+    page.evaluate("() => import('./js/store.js').then(m => m.kvDel('pendingReview'))")
+    page.clock.set_system_time(datetime.datetime.fromisoformat('2026-12-09T06:00:00-07:00')); page.goto(f'http://localhost:{PORT}/'); page.wait_for_timeout(800)
+    if page.locator('button:has-text("Discard")').count(): page.locator('button:has-text("Discard")').first.click(); page.wait_for_timeout(300)
+    page.wait_for_selector('#today-card .btn.primary')
+    page.click('#today-card .btn.primary'); page.wait_for_selector('#start-workout'); page.click('#start-workout'); page.wait_for_selector('.player')
+    check('reached the all-out strict press (set 4)', walk(page, lambda: kind(page) == 'all-out' and name(page) == 'Strict press'), (kind(page), name(page)))
+    page.fill('#in-reps', '11'); page.click('.player-actions button.btn.primary'); page.clock.run_for(700); page.wait_for_timeout(150)
+    end_early(page)
+    rev = page.locator('.review-card', has_text='Strict press').first.inner_text()
+    check('review: the press goes up 7.5 lb (3 steps) on an all-out 11 at 95', 'all-out set: 11 reps' in rev and 'Up +7.5' in rev, rev)
+    check('no page errors in the workout', not errors, errors)
     browser.close()
 
 server.terminate()

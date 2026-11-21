@@ -116,6 +116,11 @@ export async function addKneeScore(entry) {
 export const getInProgress = () => kvGet('inProgress');
 export const setInProgress = state => kvSet('inProgress', state);
 export const clearInProgress = () => kvDel('inProgress');
+// v1.18: a finished session waiting on Review. It is kept until Save (or Discard), so closing the app or a reload on
+// the Review page does not lose the workout.
+export const getPendingReview = () => kvGet('pendingReview');
+export const setPendingReview = draft => kvSet('pendingReview', JSON.parse(JSON.stringify(draft)));
+export const clearPendingReview = () => kvDel('pendingReview');
 
 // ---- settings: defaults from data/settings.json + overrides in kv ----
 let defaults = null;
@@ -185,6 +190,11 @@ export async function doublePairWeights(ids) {
     for (const st of ip.timeline.steps) if (set.has(st.exerciseId)) { x2(st.target, ['weight']); x2(st.record, ['weight']); if (st.record) x2(st.record.target, ['weight']); }
     await setInProgress(ip);
   }
+  const pr = await getPendingReview();
+  if (pr && pr.sets) {
+    for (const st of pr.sets) if (set.has(st.exerciseId)) { x2(st, ['weight']); x2(st.target, ['weight']); }
+    await setPendingReview(pr);
+  }
 }
 
 // ---- backup and restore ----
@@ -222,6 +232,7 @@ export async function importAll(backup, opts = {}) {
     t.objectStore('kv').put(backup.targets || {}, 'targets');
     t.objectStore('kv').put(backup.settings || {}, 'settings');
     t.objectStore('kv').delete('inProgress');
+    t.objectStore('kv').delete('pendingReview');
     // v1.9: a backup from before check-ins existed leaves them as they are
     if (backup.checkins) t.objectStore('kv').put(backup.checkins, 'checkins');
     if (backup.coachApplied) t.objectStore('kv').put(backup.coachApplied, 'coachApplied');

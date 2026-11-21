@@ -8,7 +8,7 @@ import { el, toast, closeModal, showModal, effortChips, countUp } from './ui.js'
 import { ringsCard } from './rings.js';
 import { sessionNumbers, drawShareCard, shareOrSave } from './share-card.js';
 import { icon } from './icons.js';
-import { numberFlag } from './sanity.js';
+import { numberFlag, impossibleNumber } from './sanity.js';
 
 /** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
 export async function previewSession(draft, { plan, rules }) {
@@ -62,9 +62,23 @@ function buildRecord(draft, plan) {
     sets: draft.sets.map(s => Object.assign(s, { logName: plan.exercises[s.exerciseId] ? (plan.exercises[s.exerciseId].logName || plan.exercises[s.exerciseId].name) : s.name })),
     whatChanged: [], e1rms: {}, prs: []
   };
+  // v1.18: start to finish with the pauses in it (Cameron: "I want to see total time in gym")
+  if (draft.gymSeconds != null) record.gymSeconds = draft.gymSeconds;
   if (tl.catchUp) { record.catchUp = true; record.catchUpInfo = tl.catchUpInfo || {}; }
   if (!record.id || draft.recordId) record.id = draft.recordId || record.id;
   return record;
+}
+
+/** v1.18: seconds in the gym, start to finish. Sessions saved before v1.18 have working time and paused time only. */
+export const gymSecondsOf = r => (r && r.gymSeconds != null ? r.gymSeconds : ((r && r.actualSeconds) || 0) + ((r && r.pausedSeconds) || 0));
+/** v1.18: seconds paused while in the gym (a long gap with the app closed is neither gym time nor a pause in it). */
+export const pausedInGym = r => Math.max(0, gymSecondsOf(r) - ((r && r.actualSeconds) || 0));
+/** v1.18: a set the timer logged as planned that nobody has checked since (the player sets `unconfirmed`). */
+export const isUnchecked = st => !!(st && st.unconfirmed && st.done && !st.skipped && !st.ramp);
+/** "1 h 33 min" past the hour, "47 min" under it. */
+export function fmtLong(seconds) {
+  const m = Math.round(seconds / 60);
+  return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
 }
 
 export const VERDICT = {
@@ -90,10 +104,11 @@ export function setIssue(st, ex) {
   return '';
 }
 
-export async function renderReview(container, draft, ctx, { onSave, onCancel }) {
+export async function renderReview(container, draft, ctx, { onSave, onCancel, onPaint, onDiscard }) {
   const { plan, rules } = ctx;
   const gate = !(rules.review && rules.review.blockSaveOnOpenItems === false);
-  const overrides = {};
+  // v1.18: next-time numbers he changed live on the draft, so they are kept with it (it is stored until Save)
+  const overrides = draft.overrides && typeof draft.overrides === 'object' ? draft.overrides : (draft.overrides = {});
   draft.recordId = draft.recordId || newId('ses');
   const settings = await getSettings();
 
@@ -103,7 +118,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     const over = record.actualSeconds - record.plannedSeconds;
     container.appendChild(el('div', { class: 'card' }, [
       el('h1', {}, 'Review and save'),
-      el('p', { class: 'muted' }, `${record.sessionName} · week ${record.week} · ${fmtMinutes(record.actualSeconds)} (plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)})${record.status !== 'complete' ? ' · ended early' : ''}`),
+      el('p', { class: 'muted', id: 'review-time' }, `${record.sessionName} · week ${record.week} · ${fmtMinutes(record.actualSeconds)} (plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)})${pausedInGym(record) > 30 ? ` · ${fmtLong(gymSecondsOf(record))} in the gym` : ''}${record.status !== 'complete' ? ' · ended early' : ''}`),
       el('p', { class: 'muted', style: 'margin:0' }, 'Tap a set to correct it. The arrow is the plan’s verdict for next time; change the next weight if you disagree.')
     ]));
 
@@ -113,7 +128,9 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
       const ex = plan.exercises[st.exerciseId];
       const issue = setIssue(st, ex);
       const flag = issue ? null : (st.done ? numberFlag(st, ex, rules) : null);
-      return { st, ex, why: issue || (flag ? `${fmtWeight(st.weight)} lb: ${flag.short}` : ''), flag };
+      // v1.18: a flag about reps names the reps (a bodyweight set read " lb: 0 reps")
+      const flagWhy = f => (f.code === 'reps' ? (f.short === `${st.reps} reps` ? f.short : `${st.reps} reps: ${f.short}`) : `${fmtWeight(st.weight)} lb: ${f.short}`);
+      return { st, ex, why: issue || (flag ? flagWhy(flag) : ''), flag };
     }).filter(x => x.why);
     const skippedOpen = open.filter(x => x.why === 'skipped');
     const flaggedOpen = open.filter(x => x.flag);
@@ -130,6 +147,27 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
       ]));
     } else {
       container.appendChild(el('div', { class: 'card review-open clear', id: 'review-clear' }, [el('b', {}, '✓ Every set is filled in or marked skipped.')]));
+    }
+
+    // v1.18: sets whose timer ran out before an effort was picked. Nobody confirmed them, so they are listed here.
+    // Saving does not wait for them, but a lift saved with one unrated keeps its target for the next session (rules R4,
+    // rule 1). This page is the only place to rate them: a saved session has no rating control.
+    const unchecked = record.sets.filter(st => isUnchecked(st) && !open.some(x => x.st === st));
+    if (unchecked.length) {
+      const one = unchecked.length === 1;
+      const oneLift = new Set(unchecked.map(st => st.exerciseId)).size === 1;
+      container.appendChild(el('div', { class: 'card review-unchecked', id: 'review-unchecked' }, [
+        el('h2', {}, `${unchecked.length} ${one ? 'set was' : 'sets were'} logged by the timer`),
+        el('p', { class: 'muted', style: 'margin:0 0 6px' }, `The clock ran out before an effort was picked. Saved without a rating, ${oneLift ? 'that lift keeps its' : 'those lifts keep their'} target next time. Tap one to rate it or correct it.`),
+        ...unchecked.map(st => {
+          const ex = plan.exercises[st.exerciseId];
+          return el('div', { class: 'open-item unchecked', onclick: () => editSet(st, ex) }, [
+            el('span', {}, `${ex ? ex.name : st.name}${st.round ? ', round ' + st.round : (st.setIndex ? ', set ' + st.setIndex : '')}`),
+            el('span', { class: 'why' }, `${st.weight != null ? weightWithPair(ex, st.weight) + ' × ' : ''}${st.reps != null ? st.reps : '?'} ›`)
+          ]);
+        }),
+        el('button', { class: 'btn', id: 'confirm-unchecked', style: 'margin-top:10px', onclick: () => { unchecked.forEach(st => { delete st.unconfirmed; }); paint(); } }, unchecked.length === 1 ? 'It went as planned' : 'They all went as planned')
+      ]));
     }
 
     const order = [];
@@ -153,7 +191,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
       const rows = sets.map((st, i) => el('div', { class: 'review-set' + (st.skipped ? ' skipped' : '') + (setIssue(st, ex) || (st.done && numberFlag(st, ex, rules)) ? ' flag' : ''), onclick: () => editSet(st, ex) }, [
         el('span', { class: 'muted' }, st.baseline ? 'Base' : (st.retest ? 'Test' : (st.round ? `R${st.round}` : `${st.setIndex || i + 1}`))),
         setIssue(st, ex) ? el('span', { class: 'flag-text' }, st.skipped ? 'skipped: confirm or fill in' : `${setIssue(st, ex)}: tap to add`) : el('span', {}, st.skipped ? 'skipped' : `${st.weight != null ? weightWithPair(ex, st.weight) : (st.holdSeconds ? '' : (ex && ex.equipment === 'bodyweight' ? 'bw' : '? lb'))} × ${st.reps != null ? st.reps : '?'}${st.holdSeconds ? ' s' : ''}`),
-        el('span', { class: 'muted' }, st.rpe != null && !st.skipped ? effortLabel(rules, st.rpe) : ''),
+        el('span', { class: 'muted' + (isUnchecked(st) ? ' not-rated' : '') }, isUnchecked(st) ? 'not rated' : (st.rpe != null && !st.skipped ? effortLabel(rules, st.rpe) : '')),
         st.pr && st.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : el('span', { class: 'muted' }, '›')
       ]));
       card.appendChild(el('div', { class: 'review-sets' }, rows));
@@ -171,9 +209,11 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     if (result.prs && result.prs.length) container.appendChild(el('div', { class: 'card pr-card' }, [el('h2', {}, 'Personal records'), el('ul', { class: 'lines' }, result.prs.map(p => el('li', {}, p.kind === 'e1rm' ? `${p.name}: e1RM ${p.value} lb (was ${p.prev})` : `${p.name}: heaviest ${fmtWeight(p.value)} lb (was ${fmtWeight(p.prev)})`)))]));
     container.appendChild(el('div', { class: 'stack' }, [
       el('button', { class: 'btn primary', id: 'save-session', disabled: gate && open.length > 0, onclick: () => { if (gate && open.length) return; onSave(overrides); } }, gate && open.length ? `Save session (${open.length} to check first)` : 'Save session'),
-      onCancel ? el('button', { class: 'btn ghost', onclick: onCancel }, 'Back') : null
+      onCancel ? el('button', { class: 'btn ghost', onclick: onCancel }, 'Back') : null,
+      onDiscard ? el('button', { class: 'btn ghost danger-text', id: 'discard-session', onclick: onDiscard }, 'Discard this session') : null
     ]));
     window.scrollTo(0, 0);
+    if (onPaint) onPaint();
   }
 
   function editSet(st, ex) {
@@ -181,23 +221,42 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     const w = el('input', { type: 'number', step: '2.5', value: st.weight == null ? '' : st.weight, inputmode: 'decimal' });
     const r = el('input', { type: 'number', step: '1', value: st.reps == null ? '' : st.reps, inputmode: 'numeric' });
     let rpe = st.rpe;
-    const chips = effortChips(rules, rpe, lvl => { rpe = lvl.rpe; chips.querySelectorAll('.effort-chip').forEach(b => b.classList.toggle('on', b.dataset.key === lvl.key)); });
+    let picked = false;
+    const chips = effortChips(rules, rpe, lvl => { rpe = lvl.rpe; picked = true; chips.querySelectorAll('.effort-chip').forEach(b => b.classList.toggle('on', b.dataset.key === lvl.key)); });
     const flag = st.done ? numberFlag(st, ex, rules) : null;
+    // v1.18: the effort on a set the timer logged is the app's guess, so no button is lit until he picks one
+    const guess = isUnchecked(st);
+    if (guess) chips.querySelectorAll('.effort-chip').forEach(b => b.classList.remove('on'));
+    // v1.18: a number that cannot be right is refused, said inside the sheet (a toast sits behind it)
+    const refused = el('div', { class: 'num-flag', id: 'edit-refused', role: 'alert', hidden: true });
     showModal(el('div', {}, [
       el('h2', {}, `${st.name}${st.setIndex ? ', set ' + st.setIndex : ''}`),
       flag ? el('div', { class: 'num-flag', id: 'num-flag' }, [el('b', {}, 'Check this number. '), `${flag.text}.`]) : null,
+      guess ? el('p', { class: 'muted', id: 'unchecked-note', style: 'margin:0 0 10px' }, 'The timer logged this set before an effort was picked. Pick the effort so it counts. New numbers alone are saved, and the set stays not rated.') : null,
       el('div', { class: 'grid2' }, [
         isBw ? el('div') : el('div', { class: 'field' }, [el('label', {}, ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight')), w]),
         el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r])
       ]),
       st.holdSeconds ? null : el('div', { class: 'field' }, [el('label', {}, 'Effort'), chips]),
+      refused,
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
         flag ? el('button', { class: 'btn', id: 'number-ok', onclick: () => { st.numberOk = true; closeModal(); paint(); } }, 'It\'s right') : null,
         st.skipped
           ? el('button', { class: 'btn', onclick: () => { st.skipOk = true; closeModal(); paint(); } }, 'I skipped it')
-          : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.skipOk = true; st.done = false; closeModal(); paint(); } }, 'Mark skipped'),
-        el('button', { class: 'btn primary', onclick: () => { st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = rpe; st.done = true; st.skipped = false; st.skipOk = false; closeModal(); paint(); } }, st.skipped ? 'I did it: save' : 'Save')
+          : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.skipOk = true; st.done = false; delete st.unconfirmed; closeModal(); paint(); } }, 'Mark skipped'),
+        el('button', { class: 'btn primary', id: 'edit-set-save', onclick: () => {
+          const typed = { weight: w.value === '' ? null : Number(w.value), reps: r.value === '' ? null : Number(r.value) };
+          // v1.18: reps below 0 or part of a rep are refused; the sheet stays open
+          const bad = impossibleNumber(typed, ex, { hold: !!st.holdSeconds });
+          if (bad) { refused.textContent = `${bad}.`; refused.hidden = false; return; }
+          // v1.18: the effort on a set the timer logged is a guess. Without a pick, Save keeps the new numbers and the
+          // set stays not rated (a correction alone is not a rating, as on the workout's last-set card); it used to
+          // confirm the guess, and then refused the numbers until an effort was picked, which pushed him to make one up
+          const rated = !guess || picked || !!st.holdSeconds;
+          st.weight = typed.weight; st.reps = typed.reps; st.done = true; st.skipped = false; st.skipOk = false;
+          if (rated) { st.rpe = rpe; delete st.unconfirmed; }
+          closeModal(); paint(); } }, st.skipped ? 'I did it: save' : 'Save')
       ])
     ]));
   }
@@ -222,7 +281,8 @@ export function renderSummary(container, record, { onDone, onBackup, prev, rings
       tile(done === planned ? ' good' : '', done, `/ ${planned}`, 'sets logged'),
       tile('', Math.round(record.actualSeconds / 60), 'min', `plan ${fmtMinutes(record.plannedSeconds)}, ${over >= 0 ? '+' : '−'}${Math.round(Math.abs(over) / 60)}`),
       n.volume ? tile(n.change > 0 ? ' good' : '', n.volume, 'lb', n.change != null ? `${n.change >= 0 ? '+' : '−'}${Math.abs(n.change)}% vs last time` : 'lifted', v => Math.round(v).toLocaleString()) : null,
-      record.pausedSeconds > 30 ? tile('', Math.round(record.pausedSeconds / 60), 'min', 'paused') : null
+      // v1.18: with a pause in it, the time in the gym next to the working time (it used to show the pause alone)
+      pausedInGym(record) > 30 ? el('div', { class: 'done-stat', id: 'gym-stat' }, [el('div', { class: 'ds-num' }, [num(Math.round(gymSecondsOf(record) / 60)), el('small', {}, 'min')]), el('span', {}, `in the gym, ${Math.max(1, Math.round(pausedInGym(record) / 60))} paused`)]) : null
     ]),
     record.trims.length ? el('p', { class: 'done-trims' }, [el('b', {}, 'Trimmed: '), record.trims.join('; ')]) : null,
     rings ? ringsCard(rings, { compact: true }) : null
@@ -271,7 +331,7 @@ export function setsTable(sets) {
     el('td', {}, [`${s.name}${s.baseline ? ' (baseline)' : ''}${s.retest ? ' (retest)' : ''}`, s.pr && s.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null]),
     el('td', { class: 'num' }, s.setIndex != null ? (s.round ? `R${s.round}` : `${s.setIndex || ''}`) : ''),
     el('td', { class: 'num' }, s.skipped ? 'skipped' : `${s.weight != null ? weightWithPair(getData().plan.exercises[s.exerciseId], s.weight) : (s.holdSeconds ? '' : 'bw')} × ${s.reps != null ? s.reps : '?'}${s.holdSeconds ? ' s' : ''}`),
-    el('td', { class: 'num' }, s.rpe != null && !s.skipped ? effortLabel(getData().rules, s.rpe) : '')
+    el('td', { class: 'num' + (isUnchecked(s) ? ' muted' : '') }, isUnchecked(s) ? 'not rated' : (s.rpe != null && !s.skipped ? effortLabel(getData().rules, s.rpe) : ''))
   ]));
   return el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'Effort')]), ...rows]);
 }

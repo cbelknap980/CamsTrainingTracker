@@ -15,6 +15,14 @@ def check(name, cond, info=''):
     print(('  ok   ' if cond else '  FAIL ') + name + ('' if cond else f'  -> {info}'))
     if not cond: fails.append(name)
 
+def tap_main(page, sel='.player-actions button.btn.primary'):
+    """v1.18: the app ignores a main-button tap within 0.6 s of the one before (a double tap), so a test that taps on
+    purpose lets the clock move that far first."""
+    gap = page.evaluate("Date.now() - (window.__lastMainTap || 0)")
+    if gap < 650: page.clock.run_for(int(650 - gap))
+    page.click(sel)
+    page.evaluate("window.__lastMainTap = Date.now()")
+
 TARGETS = {'back_squat': {'weight': 170, 'reps': 4}, 'rdl': {'weight': 150, 'reps': 6}, 'calf_raise': {'weight': 135, 'reps': 10}, 'bss': {'weight': 60, 'reps': 8},
            'leg_curl': {'weight': 80, 'reps': 8}, 'curl': {'weight': 50, 'reps': 10}, 'oh_tri_ext': {'weight': 40, 'reps': 10}}
 PREV = {'id': 'ses_prev', 'sessionId': 'lift1', 'sessionName': 'Lift 1: Legs', 'logName': 'Lift 1', 'week': 2, 'date': '2026-11-23', 'startedAt': '2026-11-23T13:00:00.000Z',
@@ -27,11 +35,20 @@ def secs(page):
 def kind(page): return page.locator('.step-kind').inner_text().strip().lower()
 def name(page): return page.locator('.step-name').first.inner_text().strip()
 def where(page): return page.locator('.step-where').first.inner_text().strip() if page.locator('.step-where').count() else ''
+def screen_key(page):
+    return page.evaluate("() => ['.step-kind', '.step-name', '#where', '.step-where'].map(s => { const e = document.querySelector(s); return e ? e.textContent.trim() : ''; }).join('|')")
+def run_out(page):
+    """Let the clock run until the step ends by itself. v1.18: a step done one side at a time has two clocks and no #timer."""
+    if page.locator('#timer').count(): page.clock.run_for((secs(page) + 1) * 1000); return
+    key = screen_key(page)
+    for _ in range(600):
+        page.clock.run_for(1000)
+        if not page.locator('.player').count() or screen_key(page) != key: return
 def step(page):
     k = kind(page)
-    if page.locator('#confirm-btn').count(): page.click('#confirm-btn')
-    elif k in ('timed', 'stretch') or (k == 'set up' and not page.locator('#up-next').count()): page.clock.run_for((secs(page) + 1) * 1000)
-    else: page.click('.player-actions button.btn.primary')
+    if page.locator('#confirm-btn').count(): tap_main(page, '#confirm-btn'); page.clock.run_for(700)   # v1.18: a second tap within 0.6 s is ignored
+    elif k in ('timed', 'stretch') or (k == 'set up' and not page.locator('#up-next').count()): run_out(page)
+    else: tap_main(page, '.player-actions button.btn.primary')
     page.wait_for_timeout(60)
 def active_tab(page): return page.locator('#tabs .tab.active').get_attribute('data-view')
 def small_targets(page):
@@ -99,7 +116,7 @@ with sync_playwright() as p:
     print('Workout')
     page.click('#start-workout'); page.wait_for_selector('.player')
     bar = lambda: page.evaluate("document.querySelector('meta[name=theme-color]').content")
-    for _ in range(40):
+    for _ in range(80):   # v1.18: each bar change on the way up waits for Set-up done, so there are more taps
         if kind(page) == 'work' and name(page) == 'Back squat': break
         step(page)
     check('status bar takes the work color', bar() == '#12432f', bar())
@@ -112,17 +129,17 @@ with sync_playwright() as p:
     page.click('.player-actions .secondary button:has-text("Edit")'); page.wait_for_selector('#in-weight')
     page.fill('#in-weight', ''); page.click('.stepper:has(#in-weight) button[aria-label=more]')
     check('v1.15 barbell: + on an empty weight box starts at the 45 lb bar', page.locator('#in-weight').input_value() == '45', page.locator('#in-weight').input_value())
-    page.fill('#in-weight', '5'); page.click('.player-actions button.btn.primary'); page.wait_for_timeout(100)
+    page.fill('#in-weight', '5'); tap_main(page, '.player-actions button.btn.primary'); page.wait_for_timeout(100)
     check('v1.16 a weight under the bar is held: same set, the number stays, a note asks to fix it or tap Done again', page.locator('#num-flag').is_visible() and 'empty bar' in page.locator('#num-flag').inner_text() and 'Set 1 of 3' in where(page) and page.locator('#in-weight').input_value() == '5', (where(page), page.locator('#edit-panel').inner_text()[:200]))
     page.screenshot(path=f'{SHOTS}/v116-flag-in-workout.png')
     page.fill('#in-weight', '170'); page.click('.player-actions .secondary button:has-text("Hide")'); page.wait_for_timeout(60)
-    page.click('.player-actions button.btn.primary'); page.wait_for_selector('#jd-undo')
+    tap_main(page, '.player-actions button.btn.primary'); page.wait_for_selector('#jd-undo')
     check('rest screen offers Undo for the set just logged', page.locator('#jd-undo').is_visible())
     page.screenshot(path=f'{SHOTS}/v114-rest-undo.png')
     check('status bar takes the rest color', bar() == '#1a3c73', bar())
     page.click('#jd-undo'); page.wait_for_timeout(100)
     check('Undo goes back to set 1, not logged', kind(page) == 'work' and 'Set 1 of 3' in where(page), (kind(page), where(page)))
-    page.click('.player-actions button.btn.primary'); page.wait_for_timeout(80)
+    tap_main(page, '.player-actions button.btn.primary'); page.wait_for_timeout(80)
     for _ in range(10):
         if kind(page) == 'work': break
         step(page)
@@ -137,9 +154,9 @@ with sync_playwright() as p:
     page.go_back(); page.wait_for_timeout(150)
     check('Back again closes the menu, the workout stays', page.locator('.modal').is_hidden() and page.locator('.player').count() == 1)
     if page.locator('#edit-panel').is_hidden(): page.click('.player-actions .secondary button:has-text("Edit")')
-    page.fill('#in-weight', '400'); page.click('.player-actions button.btn.primary'); page.wait_for_timeout(100)
+    page.fill('#in-weight', '400'); tap_main(page, '.player-actions button.btn.primary'); page.wait_for_timeout(100)
     check('v1.16 far over the target is held too', page.locator('#num-flag').is_visible() and 'Set 2 of 3' in where(page), where(page))
-    page.click('.player-actions button.btn.primary'); page.wait_for_timeout(80)
+    tap_main(page, '.player-actions button.btn.primary'); page.wait_for_timeout(80)
     check('v1.16 Done a second time keeps the number', 'Set 2 of 3' not in where(page) or kind(page) != 'work', (kind(page), where(page)))
     page.click('#more-btn'); page.click('text=End session early'); page.click('.modal button:has-text("End session")')
     page.wait_for_selector('h1:has-text("Review and save")')

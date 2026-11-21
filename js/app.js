@@ -3,10 +3,11 @@
 import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentFor, isPair, pairText, weightWithPair } from './data.js';
 import { buildTimeline, lastResults } from './builder.js';
 import { icon } from './icons.js';
-import { Player } from './player.js';
-import { saveSession, renderSummary, renderReview, setsTable } from './logger.js';
+import { Player, playTones } from './player.js';
+import { learnPacing, pacingLines, pacingConfig } from './pacing.js';
+import { saveSession, renderSummary, renderReview, setsTable, gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from './logger.js';
 import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progression.js';
-import { getTargets, setTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
+import { getTargets, setTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getPendingReview, setPendingReview, clearPendingReview, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
@@ -19,7 +20,7 @@ import { renderPlan } from './plan-view.js';
 import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp } from './ui.js';
 import { weekRings, ringsCard } from './rings.js';
-import { flaggedGroups, applyNumberFix } from './sanity.js';
+import { flaggedGroups, applyNumberFix, impossibleNumber } from './sanity.js';
 import { getExNotes, getKneeLog } from './store.js';
 import { noteText, noteLine, editNote } from './notes.js';
 import { swapScore, swappable, applyKneeSwap, morningDue } from './knee.js';
@@ -177,12 +178,36 @@ async function syncCoach(rerender) {
 
 async function openApp() {
   const inProgress = await getInProgress();
-  if (inProgress && inProgress.status === 'running' && Date.now() - (inProgress.lastTick || 0) < D.rules.timing.resumeWindowHours * 3600000) {
-    offerResume(inProgress);
-  } else {
-    if (inProgress) clearInProgress().catch(() => {});
-    if (!(await openShortcut())) showTab('home');
+  // v1.18: a finished session that was never saved comes back first (the app closed or reloaded on Review)
+  const pending = await pendingReview();
+  if (pending) {
+    // its own in-progress copy, if the app closed before that was cleared, is not offered as a Resume
+    if (inProgress && inProgress.startedISO === pending.startedAt) clearInProgress().catch(() => {});
+    onSessionFinished(pending, { restored: true });
+    toast('This session is not saved yet. Check it and tap Save.', 4500);
+    return;
   }
+  if (inProgress && inProgress.status === 'running') {
+    const fresh = Date.now() - (inProgress.lastTick || 0) < D.rules.timing.resumeWindowHours * 3600000;
+    // v1.18: past the resume window a session with sets logged is offered to save or discard (it was deleted
+    // without a word after 3 hours away, logged sets and all)
+    const logged = ((inProgress.timeline && inProgress.timeline.steps) || []).some(st => st.kind === 'set' && st.record && st.record.done && !st.record.skipped);
+    if (fresh || logged) { offerResume(inProgress, { stale: !fresh }); return; }
+  }
+  if (inProgress) clearInProgress().catch(() => {});
+  if (!(await openShortcut())) showTab('home');
+}
+
+/**
+ * v1.18: the finished session waiting on Review, or null. One that was saved after all (the app closed between Save
+ * and the summary) or that cannot be read is dropped.
+ */
+async function pendingReview() {
+  const p = await getPendingReview().catch(() => null);
+  if (!p) return null;
+  const sessions = p.timeline && Array.isArray(p.sets) ? await getSessions() : null;
+  if (!sessions || (p.recordId && sessions.some(x => x.id === p.recordId))) { await clearPendingReview().catch(() => {}); return null; }
+  return p;
 }
 
 /**
@@ -317,12 +342,14 @@ async function renderHome() {
   // v1.8 catch-up: sets skipped or not reached this week, and lifts whose day passed with nothing logged
   const allSessions = await getSessions();
   const allRuns = await getRuns();
+  // v1.18: the minutes shown here use the set and set-up times learned from his pace, like the workout itself
+  const pacing = learnPacing({ sessions: allSessions, plan: D.plan, rules: D.rules, settings });
   const owed = week >= 1 && week <= 12 ? weekOwed({ plan: D.plan, sessions: allSessions, week, today }) : { lifts: [], totalSets: 0, missed: [] };
   const catchUp = owed.totalSets ? buildCatchUpSession(D.plan, D.rules, owed) : null;
   const hasOwed = !!(catchUp || owed.missed.length);
   const catchUpBody = (card, primary) => {
     if (catchUp) {
-      const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session: catchUp, week, targets });
+      const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session: catchUp, week, targets, pacing });
       card.appendChild(el('p', { class: primary ? '' : 'muted' }, `${owed.totalSets} ${owed.totalSets === 1 ? 'set' : 'sets'} left over from this week, about ${fmtMinutes(tl.plannedSeconds)} with warm-up and stretch.`));
       card.appendChild(el('ul', { class: 'lines owed-list' }, owedLines(owed).map(l => el('li', {}, [el('b', {}, `${l.short}: `), l.text]))));
       card.appendChild(el('button', { class: 'btn ' + (primary ? 'primary' : ''), id: 'catchup-start', onclick: () => previewSession(catchUp, week) }, primary ? 'Start catch-up' : 'Do the catch-up now'));
@@ -356,6 +383,16 @@ async function renderHome() {
   };
   const movedNote = row => (row.status === 'open' ? `Moved here from ${new Date(row.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long' })}. If you run with your watch, it logs itself.` : 'If you run with your watch, it logs itself.');
 
+  // v1.18: a finished session that was never saved (a tab tapped on Review) waits at the top until it is
+  const pending = await pendingReview();
+  if (pending) {
+    view.appendChild(el('div', { class: 'card accent', id: 'pending-review' }, [
+      el('h3', {}, 'Not saved yet'),
+      el('p', {}, `${pending.timeline.sessionName || 'Your last session'}, ${fmtDate(toISODate(pending.startedAt))}. Its sets are kept here until you save it.`),
+      el('button', { class: 'btn primary', id: 'pending-open', onclick: () => onSessionFinished(pending, { restored: true }) }, 'Review and save')
+    ]));
+  }
+
   // v1.16: numbers that look wrong come first, until Cameron fixes or confirms them
   const flags = flaggedGroups(allSessions, D.plan, D.rules);
   if (flags.length) view.appendChild(checkNumbersCard(flags, allSessions));
@@ -377,7 +414,7 @@ async function renderHome() {
   const todayCard = el('div', { class: 'card accent', id: 'today-card' });
   todayCard.appendChild(el('h3', {}, `Today, ${fmtDate(toISODate(today))}${week >= 1 && week <= 12 ? ` · week ${week}` : ''}${phase.note ? ' · ' + phase.name : ''}`));
   if (session) {
-    const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets });
+    const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets, pacing });
     todayCard.appendChild(el('h1', {}, session.name));
     // polish: the facts as chips, a strip with one bar per block (sized by its minutes), the phase note small
     const blocks = session.blocks.filter(b => b.type !== 'iftime');
@@ -523,9 +560,12 @@ function checkNumbersCard(flags, sessions) {
     ...flags.map(g => {
       const rec = sessions.find(s => s.id === g.recordId);
       const ws = g.sets.map(i => rec.sets[i].weight).filter(w => w != null);
+      // v1.18: a flag about reps shows the reps
+      const f0 = g.flagged[0].flag;
+      const sub = f0.code === 'reps' ? `${g.sets.map(i => rec.sets[i].reps).filter(r => r != null).join(', ')} reps · ${f0.short}` : `${ws.map(fmtWeight).join(', ')} lb · ${f0.short}`;
       return el('button', { type: 'button', class: 'check-row', 'data-ex': g.exerciseId, onclick: () => fixNumbers(g, sessions) }, [
         el('span', { class: 'cr-main' }, [el('b', {}, g.name), el('span', { class: 'muted' }, ` · ${fmtDate(g.date)}`)]),
-        el('span', { class: 'cr-sub' }, `${ws.map(fmtWeight).join(', ')} lb · ${g.flagged[0].flag.short}`),
+        el('span', { class: 'cr-sub' }, sub),
         el('span', { class: 'cr-go' }, 'Fix ›')
       ]);
     })
@@ -551,6 +591,9 @@ function fixNumbers(g, sessions) {
   const save = async keep => {
     const weights = {};
     if (!keep) for (const [i, x] of Object.entries(inputs)) if (x.value !== '') weights[i] = Number(x.value);
+    // v1.18: a weight below 0 is refused (the sheet stays open)
+    const bad = Object.values(weights).map(w => impossibleNumber({ weight: w }, ex)).find(Boolean);
+    if (bad) { refused.textContent = `${bad}.`; refused.hidden = false; return; }
     const [allSessions, targets, settings] = await Promise.all([getSessions(), getTargets(), getSettings()]);
     const r = applyNumberFix({ sessions: allSessions, targets, recordId: g.recordId, exerciseId: g.exerciseId, weights, checked: g.sets, plan: D.plan, rules: D.rules, settings });
     await putSession(r.record);
@@ -559,11 +602,14 @@ function fixNumbers(g, sessions) {
     toast(keep ? `${ex.name}: kept as logged` : (r.retargeted && r.target.weight != null ? `${ex.name} fixed. Next time ${weightWithPair(ex, r.target.weight)} × ${r.target.reps}` : `${ex.name} fixed`), 4000);
     renderHome();
   };
+  // v1.18: a weight below 0 is refused, said inside the sheet (a toast sits behind it)
+  const refused = el('div', { class: 'num-flag', id: 'fix-refused', role: 'alert', hidden: true });
   showModal(el('div', { class: 'fix-sheet' }, [
     el('h2', {}, ex.name || g.name),
     el('p', { class: 'muted' }, `${rec.sessionName}, ${fmtDate(rec.date)}. Put in what you actually lifted${isPair(ex) ? ' (the total of both dumbbells)' : ''}.`),
     el('div', { class: 'field' }, [el('label', { for: 'fix-all' }, 'Same weight for every set'), all]),
     ...rows,
+    refused,
     el('div', { class: 'btn-row' }, [
       el('button', { class: 'btn ghost', id: 'fix-keep', onclick: () => save(true) }, 'It\'s right'),
       el('button', { class: 'btn primary', id: 'fix-save', onclick: () => save(false) }, 'Save')
@@ -621,9 +667,15 @@ function editTarget(id, ex, t, settings) {
 // ---- Pre-session overview (v1.4) ----
 // What the session is for, every exercise with sets x reps and a weight you can change, and the time it should take.
 async function previewSession(sessionRef, week) {
+  // v1.18: one session at a time: the last one is saved (or discarded) before the next starts
+  const pending = await pendingReview();
+  if (pending) { onSessionFinished(pending, { restored: true }); toast('Save your last session first (or discard it at the bottom).', 4500); return; }
   const settings = await getSettings();
   const targets = await getTargets();
-  const lastTime = lastResults(await getSessions());
+  const sessions = await getSessions();
+  const lastTime = lastResults(sessions);
+  // v1.18: set and set-up times that follow his pace (pacing.js)
+  const pacing = learnPacing({ sessions, plan: D.plan, rules: D.rules, settings });
   // v1.19: sticky notes per exercise, and the knee swaps when the newest knee score is high
   let notes = await getExNotes();
   let kneeLog = await getKneeLog();
@@ -637,7 +689,7 @@ async function previewSession(sessionRef, week) {
     for (const [id, w] of Object.entries(weights)) if (w != null) t[id] = { ...(t[id] || {}), weight: w };
     return t;
   };
-  let tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets });
+  let tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, pacing });
   for (const st of tl.steps) {
     if (st.kind !== 'set' || st.ramp || !st.exerciseId || st.exerciseId in weights) continue;
     const ex = D.plan.exercises[st.exerciseId];
@@ -648,7 +700,9 @@ async function previewSession(sessionRef, week) {
   }
 
   const paint = () => {
-    tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights() });
+    tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights(), pacing });
+    // what the learned times change, against the same session built from the rules alone
+    const paceLines = Object.keys(pacing).length ? pacingLines(buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights() }), tl) : [];
     const kneeOn = swapScore(D.rules, kneeLog, new Date());
     const kneeLifts = kneeOn ? applyKneeSwap(tl.steps, D.rules, D.plan) : [];
     const y = window.scrollY;
@@ -671,6 +725,12 @@ async function previewSession(sessionRef, week) {
         onSaved: async () => { kneeLog = await getKneeLog(); paint(); } }) }));
     }
     view.appendChild(targetsToday(tl, weights, estimated, lastTime));
+    if (paceLines.length) {
+      view.appendChild(el('div', { class: 'card', id: 'pacing-note' }, [
+        el('h3', {}, ['Times set from your pace', infoBtn('Times set from your pace', pacingHelp())]),
+        el('ul', { class: 'lines pace-list' }, paceLines.map(l => el('li', {}, [el('b', {}, `${l.name}: `), l.text])))
+      ]));
+    }
 
     const blocks = [];
     for (const st of tl.steps) {
@@ -785,17 +845,27 @@ function targetsToday(tl, weights, estimated, lastTime) {
   ]);
 }
 
+/** v1.18: how the learned times work, in words. The counts come from rules.json > pacing. */
+function pacingHelp() {
+  const c = pacingConfig(D.rules);
+  const word = n => ['zero', 'one', 'two', 'three', 'four', 'five', 'six'][n] || String(n);
+  return [`When you end a set early with Done ${word(c.inARow)} sets in a row, the app gives that lift less time. When you have to add time or pause ${word(c.inARow)} sets in a row, it gives it more.`, `Set-up time before a lift changes the same way after ${word(c.setup.inARow)} sessions in a row.`, 'Rest times never change by themselves: they are part of the training plan. Lifts with a set tempo (the calf raise) are never shortened.', 'Settings has the switch, and a button to forget what was learned.'];
+}
+
 // ---- Session flow ----
 async function startSession(session, week, targetsForToday, opts = {}) {
   const settings = await getSettings();
   const targets = targetsForToday || await getTargets();
-  const history = lastResults(await getSessions());
-  const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, history });
+  const sessions = await getSessions();
+  const history = lastResults(sessions);
+  // v1.18: set and set-up times learned from how the last sessions went (pacing.js)
+  const pacing = learnPacing({ sessions, plan: D.plan, rules: D.rules, settings });
+  const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, history, pacing });
   // v1.19: the same knee swaps the start page showed
   if (swapScore(D.rules, opts.kneeLog || await getKneeLog(), new Date())) applyKneeSwap(timeline.steps, D.rules, D.plan);
   await primeNotes();
   await askNotificationPermission(settings);
-  player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
+  player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished, sessions, pacing });
   transition(() => { window.scrollTo(0, 0); player.start(); }, 'fwd');
 }
 
@@ -806,42 +876,70 @@ async function askNotificationPermission(settings) {
   try { await Notification.requestPermission(); } catch (e) { /* ignore */ }
 }
 
-function offerResume(saved) {
+/** stale: v1.18, left open longer than the resume window: no Resume, only save what was logged or discard it. */
+function offerResume(saved, { stale = false } = {}) {
   view.innerHTML = '';
   const tl = saved.timeline;
-  view.appendChild(el('div', { class: 'card accent' }, [
-    el('h1', {}, 'Resume session?'),
-    el('p', { class: 'muted' }, `${tl.sessionName}, step ${saved.idx + 1} of ${tl.steps.length}, started ${fmtDate(saved.startedISO)}.`),
+  view.appendChild(el('div', { class: 'card accent', id: 'resume-card' }, [
+    el('h1', {}, stale ? 'Unfinished session' : 'Resume session?'),
+    el('p', { class: 'muted' }, stale
+      ? `${tl.sessionName}, started ${fmtDate(saved.startedISO)}, was left open for more than ${D.rules.timing.resumeWindowHours} hours. Save the sets you logged, or discard it.`
+      : `${tl.sessionName}, step ${saved.idx + 1} of ${tl.steps.length}, started ${fmtDate(saved.startedISO)}.`),
     el('div', { class: 'stack' }, [
-      el('button', { class: 'btn primary', onclick: async () => {
+      stale ? null : el('button', { class: 'btn primary', onclick: async () => {
         const settings = await getSettings();
         const targets = await getTargets();
         await primeNotes();
-        player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
+        const sessions = await getSessions();
+        const pacing = learnPacing({ sessions, plan: D.plan, rules: D.rules, settings });
+        player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished, sessions, pacing });
         player.resume(saved);
       } }, 'Resume'),
-      el('button', { class: 'btn', onclick: async () => {
+      el('button', { class: stale ? 'btn primary' : 'btn', id: 'resume-save', onclick: async () => {
         const settings = await getSettings();
         player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, container: view, onFinish: onSessionFinished });
         // v1.15.1: the session ended when the app was last used, not now (it counted the hours away as workout time)
         player.s = saved; player.finish('ended_early', saved.pausedAt != null ? saved.pausedAt : saved.lastTick);
       } }, 'Save what I did and stop'),
-      el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
-      el('button', { class: 'btn danger', onclick: async () => { await clearInProgress(); showTab('home'); } }, 'Discard it')
+      stale ? null : el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
+      el('button', { class: 'btn danger', id: 'resume-discard', onclick: async () => { await clearInProgress(); showTab('home'); } }, 'Discard it')
     ])
   ]));
 }
 
-async function onSessionFinished(draft) {
+async function onSessionFinished(draft, { restored = false } = {}) {
   player = null;
   // v1.14: the review is not saved yet, so Back must not leave it
   const guard = () => { onBack('page', guard); toast('Tap Save at the bottom to keep this session'); };
   onBack('page', guard);
+  let saving = false;
   try {
     window.scrollTo(0, 0);
     await renderReview(view, draft, { plan: D.plan, rules: D.rules }, {
+      // v1.18: each change on Review is kept with the draft, so a reload comes back to it as he left it
+      onPaint: () => { if (!saving) setPendingReview(draft).catch(() => {}); },
+      // v1.18: a review that came back after a reload (or from Home) can be thrown away, with a confirm
+      onDiscard: restored ? async () => {
+        if (!(await confirmDialog('Discard this session?', 'Nothing from it is saved: no sets, no new targets.', 'Discard', true))) return;
+        await clearPendingReview().catch(() => {});
+        showTab('home');
+      } : null,
       onSave: async overrides => {
-        const record = await saveSession(draft, { plan: D.plan, rules: D.rules, overrides });
+        // v1.18: one save per session. A second tap before the summary showed saved it twice, and the second run of
+        // the engine counted a missed session again (two misses in a row drop the weight).
+        if (saving) return;
+        saving = true;
+        const btn = document.getElementById('save-session');
+        if (btn) btn.disabled = true;
+        let record;
+        try { record = await saveSession(draft, { plan: D.plan, rules: D.rules, overrides }); } catch (e) {
+          saving = false; if (btn) btn.disabled = false;
+          toast(`Could not save: ${e.message || e}`, 4000);
+          return;
+        }
+        await clearPendingReview().catch(() => {});
+        // and its in-progress copy, in case clearing that failed when the session ended (Resume would offer it again)
+        getInProgress().then(ip => (ip && ip.startedISO === draft.startedAt ? clearInProgress() : null)).catch(() => {});
         await updateWeekChip();
         window.scrollTo(0, 0);
         const [settings, sessions, runs, cfg] = await Promise.all([getSettings(), getSessions(), getRuns(), getSync()]);
@@ -941,7 +1039,7 @@ function showExercise(id, sessions, settings) {
       el('td', {}, fmtDate(r.date)),
       el('td', { class: 'num' }, r.baseline ? 'Base' : (r.round ? `R${r.round}` : `${r.setIndex || ''}`)),
       el('td', { class: 'num' }, `${r.weight != null ? fmtWeight(r.weight) + ' lb' : 'bw'} × ${r.reps}${r.holdSeconds ? ' s' : ''}`),
-      el('td', { class: 'num' }, r.rpe != null ? effortLabel(D.rules, r.rpe) : ''),
+      el('td', { class: 'num' + (isUnchecked(r) ? ' muted' : '') }, isUnchecked(r) ? 'not rated' : (r.rpe != null ? effortLabel(D.rules, r.rpe) : '')),
       el('td', { class: 'num' }, [r.weight != null && r.reps && !r.holdSeconds ? `${epley(r.weight + bw, r.reps)}` : '', r.pr && r.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null])
     ]))
   ]);
@@ -956,7 +1054,7 @@ function showExercise(id, sessions, settings) {
 function showSession(s) {
   showModal(el('div', {}, [
     el('h2', {}, `${s.sessionName} · ${fmtDate(s.date)}`),
-    el('p', { class: 'muted' }, `Week ${s.week} · ${fmtMinutes(s.actualSeconds)} (plan ${fmtMinutes(s.plannedSeconds)})${s.trims && s.trims.length ? ' · ' + s.trims.join('; ') : ''}`),
+    el('p', { class: 'muted' }, `Week ${s.week} · ${fmtMinutes(s.actualSeconds)} (plan ${fmtMinutes(s.plannedSeconds)})${pausedInGym(s) > 30 ? ` · ${fmtLong(gymSecondsOf(s))} in the gym` : ''}${s.trims && s.trims.length ? ' · ' + s.trims.join('; ') : ''}`),
     s.whatChanged && s.whatChanged.length ? el('div', {}, [el('h3', {}, 'What changed'), el('ul', { class: 'lines' }, s.whatChanged.map(l => el('li', {}, l.text)))]) : null,
     el('h3', { style: 'margin-top:12px' }, 'Sets'),
     setsTable(s.sets),
@@ -995,7 +1093,7 @@ async function renderProgressTab() {
   };
   const cfg = await getSync();
   renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, targets, muscles: D.muscles, today: new Date() }, {
-    header: progressHeader(), syncOn: !!(cfg && cfg.repo), onExercise: id => showExercise(id, sessions, settings), ...(onComputer() ? { onLoadBackup } : {})
+    header: progressHeader(), syncOn: !!(cfg && cfg.repo), onExercise: id => showExercise(id, sessions, settings), onRuns: () => showTab('runs'), ...(onComputer() ? { onLoadBackup } : {})
   });
   // v1.19: the knee scores, next to the weekly numbers (nothing until the first score)
   const knee = trendCard({ rules: D.rules, log: await getKneeLog() });
@@ -1098,9 +1196,51 @@ async function renderSyncSheet(note) {
 }
 
 // ---- Settings ----
+/** v1.18: play the set-end beep once, the way the workout would (Settings > Play the beep). */
+let testCtx = null;
+async function testBeep() {
+  const st = await getSettings();
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    testCtx = testCtx || new Ctx();
+    if (testCtx.state === 'suspended') await testCtx.resume();
+    const cfg = D.rules.cues || {};
+    const voice = cfg[st.cues && st.cues.loud === false ? 'normal' : 'loud'];
+    playTones(testCtx, testCtx.destination, (cfg.tones && cfg.tones.setEnd) || [[1175, 0, 0.2], [784, 0.24, 0.42]], voice);
+  } catch (e) { toast('This browser cannot play the beep'); }
+}
+
+/** v1.18: what the app has learned about his pace, and a way to forget it. */
+function pacingSettings(s, learned) {
+  const rows = Object.entries(learned).filter(([, e]) => e.repSeconds != null || e.setupSeconds != null).map(([id, e]) => {
+    const ex = D.plan.exercises[id] || { name: id };
+    const bits = [];
+    if (e.repSeconds != null) bits.push(`${e.repSeconds} s a rep (the plan's tempo is ${Math.round(e.tempoSeconds * 10) / 10} s)`);
+    if (e.setupSeconds != null) bits.push(`${e.setupSeconds} s to set up (was ${e.defaultSetup} s)`);
+    return el('li', {}, [el('b', {}, `${ex.name}: `), bits.join(', ')]);
+  });
+  return el('div', { class: 'set-note', id: 'pacing-settings' }, [
+    `After ${pacingConfig(D.rules).inARow} sets in a row ended early, extended or paused, that lift gets less or more time. Rest times never change by themselves. `,
+    rows.length ? el('ul', { class: 'lines pace-list', style: 'margin-top:8px' }, rows) : (s.adaptTiming === false ? '' : 'Nothing has changed yet.'),
+    rows.length ? el('button', { type: 'button', class: 'link-btn', id: 'pacing-reset', onclick: async () => {
+      if (!(await confirmDialog('Forget the learned times?', 'Set and set-up times go back to the plan and start learning again from your next workout.', 'Forget them'))) { renderSettings(); return; }
+      await saveSettings({ pacingSince: new Date().toISOString() });
+      toast('Times are back to the plan'); renderSettings();
+    } }, 'Forget the learned times') : null
+  ]);
+}
+
+/** The switch was flipped: the list under it follows at once (off: nothing is applied; on: what was learned). */
+async function refreshPacingSettings() {
+  const node = document.getElementById('pacing-settings'); if (!node) return;
+  const st = await getSettings();
+  node.replaceWith(pacingSettings(st, learnPacing({ sessions: await getSessions(), plan: D.plan, rules: D.rules, settings: st })));
+}
+
 async function renderSettings() {
   const s = await getSettings();
-  const toggle = (label, path, val) => el('div', { class: 'toggle' }, [el('span', {}, label), el('input', { type: 'checkbox', checked: val, onchange: async e => { const patch = {}; let o = patch; const keys = path.split('.'); keys.forEach((k, i) => { if (i === keys.length - 1) o[k] = e.target.checked; else { o[k] = {}; o = o[k]; } }); await saveSettings(patch); if (path === 'cues.vibrate') setHaptics(e.target.checked); } })]);
+  const learned = learnPacing({ sessions: await getSessions(), plan: D.plan, rules: D.rules, settings: s });
+  const toggle = (label, path, val) => el('div', { class: 'toggle' }, [el('span', {}, label), el('input', { type: 'checkbox', checked: val, onchange: async e => { const patch = {}; let o = patch; const keys = path.split('.'); keys.forEach((k, i) => { if (i === keys.length - 1) o[k] = e.target.checked; else { o[k] = {}; o = o[k]; } }); await saveSettings(patch); if (path === 'cues.vibrate') setHaptics(e.target.checked); if (path === 'adaptTiming') refreshPacingSettings(); } })]);
   const numField = (label, key, step) => el('div', { class: 'field' }, [el('label', {}, label), el('input', { type: 'number', step: String(step), value: s[key], inputmode: 'decimal', onchange: async e => { const v = Number(e.target.value); if (e.target.value === '' || !(v > 0)) { e.target.value = s[key]; toast('Enter a number above 0'); return; } await saveSettings({ [key]: v }); s[key] = v; toast('Saved'); } })]);
   const fileInput = el('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: async e => {
     const f = e.target.files[0]; if (!f) return;
@@ -1111,10 +1251,14 @@ async function renderSettings() {
     el('h2', {}, 'Settings'),
     toggle('Vibrate when a set or rest ends', 'cues.vibrate', s.cues.vibrate),
     toggle('Beep when a set or rest ends', 'cues.beep', s.cues.beep),
+    toggle('Loud beeps', 'cues.loud', s.cues.loud !== false),
+    el('div', { class: 'set-note' }, ['The beeps follow the phone\'s media volume. ', el('button', { type: 'button', class: 'link-btn', id: 'beep-test', onclick: testBeep }, 'Play the beep')]),
     toggle('Countdown ticks before a set starts', 'cues.warningTick', s.cues.warningTick),
     toggle('Say each exercise and rest out loud', 'cues.voice', s.cues.voice !== false),
     toggle('End each set on its own timer', 'autoAdvance', s.autoAdvance !== false),
-    toggle('Wait for a Set-up done tap before each new block', 'confirmSetup', s.confirmSetup !== false),
+    toggle('Wait for my tap before each exercise, each bar change and the stretches', 'confirmSetup', s.confirmSetup !== false),
+    toggle('Set times follow my pace', 'adaptTiming', s.adaptTiming !== false),
+    pacingSettings(s, learned),
     toggle('Notify when a rest ends while in another app', 'cues.notify', s.cues.notify !== false),
     ('Notification' in window && Notification.permission === 'denied') ? el('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Notifications are blocked for this site in Android settings; allow them there to get the rest-end alert.') : null,
     toggle('Keep the screen on during a session', 'keepScreenOn', s.keepScreenOn !== false),
