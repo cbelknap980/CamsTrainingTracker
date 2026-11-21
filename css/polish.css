@@ -444,3 +444,6 @@ body.computer #tabs .tab { font-size: 0.95rem; }
 .knee-chart .knee-line-swap { stroke: var(--bad); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.6; vector-effect: non-scaling-stroke; }
 .knee-chart .knee-dot { fill: var(--accent); }
 .knee-chart .knee-dot.high { fill: var(--bad); }
+.knee-ask { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 44px; margin-top: 8px; border: 1px dashed var(--line); border-radius: 12px; background: transparent; color: var(--text); font: inherit; font-weight: 700; font-size: var(--t-small); cursor: pointer; }
+.knee-ask.done { border-style: solid; color: var(--muted); font-weight: 600; }
+.upnext-note { margin-top: 4px; }

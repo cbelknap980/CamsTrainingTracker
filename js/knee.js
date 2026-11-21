@@ -59,6 +59,7 @@ export function applyKneeSwap(steps, rules, plan, { fromIdx = 0, onlyIds = null 
     const fb = s.exerciseId && k.fallbacks[s.exerciseId];
     if (!fb || (onlyIds && !onlyIds.includes(s.exerciseId)) || s.kind !== 'set' || s.kneeSwap || s.done) continue;
     const from = (plan.exercises[s.exerciseId] || {}).name || s.name;
+    s.kneeOrig = { name: s.name, cue: s.cue, tips: s.tips };
     s.kneeSwap = true;
     s.name = fb.name;
     s.cue = fb.cue || s.cue;
@@ -69,11 +70,25 @@ export function applyKneeSwap(steps, rules, plan, { fromIdx = 0, onlyIds = null 
   for (let i = fromIdx; i < steps.length; i++) {
     const s = steps[i];
     for (const c of changed) {
-      if (typeof s.name === 'string' && s.kind !== 'set' && s.name.includes(c.from)) s.name = s.name.split(c.from).join(c.to);
-      if (typeof s.setupFor === 'string' && s.setupFor.includes(c.from)) s.setupFor = s.setupFor.split(c.from).join(c.to);
+      if (typeof s.name === 'string' && s.kind !== 'set' && s.name.includes(c.from)) { s.kneeOrigName = s.kneeOrigName || s.name; s.name = s.name.split(c.from).join(c.to); }
+      if (typeof s.setupFor === 'string' && s.setupFor.includes(c.from)) { s.kneeOrigSetup = s.kneeOrigSetup || s.setupFor; s.setupFor = s.setupFor.split(c.from).join(c.to); }
     }
   }
   return changed;
+}
+
+/** Puts the regular lift back on the sets still to come (a lower score in the middle of a session). Returns how many. */
+export function undoKneeSwap(steps, { fromIdx = 0 } = {}) {
+  let n = 0;
+  for (let i = fromIdx; i < steps.length; i++) {
+    const s = steps[i];
+    if (s.kneeSwap && !s.done && s.kneeOrig) { Object.assign(s, s.kneeOrig); delete s.kneeOrig; s.kneeSwap = false; n++; }
+    else if (!s.done && (s.kneeOrigName || s.kneeOrigSetup)) {
+      if (s.kneeOrigName) { s.name = s.kneeOrigName; delete s.kneeOrigName; }
+      if (s.kneeOrigSetup) { s.setupFor = s.kneeOrigSetup; delete s.kneeOrigSetup; }
+    }
+  }
+  return n;
 }
 
 /** Index of the work set after which the session asks for a knee score: the first work set of the first askAfter lift. */

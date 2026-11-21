@@ -24,6 +24,7 @@ import { getExNotes, getKneeLog } from './store.js';
 import { noteText, noteLine, editNote } from './notes.js';
 import { swapScore, swappable, applyKneeSwap, morningDue } from './knee.js';
 import { askKnee, morningCard, swapNote, trendCard } from './knee-ui.js';
+import { primeNotes } from './session-hooks.js';
 
 const view = document.getElementById('view');
 let D = null; // { plan, rules, settingsDefaults, architecture }
@@ -792,6 +793,7 @@ async function startSession(session, week, targetsForToday, opts = {}) {
   const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, history });
   // v1.19: the same knee swaps the start page showed
   if (swapScore(D.rules, opts.kneeLog || await getKneeLog(), new Date())) applyKneeSwap(timeline.steps, D.rules, D.plan);
+  await primeNotes();
   await askNotificationPermission(settings);
   player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
   transition(() => { window.scrollTo(0, 0); player.start(); }, 'fwd');
@@ -814,6 +816,7 @@ function offerResume(saved) {
       el('button', { class: 'btn primary', onclick: async () => {
         const settings = await getSettings();
         const targets = await getTargets();
+        await primeNotes();
         player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
         player.resume(saved);
       } }, 'Resume'),

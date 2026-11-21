@@ -12,6 +12,7 @@ import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarg
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
 import { numberFlag, flaggedGroups, applyNumberFix } from '../js/sanity.js';
 import { markAmrap, amrapCheck, amrapRepsText, isAmrapWeek } from '../js/amrap.js';
+import { undoKneeSwap } from '../js/knee.js';
 import { swapScore, latestScore, applyKneeSwap, swappable, askIdx, morningDue, kneeHeld, kneeTrend, kneeEntry } from '../js/knee.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
@@ -569,6 +570,9 @@ console.log('v1.19 knee check');
   const fromSet2 = l1a.steps.findIndex(s => s.exerciseId === 'back_squat' && s.setIndex === 2);
   applyKneeSwap(l1a.steps, rules, plan, { fromIdx: fromSet2 });
   check('a mid-session swap changes only the sets still to come', l1a.steps.filter(s => s.exerciseId === 'back_squat' && s.kind === 'set' && !s.ramp).map(s => !!s.kneeSwap).join() === 'false,true,true');
+  l1a.steps.find(s => s.exerciseId === 'back_squat' && s.setIndex === 2).done = true;
+  const undone = undoKneeSwap(l1a.steps, { fromIdx: fromSet2 });
+  check('a lower score puts the regular squat back on the sets not done yet', undone === 1 && l1a.steps.filter(s => s.exerciseId === 'back_squat' && s.kind === 'set' && !s.ramp).map(s => `${!!s.kneeSwap}:${s.name}`).join() === 'false:Back squat,true:Box squat, 3-s lowering,false:Back squat', l1a.steps.filter(s => s.exerciseId === 'back_squat' && s.kind === 'set' && !s.ramp).map(s => s.name));
   const l2k = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 3, targets: tg });
   check('lift2 (upper) has nothing to swap and no knee question', applyKneeSwap(l2k.steps, rules, plan).length === 0 && askIdx(rules, l2k.steps) === -1);
 
