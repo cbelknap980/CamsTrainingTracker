@@ -969,10 +969,12 @@ export class Player {
     const item = (ic, label, fn, cls) => el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { closeModal(); fn(); } }, [icon(ic), el('span', {}, label)]);
     // v1.18: the set has started and the equipment turns out to be taken: step back to its countdown and choose there
     const onSet = s && s.kind === 'set' && !s.done && this.s.idx > 0 && this.leadsIntoSet(this.s.idx - 1);
+    const cue = this.cueStep();
     showModal(el('div', {}, [
       el('div', { class: 'menu' }, [
         item(paused ? 'play' : 'pause', paused ? 'Resume' : 'Pause', () => (paused ? this.unpause() : this.pause())),
         item('list', 'Whole workout: sets and weights', () => this.openPlan()),
+        cue ? item('plan', `Cues: ${cue.name}`, () => this.openCues(cue), 'cues-item') : null,
         this.s.idx > 0 ? item('back', 'Back one step', () => this.back()) : null,
         this.swapChoices().length ? item('skip', 'Equipment taken: do something else now', () => this.openSwap()) : null,
         onSet ? item('skip', 'Equipment taken: do something else now', () => { this.back(); if (this.swapChoices().length) this.openSwap(); else toast('Nothing later in this session to swap with'); }) : null,
@@ -1193,6 +1195,28 @@ export class Player {
   }
   openOverview() { this.openPlan(); }
 
+  /** Scroll the middle just far enough to show the cues he opened (their title stays in view). */
+  revealCues(det) {
+    const main = det.closest('.step-main');
+    if (!main) return;
+    const m = main.getBoundingClientRect(), d = det.getBoundingClientRect();
+    const below = d.bottom - m.bottom;
+    if (below > 0) main.scrollTop += Math.min(below + 24, Math.max(0, d.top - m.top));
+  }
+  /** The step whose cues the ⋯ menu offers: the set on screen, or the one this countdown leads into. */
+  cueStep() {
+    const s = this.step;
+    const x = s && s.kind !== 'set' && this.leadsIn() ? this.steps[this.s.idx + 1] : s;
+    return x && ((x.tips && x.tips.length) || x.cue) ? x : null;
+  }
+  /** v1.18: a lift's cues on a sheet. On a full screen the Cues row is the first thing to go, so they are always here. */
+  openCues(x) {
+    showModal(el('div', { class: 'cues-sheet', id: 'cues-sheet' }, [
+      el('h2', {}, x.name),
+      el('div', { class: 'tips' }, [...(x.tips || []).map(t => el('div', { class: 'tip' }, t)), x.cue ? el('div', { class: 'tip note' }, x.cue) : null]),
+      el('button', { class: 'btn ghost', id: 'cues-close', onclick: () => closeModal() }, 'Close')
+    ]));
+  }
   cuesOpen(s) {
     const mem = this.s.cuesOpen && this.s.cuesOpen[s.exerciseId];
     if (mem != null) return mem;
@@ -1551,7 +1575,8 @@ export class Player {
   renderSet(main, s, paused) {
     const ex = this.plan.exercises[s.exerciseId];
     const kind = s.ramp ? 'Ramp-up' : (s.baseline ? 'Baseline' : (s.retest ? 'Retest' : (s.holdSeconds ? 'Hold' : 'Work')));
-    const where = this.whereText(s);
+    // the pill already says Ramp-up, Baseline or Retest: the line beside it does not say it twice
+    const where = this.whereText(s).replace(/^(Ramp-up|Baseline set|Retest set)(?: · |$)/, '');
     const sided = this.sided(s);
     main.appendChild(el('div', { class: 'work-top' }, [
       paused ? this.pausedBanner() : null, this.pill(kind, 'work', paused),
@@ -1593,12 +1618,17 @@ export class Player {
       const mem = this.s.cuesOpen && this.s.cuesOpen[s.exerciseId];
       const open = this.cuesOpen(s);
       const n = ((s.tips && s.tips.length) || 0) + (s.cue ? 1 : 0);
-      const det = el('details', { class: 'cues fit-2', id: 'cues', open: open || null, 'data-auto': mem == null ? '1' : null }, [
+      // cues he opened with a tap are his to close: fit() never sheds them (no fit-2), the middle scrolls to them instead
+      const det = el('details', { class: 'cues' + (mem === true ? '' : ' fit-2'), id: 'cues', open: open || null, 'data-auto': mem == null ? '1' : null }, [
         el('summary', {}, [el('span', {}, n ? `Cues (${n})` : 'Cues'), el('span', { class: 'cues-hint' }, open ? 'Hide' : 'Show')]),
         ...cueBits
       ]);
       // only a tap is remembered (a <details> built open also fires 'toggle')
-      det.querySelector('summary').addEventListener('click', () => { (this.s.cuesOpen = this.s.cuesOpen || {})[s.exerciseId] = !det.open; det.removeAttribute('data-auto'); this.persist(); setTimeout(() => this.fit(), 0); });
+      det.querySelector('summary').addEventListener('click', () => {
+        const opening = !det.open;
+        (this.s.cuesOpen = this.s.cuesOpen || {})[s.exerciseId] = opening; det.removeAttribute('data-auto'); det.classList.toggle('fit-2', !opening);
+        this.persist(); setTimeout(() => { this.fit(); if (det.open) this.revealCues(det); }, 0);
+      });
       det.addEventListener('toggle', () => { const h = det.querySelector('.cues-hint'); if (h) h.textContent = det.open ? 'Hide' : 'Show'; });
       main.appendChild(det);
     }
@@ -1698,8 +1728,8 @@ export class Player {
   /**
    * v1.18 (Cameron: "have to scroll down to see everything", "3 digits in weight cut off", "too busy"): make the
    * middle of the screen fit. Text on one line is shrunk until it fits its box, never cut. If the middle is still
-   * taller than its space it sheds detail in steps (tight-1: smaller numbers, cues closed; tight-2: last time, cues
-   * and the second "then" rows go; tight-3: effort words and notes go; then two things in an order that depends on
+   * taller than its space it sheds detail in steps (the cues of a first set close; tight-1: smaller numbers, and if
+   * that alone is enough the closed Cues row goes; tight-2: last time, cues and the second "then" rows go; tight-3: effort words and notes go; then two things in an order that depends on
    * the screen: the last-set steppers fold into its title, and the first "then" row and the plates per side go. On a
    * screen that waits for his tap, what to set up outlasts the steppers (they fold at 3, the rest goes at 4); on a
    * plain rest the steppers outlast the list of what follows). Only if all of that is not enough does the middle
@@ -1727,14 +1757,29 @@ export class Player {
     };
     const cues = p.querySelector('details.cues');
     const cuesAuto = cues && cues.getAttribute('data-auto') === '1' && this.cuesOpen(this.step);
+    // cues he opened with a tap stay open whatever the room: the rest is fitted as if they were closed
+    const cuesByHand = !!cues && !cues.hasAttribute('data-auto') && cues.open;
     if (cuesAuto) cues.open = true;
+    if (cuesByHand) cues.open = false;
+    p.classList.remove('overflowing', 'no-cues');
+    const fits = () => main.scrollHeight <= main.clientHeight + 1;
     let level = 0;
     for (; level <= TIGHTEST; level++) {
       for (let k = 1; k <= TIGHTEST; k++) p.classList.toggle(`tight-${k}`, k <= level);
       if (cuesAuto) cues.open = level === 0;
       texts();
-      if (main.scrollHeight <= main.clientHeight + 1) break;
+      if (fits()) break;
+      // the cues of a first set do not fit open: closed at full size comes before smaller numbers
+      if (level === 0 && cuesAuto) { cues.open = false; texts(); if (fits()) break; }
+      // half a step between 1 and 2: the closed Cues row goes first (the cues are also in the ⋯ menu); "last time"
+      // and the size of the numbers stay
+      if (level === 1 && cues && !cuesByHand) {
+        p.classList.add('no-cues'); texts();
+        if (fits()) break;
+        p.classList.remove('no-cues');
+      }
     }
+    if (cuesByHand) cues.open = true;
     p.setAttribute('data-fit', String(Math.min(level, TIGHTEST)));
     p.classList.toggle('overflowing', main.scrollHeight > main.clientHeight + 1);
   }

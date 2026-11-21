@@ -2,7 +2,7 @@
 # (three-digit weights, one with a decimal). The main walk runs at 360 x 698: a 1080 x 2340 phone at 3x with the
 # status bar and the three-button bar taken off, which is what the installed app gets on Cameron's phone (measured
 # from his screenshots). Two more sizes follow. It follows Cameron's notes from his third workout:
-#   nothing scrolls and nothing is cut off, a ready tap before each exercise, each bar change and the stretches,
+#   nothing scrolls, nothing is cut off or squeezed, a ready tap before each exercise, each bar change and the stretches,
 #   the next sets with reps and weight, the whole workout one tap away, a red pause with the gym clock still running,
 #   Left and Right on their own clocks, Equipment taken inside a finisher, the last-set card after the last finisher
 #   set, reps in every voice line, louder beeps, set times that follow his pace, runs on Progress.
@@ -32,7 +32,9 @@ PREV = {'id': 'ses_prev', 'sessionId': 'lift3', 'sessionName': 'Lift 3: Full bod
         'trims': [], 'status': 'complete', 'engineMinutes': 0, 'whatChanged': [], 'e1rms': {}, 'prs': [],
         'sets': [{'exerciseId': 'front_squat', 'name': 'Front squat', 'setIndex': i, 'weight': 240, 'reps': 5, 'rpe': 8, 'done': True, 'skipped': False, 'blockId': 'B',
                   'target': {'weight': 240, 'reps': 5}, 'at': f'2026-11-28T00:5{i}:00.000Z',
-                  **({'lead': {'plan': 60, 'setup': 60, 'took': 155, 'paused': 0, 'by': 'tap', 'tap': 150}} if i == 1 else {})} for i in (1, 2, 3)]}
+                  **({'lead': {'plan': 60, 'setup': 60, 'took': 155, 'paused': 0, 'by': 'tap', 'tap': 150}} if i == 1 else {})} for i in (1, 2, 3)]
+                + [{'exerciseId': 'db_row', 'name': 'Dumbbell row', 'setIndex': i, 'weight': 105, 'reps': 8, 'rpe': 8, 'done': True, 'skipped': False, 'blockId': 'C',
+                    'target': {'weight': 105, 'reps': 8}, 'at': f'2026-11-28T01:1{i}:00.000Z'} for i in (1, 2, 3)]}
 RUNS = [{'id': 'run_a', 'date': '2026-11-24', 'type': 'Intervals', 'planId': 'run1', 'distance': 3.1, 'minutes': 27.5, 'pace': 8.87, 'week': 2, 'notes': ''},
         {'id': 'run_b', 'date': '2026-11-29', 'type': 'Long run', 'planId': 'run2', 'distance': 5.5, 'minutes': 55, 'pace': 10, 'week': 2, 'notes': ''}]
 
@@ -81,7 +83,24 @@ MEASURE = """() => {
     if (r.right > vw + 1 || r.left < -1) off.push(`${label(e)} x ${Math.round(r.left)}..${Math.round(r.right)}`);
     if (r.bottom > vh + 1 && !(main && main.contains(e))) off.push(`${label(e)} bottom ${Math.round(r.bottom)} > ${vh}`);
   }
+  // A part of the middle squeezed shorter than its own text. A box that hides its overflow can give its height away
+  // without the middle overflowing: the name was cut in half on the fullest screens that way.
+  for (const c of (main ? main.children : [])) {
+    const cs = getComputedStyle(c);
+    if (cs.display !== 'none' && cs.overflowY !== 'visible' && c.scrollHeight > c.clientHeight + 3) cut.push(`${label(c)} squeezed to ${c.clientHeight} px of ${c.scrollHeight}`);
+  }
   return { docScroll: document.documentElement.scrollHeight - vh, mainOver: main ? main.scrollHeight - main.clientHeight : 0, cut, off };
+}"""
+
+# The Cues row of a set screen: is it there, open, and inside the part of the middle that shows?
+CUES = """() => {
+  const p = document.querySelector('.player'), m = document.querySelector('.step-main'), c = document.querySelector('#cues');
+  const shown = e => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+  const mr = m.getBoundingClientRect(), r = c ? c.getBoundingClientRect() : null;
+  return { there: shown(c), open: !!c && c.open, hint: c ? c.querySelector('.cues-hint').textContent : '', tips: c ? c.querySelectorAll('.tip').length : 0,
+    inView: shown(c) && r.top >= mr.top - 1 && r.bottom <= mr.bottom + 1, over: m.scrollHeight - m.clientHeight, scrolled: Math.round(m.scrollTop),
+    fit: p.getAttribute('data-fit'), last: shown(document.querySelector('.last-time')),
+    squeezed: Array.from(m.children).filter(k => getComputedStyle(k).display !== 'none' && getComputedStyle(k).overflowY !== 'visible' && k.scrollHeight > k.clientHeight + 3).map(k => k.className) };
 }"""
 
 def clock_secs(t):
@@ -227,6 +246,7 @@ with sync_playwright() as p:
             w.run_out()
             f = w.state()
             check('then the set starts by itself, with Go', f['kind'] == 'ramp-up' and f['name'] == 'Power clean' and w.said[-1] == 'Go.' and body_kind() == 'work', (f['kind'], w.said[-2:]))
+            check('ramp-up set: the pill says Ramp-up, the line beside it only the equipment (not "Ramp-up" twice)', f['stepWhere'] == 'Barbell', f['stepWhere'])
             return True
 
         # ---- each bar change waits too, and says what to change ----
@@ -288,6 +308,17 @@ with sync_playwright() as p:
             return True
         if k == 'work' and nm == 'Front squat':
             seen['fs'] = seen.get('fs', 0) + 1
+            if seen['fs'] == 1:
+                # The cues: a tap on Show has to show them, whatever the room. This screen carries a "last time" line, the
+                # fullest plain set screen; there the cues once vanished, with "last time", when tapped.
+                c0 = page.evaluate(CUES)
+                if c0['open']: w.tap('#cues summary'); page.wait_for_timeout(60); c0 = page.evaluate(CUES)
+                w.tap('#cues summary'); page.wait_for_timeout(120)
+                c1 = page.evaluate(CUES)
+                check('cues: the row is on the set screen under "last time", and a tap on Show opens them in view with nothing else resized or hidden', c0['there'] and c0['last'] and c1['last'] and not c0['open'] and c0['hint'] == 'Show' and c1['there'] and c1['open'] and c1['hint'] == 'Hide' and c1['tips'] >= 2 and c1['inView'] and c1['fit'] == c0['fit'] and not c1['squeezed'], (c0, c1))
+                w.tap('#cues summary'); page.wait_for_timeout(120)
+                c2 = page.evaluate(CUES)
+                check('cues: Hide closes them again and the screen is as it was', c2['there'] and not c2['open'] and c2['hint'] == 'Show' and c2['over'] <= 1 and c2['scrolled'] == 0 and c2['fit'] == c0['fit'], c2)
             w.run_out()      # all three left to the timer: three sets nobody rated, for the review
             return True
         if s['confirm'] and nm == 'Lateral raise' and k == 'rest + set up' and 'lr_setup' not in seen:
@@ -322,6 +353,16 @@ with sync_playwright() as p:
             if n == 1:
                 check('one arm at a time: Left and Right side by side, each with its own clock', s['sides'] and page.locator('#side-left').count() == 1 and page.locator('#side-right').count() == 1 and page.locator('#side-left-time').inner_text() == page.locator('#side-right-time').inner_text() and 'reps / side' in page.locator('#hero-readout').inner_text(), s['main'][:200])
                 check('voice: Go, and which side first', w.said[-1] == 'Go. Left side.', w.said[-2:])
+                # the fullest screen of the lift: two clocks, the pace bar and a "last time" line
+                nh = page.evaluate("(() => { const n = document.querySelector('.step-main > .step-name'); return [n.clientHeight, n.scrollHeight]; })()")
+                c = page.evaluate(CUES)
+                check('one arm at a time: the name is whole and "last time" stays; the closed Cues row is what made room', nh[0] >= 24 and nh[1] - nh[0] <= 3 and c['last'] and '105 lb × 8, 8, 8' in page.locator('.last-time').inner_text() and not c['there'] and c['over'] <= 1, (nh, c))
+                w.tap('#more-btn'); page.wait_for_selector('.menu')
+                items = page.locator('.menu-item').all_inner_texts()
+                page.locator('.menu-item.cues-item').click(); page.wait_for_selector('#cues-sheet')
+                sheet = page.locator('#cues-sheet')
+                check('the cues are always in the ⋯ menu: "Cues: Dumbbell row" opens them on a sheet', any(x.strip() == 'Cues: Dumbbell row' for x in items) and sheet.locator('h2').inner_text() == 'Dumbbell row' and sheet.locator('.tip').count() >= 2, (items, sheet.inner_text()))
+                w.tap('#cues-close')
                 w.run(6)
                 a = w.state()
                 left, right = rgb('#side-left'), rgb('#side-right')

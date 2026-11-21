@@ -426,12 +426,18 @@ body.in-session .player { flex: 1 1 0; min-height: 0; gap: 8px; }
 .player-top { flex: none; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 body.in-session .step-main { flex: 1 1 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; justify-content: flex-start; padding: 0; scrollbar-width: none; }
 body.in-session .step-main::-webkit-scrollbar { display: none; }
+/* Nothing in the middle may be squeezed. A box that hides its overflow (the one-line name, "last time") has no
+   minimum height as a flex item: left to shrink it gives its own height away, the text is cut in half, and the middle
+   never overflows, so fit() never sees that the screen is too full. */
+body.in-session .step-main > * { flex-shrink: 0; }
 body.in-session .step-main > :first-child { margin-top: auto; }
 body.in-session .step-main > :last-child { margin-bottom: auto; }
 body.in-session:not(.computer) .player-actions, body.in-session .player-actions { position: static; flex: none; margin: 0; padding: 0 0 calc(10px + env(safe-area-inset-bottom)); background: none; gap: 8px; }
 body.in-session .player-actions .btn.primary { min-height: 60px; }
 /* a middle that still does not fit after every step scrolls inside itself; a soft edge says there is more */
 .player.overflowing .step-main { -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent); }
+/* room to scroll the last line clear of that soft edge */
+.player.overflowing .step-main::after { content: ""; flex: 0 0 22px; }
 /* a very short window (split screen, a phone on its side): give the shell up and let the page scroll as before */
 @media (max-height: 470px) {
   body.in-session { height: auto; min-height: 100dvh; overflow: visible; }
@@ -603,6 +609,8 @@ body[data-kind="ready"] .lead-top.big .timer { font-size: clamp(4.8rem, 27vw, 6.
 
 /* shedding detail when the middle is too tall: each level also makes the big things smaller */
 .player.tight-1 .fit-1, .player.tight-2 .fit-2, .player.tight-3 .fit-3, .player.tight-4 .fit-4 { display: none !important; }
+/* half a step after tight-1 (fit()): the closed Cues row goes before "last time" does; the ⋯ menu keeps the cues */
+.player.no-cues details.cues { display: none; }
 .player:not(.tight-3) .only-3, .player:not(.tight-4) .only-4 { display: none; }
 .player.tight-4 .lead-top .timer, body[data-kind="ready"] .player.tight-4 .lead-top .timer { font-size: 2.3rem; }
 .player.tight-4 .just-done { padding: 5px 10px 7px; }
