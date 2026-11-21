@@ -137,7 +137,8 @@ with sync_playwright() as p:
     check('upgrade: flat counts start again at 0, weights stay', t['back_squat']['stall'] == 0 and t['back_squat']['weight'] == 165, t)
     check('upgrade: the Garmin run the old app counted as intervals is an easy run waiting for Count it; his own run stays', runs['garmin-1']['type'] == 'Easy run' and runs['garmin-1']['planId'] is None and runs['run_hand']['type'] == 'Long run' and runs['run_hand']['planId'] == 'run2', [runs['garmin-1'], runs['run_hand']])
     check('upgrade: one toast says what changed', 'Count it' in said, said)
-    check('upgrade: the data is marked as upgraded', pg.evaluate("import('./js/store.js').then(m => m.kvGet('dataVersion'))") == '1.18.1')
+    app_version = pg.evaluate("import('./js/data.js').then(m => m.APP_VERSION)")
+    check('upgrade: the data is marked as upgraded to this version', pg.evaluate("import('./js/store.js').then(m => m.kvGet('dataVersion'))") == app_version, app_version)
     pg.evaluate("import('./js/store.js').then(async m => { const t = await m.getTargets(); t.back_squat.stall = 2; await m.setTargets(t); })")
     pg.reload(); pg.wait_for_selector('.card.accent h1'); pg.wait_for_timeout(300)
     check('upgrade: it runs once (a count made since stays)', pg.evaluate("import('./js/store.js').then(m => m.getTargets())")['back_squat']['stall'] == 2)
@@ -157,7 +158,7 @@ with sync_playwright() as p:
     # a restore of an older backup gets the upgrade too
     pg.evaluate("b => import('./js/store.js').then(m => m.importAll(b)).then(() => import('./js/upgrade.js')).then(u => u.runUpgrades())", OLD)
     t = pg.evaluate("import('./js/store.js').then(m => m.getTargets())")
-    check('a restored v1.18.0 backup gets the same one-time changes', t['back_squat']['stall'] == 0 and pg.evaluate("import('./js/store.js').then(m => m.kvGet('dataVersion'))") == '1.18.1', t)
+    check('a restored v1.18.0 backup gets the same one-time changes', t['back_squat']['stall'] == 0 and pg.evaluate("import('./js/store.js').then(m => m.kvGet('dataVersion'))") == app_version, t)
     ctx2.close()
 
     check('no page errors', not errors, errors[:5])

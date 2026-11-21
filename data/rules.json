@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.9",
+  "rulesVersion": "1.9.1",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -27,10 +27,10 @@
     "repsFirst": true
   },
   "stall": {
-    "description": "v1.18.1 (rules R4, approved by Cameron Nov 20 2026): a flat session falls short of the target reps at the target weight, or makes them with a set rated flatAtRpe or higher (9 = Hard or Maxed, 10 = Maxed only, null = only missed reps count). sessionsBeforeDrop flat sessions in a row take dropFraction off, rounded to the grid and at least one step, never below the empty bar (+0 on the pull-up); resetReps keep = same reps, bottom = bottom of the range. Only a target that moves clears the count. Was 2 sessions and 10% until v1.18.1.",
+    "description": "v1.18.1 (rules R4, approved by Cameron Nov 20 2026): a flat session falls short of the target reps at the target weight, or makes them with a set rated flatAtRpe or higher (9 = Hard or Maxed, 10 = Maxed only, null = only missed reps count). sessionsBeforeDrop flat sessions in a row take dropFraction off, rounded to the grid and at least one step, never below the empty bar (+0 on the pull-up); resetReps keep = same reps, bottom = bottom of the range. Only a target that moves clears the count. Was 2 sessions and 10% until v1.18.1. v1.18.2: flatAtRpe null, Cameron's pick on Nov 21 (\"Only missed reps\"): a Hard or Maxed day that made its reps holds the weight and does not count.",
     "sessionsBeforeDrop": 3,
     "dropFraction": 0.05,
-    "flatAtRpe": 9,
+    "flatAtRpe": null,
     "resetReps": "keep",
     "message": "Check sleep, food and ski load."
   },
