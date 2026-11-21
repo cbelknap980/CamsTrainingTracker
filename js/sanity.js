@@ -7,6 +7,18 @@
 import { applyProgression, epley } from './progression.js';
 import { fmtWeight } from './data.js';
 
+/**
+ * v1.18: a number that cannot be right, refused where it is typed (the workout's Edit and fix sheets, Review): reps
+ * below 0 or part of a rep, seconds below 0, a weight below 0. Added weight on a pull-up may be below 0 (assistance).
+ * Returns what to tell him, or ''.
+ */
+export function impossibleNumber({ weight, reps } = {}, ex, { hold = false } = {}) {
+  if (reps != null && (!Number.isFinite(reps) || reps < 0)) return hold ? 'Seconds can\'t be below 0' : 'Reps can\'t be below 0';
+  if (reps != null && !hold && !Number.isInteger(reps)) return 'Reps are whole numbers';
+  if (weight != null && (!Number.isFinite(weight) || (weight < 0 && !(ex && ex.equipment === 'weighted_bw')))) return 'Weight can\'t be below 0';
+  return '';
+}
+
 /** Why a logged set looks wrong: { code, text, short } or null. Ramp-ups, skipped sets, holds and confirmed sets pass. */
 export function numberFlag(st, ex, rules) {
   if (!st || !ex || st.ramp || st.skipped || st.numberOk || st.holdSeconds || ex.timed) return null;
@@ -17,6 +29,10 @@ export function numberFlag(st, ex, rules) {
   if (w != null && ex.equipment === 'barbell' && bar && w < bar) {
     return { code: 'under-bar', short: 'under the empty bar', text: `${fmtWeight(w)} lb is less than the empty bar (${bar} lb)` };
   }
+  // v1.18: below 0 (on a pull-up that would be assistance, which the plan never asks for)
+  if (w != null && w < 0) return { code: 'negative', short: 'below 0 lb', text: `${fmtWeight(w)} lb is below 0` };
+  if (st.reps != null && st.reps < 0) return { code: 'reps', short: 'below 0', text: `${st.reps} reps is below 0` };
+  if (st.reps != null && !Number.isInteger(st.reps)) return { code: 'reps', short: 'part of a rep', text: `${st.reps} reps is not a whole number` };
   if (w != null && t != null && t > 0 && ex.equipment !== 'bodyweight' && Math.abs(w - t) >= (c.minGapLb != null ? c.minGapLb : 15)) {
     if (w <= t * (c.lighterThan != null ? c.lighterThan : 0.5)) {
       const one = ex.pair && w * 2 === t;

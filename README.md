@@ -20,7 +20,7 @@ Tests for the Session Builder and Progression Engine:
 node tests/run-tests.mjs
 ```
 
-Phone-sized browser checks (Playwright; each serves the repo on its own port): `tests/browser-test.py`, `sync-test.py`, `catchup-test.py`, `runs-test.py`, `feel-test.py`, `bugfix-test.py`.
+Phone-sized browser checks (Playwright; each serves the repo on its own port): `tests/browser-test.py`, `sync-test.py`, `catchup-test.py`, `runs-test.py`, `feel-test.py`, `bugfix-test.py`, `workout-test.py` (a whole Friday session at 360 x 698). `runs-test.py` and `feel-test.py` share a port, so run those two one after the other.
 
 ## Install on the phone
 

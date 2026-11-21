@@ -10,7 +10,7 @@ import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../j
 import { applyRestAdjust } from '../js/builder.js';
 import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
-import { numberFlag, flaggedGroups, applyNumberFix } from '../js/sanity.js';
+import { numberFlag, flaggedGroups, applyNumberFix, impossibleNumber } from '../js/sanity.js';
 // v1.18
 import { leadIns, setupSecondsFor, repSecondsFor } from '../js/builder.js';
 import { pacingConfig, setObservation, setupObservation, learnRep, learnSetup, learnPacing, pacingLines } from '../js/pacing.js';
@@ -391,6 +391,14 @@ console.log('v1.9 muscle groups and coach check-ins');
   check('v1.16 flag: far more reps than planned, and 0 reps', code(set({ reps: 40 })) === 'reps' && code(set({ reps: 0 })) === 'reps' && code(set({ reps: 6 })) === null);
   check('v1.16 flag: no target and over 500 lb', code({ ...set(), exerciseId: 'leg_curl', target: { weight: null }, weight: 1000, repRange: [8, 12] }, curl) === 'heavy');
   check('v1.16 flag: ramp-ups, skipped sets and confirmed numbers are never flagged', code(set({ weight: 5, ramp: true })) === null && code(set({ weight: 5, skipped: true })) === null && code(set({ weight: 5, numberOk: true })) === null);
+  // v1.18: reps below 0 or part of a rep were saved without a flag (the hands-on test logged -2 and 2.5 reps)
+  check('v1.18 flag: reps below 0 and part of a rep', code(set({ reps: -2 })) === 'reps' && code(set({ reps: 2.5 })) === 'reps' && numberFlag(set({ reps: 2.5 }), sq, rules).short === 'part of a rep');
+  check('v1.18 flag: a weight below 0 on a dumbbell lift', code({ ...set(), exerciseId: 'lateral_raise', repRange: [12, 15], target: { weight: null }, weight: -10, reps: 12 }, lr) === 'negative');
+  const pu = plan.exercises.weighted_pullup;
+  check('v1.18 refused where typed: reps below 0, part of a rep, a weight below 0 (on a pull-up added weight may be below 0)',
+    impossibleNumber({ weight: 185, reps: -2 }, sq) !== '' && impossibleNumber({ weight: 185, reps: 2.5 }, sq) === 'Reps are whole numbers' && impossibleNumber({ weight: -5, reps: 5 }, sq) !== ''
+    && impossibleNumber({ weight: -20, reps: 5 }, pu) === '' && impossibleNumber({ weight: 185, reps: 5 }, sq) === '' && impossibleNumber({ weight: null, reps: null }, sq) === ''
+    && impossibleNumber({ reps: 22.5 }, sq, { hold: true }) === '' && impossibleNumber({ reps: -1 }, sq, { hold: true }) !== '' && impossibleNumber({ weight: 187.5, reps: 5 }, sq) === '');
 
   // Cameron's Nov 17 Legs: baseline saved as 5 x 5, then 10 x 4 three times; he lifted 195
   const S = (w, extra = {}) => set({ weight: w, rpe: 8, blockId: 'A', ...extra });

@@ -128,7 +128,14 @@ class Walk:
             if self.page.evaluate("() => { const p = document.querySelector('.player'); return p && !document.querySelector('#save-session') ? p.getAttribute('data-step') : 'end'; }") != key: return n
         return None
     def tap(self, sel):
-        self.page.click(sel); self.page.wait_for_timeout(30)
+        if sel in ('#confirm-btn', '.player-actions button.btn.primary', '#next-btn'):
+            # v1.18: the app ignores a main-button tap within 0.6 s of the one before (a double tap), so a tap made on
+            # purpose lets the clock move that far first
+            gap = self.page.evaluate("Date.now() - (window.__lastMainTap || 0)")
+            if gap < 650: self.page.clock.run_for(int(650 - gap))
+            self.page.click(sel); self.page.evaluate("window.__lastMainTap = Date.now()")
+        else: self.page.click(sel)
+        self.page.wait_for_timeout(30)
     def confirm(self):
         """Set-up done / Ready. A second tap within 0.6 s is ignored by the app, so the clock moves on a little."""
         self.tap('#confirm-btn'); self.page.clock.run_for(700)

@@ -8,7 +8,7 @@ import { el, toast, closeModal, showModal, effortChips, countUp } from './ui.js'
 import { ringsCard } from './rings.js';
 import { sessionNumbers, drawShareCard, shareOrSave } from './share-card.js';
 import { icon } from './icons.js';
-import { numberFlag } from './sanity.js';
+import { numberFlag, impossibleNumber } from './sanity.js';
 
 /** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
 export async function previewSession(draft, { plan, rules }) {
@@ -104,10 +104,11 @@ export function setIssue(st, ex) {
   return '';
 }
 
-export async function renderReview(container, draft, ctx, { onSave, onCancel }) {
+export async function renderReview(container, draft, ctx, { onSave, onCancel, onPaint, onDiscard }) {
   const { plan, rules } = ctx;
   const gate = !(rules.review && rules.review.blockSaveOnOpenItems === false);
-  const overrides = {};
+  // v1.18: next-time numbers he changed live on the draft, so they are kept with it (it is stored until Save)
+  const overrides = draft.overrides && typeof draft.overrides === 'object' ? draft.overrides : (draft.overrides = {});
   draft.recordId = draft.recordId || newId('ses');
   const settings = await getSettings();
 
@@ -127,7 +128,9 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
       const ex = plan.exercises[st.exerciseId];
       const issue = setIssue(st, ex);
       const flag = issue ? null : (st.done ? numberFlag(st, ex, rules) : null);
-      return { st, ex, why: issue || (flag ? `${fmtWeight(st.weight)} lb: ${flag.short}` : ''), flag };
+      // v1.18: a flag about reps names the reps (a bodyweight set read " lb: 0 reps")
+      const flagWhy = f => (f.code === 'reps' ? (f.short === `${st.reps} reps` ? f.short : `${st.reps} reps: ${f.short}`) : `${fmtWeight(st.weight)} lb: ${f.short}`);
+      return { st, ex, why: issue || (flag ? flagWhy(flag) : ''), flag };
     }).filter(x => x.why);
     const skippedOpen = open.filter(x => x.why === 'skipped');
     const flaggedOpen = open.filter(x => x.flag);
@@ -203,9 +206,11 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     if (result.prs && result.prs.length) container.appendChild(el('div', { class: 'card pr-card' }, [el('h2', {}, 'Personal records'), el('ul', { class: 'lines' }, result.prs.map(p => el('li', {}, p.kind === 'e1rm' ? `${p.name}: e1RM ${p.value} lb (was ${p.prev})` : `${p.name}: heaviest ${fmtWeight(p.value)} lb (was ${fmtWeight(p.prev)})`)))]));
     container.appendChild(el('div', { class: 'stack' }, [
       el('button', { class: 'btn primary', id: 'save-session', disabled: gate && open.length > 0, onclick: () => { if (gate && open.length) return; onSave(overrides); } }, gate && open.length ? `Save session (${open.length} to check first)` : 'Save session'),
-      onCancel ? el('button', { class: 'btn ghost', onclick: onCancel }, 'Back') : null
+      onCancel ? el('button', { class: 'btn ghost', onclick: onCancel }, 'Back') : null,
+      onDiscard ? el('button', { class: 'btn ghost danger-text', id: 'discard-session', onclick: onDiscard }, 'Discard this session') : null
     ]));
     window.scrollTo(0, 0);
+    if (onPaint) onPaint();
   }
 
   function editSet(st, ex) {
@@ -218,6 +223,8 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
     // v1.18: the effort on a set the timer logged is the app's guess, so no button is lit until he picks one
     const guess = isUnchecked(st);
     if (guess) chips.querySelectorAll('.effort-chip').forEach(b => b.classList.remove('on'));
+    // v1.18: a number that cannot be right is refused, said inside the sheet (a toast sits behind it)
+    const refused = el('div', { class: 'num-flag', id: 'edit-refused', role: 'alert', hidden: true });
     showModal(el('div', {}, [
       el('h2', {}, `${st.name}${st.setIndex ? ', set ' + st.setIndex : ''}`),
       flag ? el('div', { class: 'num-flag', id: 'num-flag' }, [el('b', {}, 'Check this number. '), `${flag.text}.`]) : null,
@@ -227,13 +234,19 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel }) 
         el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r])
       ]),
       st.holdSeconds ? null : el('div', { class: 'field' }, [el('label', {}, 'Effort'), chips]),
+      refused,
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
         flag ? el('button', { class: 'btn', id: 'number-ok', onclick: () => { st.numberOk = true; closeModal(); paint(); } }, 'It\'s right') : null,
         st.skipped
           ? el('button', { class: 'btn', onclick: () => { st.skipOk = true; closeModal(); paint(); } }, 'I skipped it')
           : el('button', { class: 'btn', onclick: () => { st.skipped = true; st.skipOk = true; st.done = false; delete st.unconfirmed; closeModal(); paint(); } }, 'Mark skipped'),
-        el('button', { class: 'btn primary', id: 'edit-set-save', onclick: () => { st.weight = w.value === '' ? null : Number(w.value); st.reps = r.value === '' ? null : Number(r.value); st.rpe = rpe; st.done = true; st.skipped = false; st.skipOk = false; delete st.unconfirmed; closeModal(); paint(); } }, st.skipped ? 'I did it: save' : 'Save')
+        el('button', { class: 'btn primary', id: 'edit-set-save', onclick: () => {
+          const typed = { weight: w.value === '' ? null : Number(w.value), reps: r.value === '' ? null : Number(r.value) };
+          // v1.18: reps below 0 or part of a rep are refused; the sheet stays open
+          const bad = impossibleNumber(typed, ex, { hold: !!st.holdSeconds });
+          if (bad) { refused.textContent = `${bad}.`; refused.hidden = false; return; }
+          st.weight = typed.weight; st.reps = typed.reps; st.rpe = rpe; st.done = true; st.skipped = false; st.skipOk = false; delete st.unconfirmed; closeModal(); paint(); } }, st.skipped ? 'I did it: save' : 'Save')
       ])
     ]));
   }

@@ -1,4 +1,4 @@
-# bugfix-test.py - v1.15.1 bug hunt: each check below failed before the fix. Phone size, Denver time.
+# bugfix-test.py - v1.15.1 bug hunt and the v1.18.0 hands-on test: each check below failed before the fix. Phone size, Denver time.
 # Run: python3 tests/bugfix-test.py
 import os, subprocess, sys, time, datetime
 from playwright.sync_api import sync_playwright
@@ -31,6 +31,7 @@ def to_set(page, want):
         if page.locator('#confirm-btn').count(): page.click('#confirm-btn')
         elif kind(page) in ('timed', 'stretch'): page.clock.run_for((secs(page) + 1) * 1000)
         else: page.click('.player-actions button.btn.primary')
+        page.clock.run_for(700)   # v1.18: the app ignores a second main-button tap within 0.6 s
         page.wait_for_timeout(30)
     return False
 
@@ -104,6 +105,113 @@ with sync_playwright() as p:
     s = page.evaluate("import('./js/store.js').then(m => m.kvGet('settings'))")
     check('clearing the date or bodyweight in Settings does not save a blank', s.get('startDate') != '' and s.get('bodyweightLb') == 200, s)
     check('no page errors', not errors, errors)
+
+    # ---- v1.18.0: what the hands-on test of the new workout screen found, at Cameron's phone size ----
+    print('v1.18.0 fixes, 360 x 698')
+    ctx2 = browser.new_context(viewport={'width': 360, 'height': 698}, reduced_motion='reduce', is_mobile=True, has_touch=True, timezone_id='America/Denver')
+    pg = ctx2.new_page()
+    pg.on('pageerror', lambda e: errors.append(str(e)))
+    pg.add_init_script("window.SpeechSynthesisUtterance = function (t) { this.text = t; }; Object.defineProperty(window, 'speechSynthesis', { value: { cancel() {}, speak() {} }, configurable: true });")
+    pg.clock.install(time=datetime.datetime.fromisoformat('2026-12-04T06:00:00-07:00'))
+    pg.goto(f'http://localhost:{PORT}/'); pg.wait_for_selector('.card.accent h1')
+    pg.evaluate("([t, s]) => import('./js/store.js').then(async m => { await m.setTargets(t); await m.putSession(s); await m.setPairTotals('none'); await m.saveSettings({ bodyweightLb: 200 }); })", [TARGETS, SESSION])
+    pg.reload(); pg.wait_for_selector('#today-card')
+    store = lambda js: pg.evaluate(f"import('./js/store.js').then(m => {js})")
+    def k2(): return kind(pg)
+    def n2(): return name(pg)
+    def step2(): return int(pg.locator('.player').get_attribute('data-step'))
+    def toast_text(): return pg.locator('#toast').inner_text() if pg.locator('#toast').is_visible() else ''
+    def run(seconds):
+        for _ in range(int(seconds)): pg.clock.run_for(1000)
+        pg.wait_for_timeout(30)
+    def main_tap():
+        # the app ignores a second main-button tap within 0.6 s (v1.18), so deliberate taps are 0.7 s apart
+        pg.click('.player-actions button.btn.primary'); pg.clock.run_for(700); pg.wait_for_timeout(30)
+    def go_to(want_kind, want_name, limit=400):
+        for _ in range(limit):
+            if k2() == want_kind and n2() == want_name: return True
+            if k2() in ('timed', 'stretch'): run(secs(pg) + 1)
+            else: main_tap()
+        return False
+    pg.click('#today-card .btn.primary'); pg.wait_for_selector('#start-workout'); pg.click('#start-workout'); pg.wait_for_selector('.player')
+
+    check('reached the first Power clean work set', go_to('work', 'Power clean'))
+    at = step2()
+    pg.locator('.player-actions button', has_text='Edit').click(); pg.wait_for_timeout(60)
+    pg.fill('#in-reps', '-2'); main_tap()
+    t1 = toast_text()
+    check('Edit: reps below 0 are refused on Done, the set waits with the box open (it logged -2 reps)', step2() == at and k2() == 'work' and 'below 0' in t1 and pg.locator('#edit-panel').is_visible(), (step2(), at, t1))
+    pg.fill('#in-reps', '2.5'); main_tap()
+    t2 = toast_text()
+    check('Edit: part of a rep is refused too (it logged 2.5 reps)', step2() == at and 'whole numbers' in t2, (step2(), at, t2))
+    pg.fill('#in-reps', '2'); main_tap()
+    check('Edit: 2 reps logs the set', k2() == 'rest' and pg.locator('#jd-r').inner_text().strip() == '2', (k2(), pg.locator('#jd-r').inner_text() if pg.locator('#jd-r').count() else ''))
+    pg.click('#jd-r'); pg.wait_for_selector('#fix-reps'); pg.fill('#fix-reps', '-1'); pg.click('#jd-fix-save'); pg.wait_for_timeout(80)
+    check('the last-set number sheet refuses reps below 0, says so inside the sheet, and stays open', pg.locator('#fix-reps').count() == 1 and pg.locator('#fix-refused').is_visible() and 'below 0' in pg.locator('#fix-refused').inner_text() and pg.locator('#jd-r').inner_text().strip() == '2', pg.locator('#jd-r').inner_text())
+    pg.click('#modal .btn.ghost'); pg.wait_for_timeout(80)
+
+    check('reached Power clean set 2', go_to('work', 'Power clean') and step2() == at + 2, step2())
+    at = step2()
+    pg.click('.player-actions button.btn.primary'); pg.wait_for_timeout(120); pg.click('.player-actions button.btn.primary'); pg.wait_for_timeout(120)
+    check('a quick second tap on Done does not skip the rest that comes up under the thumb (it did)', k2() == 'rest' and step2() == at + 1 and secs(pg) >= 80, (k2(), step2(), at, pg.locator('#timer').inner_text()))
+    pg.click('#jd-r-minus'); pg.wait_for_timeout(80)
+    check('the card corrects set 2 to 1 rep', pg.locator('#jd-r').inner_text().strip() == '1', pg.locator('#jd-r').inner_text())
+    pg.click('#more-btn'); pg.locator('.menu-item', has_text='Back one step').click(); pg.wait_for_timeout(100)
+    check('Back one step returns to set 2', step2() == at and k2() == 'work', (step2(), k2()))
+    for _ in range(120):
+        if step2() != at: break
+        run(1)
+    check('set 2 run again and ended by its timer keeps the corrected 1 rep (it went back to the planned 2)', step2() == at + 1 and pg.locator('#jd-r').inner_text().strip() == '1' and pg.locator('#jd-saved').inner_text() == 'Saved', (step2(), pg.locator('#jd-r').inner_text(), pg.locator('#jd-saved').inner_text()))
+
+    check('reached the first dumbbell row set', go_to('work', 'Dumbbell row'))
+    at = step2()
+    cls = pg.locator('#sides').get_attribute('class')
+    pg.click('#side-right', force=True); pg.wait_for_timeout(80)
+    check('get-set seconds of a one-arm set: Right is not a button yet, a tap there changes nothing (it broke both clocks)', 'phase-set' in cls and pg.locator('button#side-right').count() == 0 and 'phase-set' in pg.locator('#sides').get_attribute('class'), (cls, pg.locator('#sides').get_attribute('class')))
+    run(6)
+    pace = pg.locator('#pace-text').inner_text()
+    check('then the left side runs, its reps paced from rep 1', 'phase-left' in pg.locator('#sides').get_attribute('class') and pace.startswith('Left · rep 1 of 8') or pace.startswith('Left · rep 2 of 8'), pace)
+    run(8)
+    pg.click('#side-right'); pg.wait_for_timeout(80); run(1)
+    pace = pg.locator('#pace-text').inner_text()
+    check('Right tapped early: the right side starts now, its reps counted from its own start', 'phase-right' in pg.locator('#sides').get_attribute('class') and pace.startswith('Right · rep 1 of 8'), pace)
+    for _ in range(80):
+        if step2() != at: break
+        run(1)
+        if '-' in pg.locator('#pace-text').inner_text() if pg.locator('#pace-text').count() else False: break
+    check('the set ends after the right side, no rep number below 1 on the way', step2() == at + 1 and pg.locator('#jd-saved').count() == 1, (step2(), at))
+
+    pg.click('#more-btn'); pg.locator('.menu-item', has_text='End session early').click(); pg.wait_for_timeout(80)
+    pg.click('#modal .btn.danger'); pg.wait_for_selector('h1:has-text("Review and save")')
+    pend = store("m.getPendingReview()")
+    ip = store("m.getInProgress()")
+    check('a finished session is kept until Save, under the id it will be saved with', pend is not None and pend.get('recordId', '').startswith('ses_') and ip is None, (bool(pend), ip is None))
+    rid = pend['recordId']
+    if pg.locator('#confirm-skipped').count(): pg.click('#confirm-skipped'); pg.wait_for_timeout(200)
+    pg.reload(); pg.wait_for_selector('h1:has-text("Review and save")')
+    check('a reload on Review comes back to Review, with what was confirmed there (the session was lost)', pg.locator('#confirm-skipped').count() == 0 and pg.locator('#discard-session').count() == 1 and pg.locator('h1:has-text("Resume session?")').count() == 0 and 'not saved yet' in toast_text(), toast_text())
+    pg.click('#tabs .tab[data-view="progress"]'); pg.wait_for_timeout(300); pg.click('#tabs .tab[data-view="home"]'); pg.wait_for_selector('#today-card')
+    check('Home after leaving Review by a tab: Not saved yet, with Review and save', pg.locator('#pending-review').is_visible() and pg.locator('#pending-open').inner_text() == 'Review and save')
+    pg.click('#today-card .btn'); pg.wait_for_selector('h1:has-text("Review and save")')
+    check('starting a session while one is not saved opens that one first', 'Save your last session first' in toast_text(), toast_text())
+    pg.evaluate("() => { const b = document.getElementById('save-session'); b.click(); b.click(); }")
+    pg.wait_for_selector('#summary-done')
+    saved = store("m.getSessions()")
+    check('Save tapped twice saves the session once, under its id', len(saved) == 2 and sum(1 for x in saved if x['id'] == rid) == 1, [x['id'] for x in saved])
+    check('after Save nothing is waiting any more', store("m.getPendingReview()") is None)
+    pg.click('#summary-done'); pg.wait_for_selector('#today-card')
+    pg.reload(); pg.wait_for_selector('#today-card')
+    check('a reload after Save opens Home, not the review again', pg.locator('#pending-review').count() == 0 and pg.locator('h1:has-text("Review and save")').count() == 0)
+
+    pg.click('#today-card .btn'); pg.wait_for_selector('#start-workout'); pg.click('#start-workout'); pg.wait_for_selector('.player')
+    pg.click('#more-btn'); pg.locator('.menu-item', has_text='End session early').click(); pg.wait_for_timeout(80)
+    pg.click('#modal .btn.danger'); pg.wait_for_selector('h1:has-text("Review and save")')
+    check('a fresh review has no Discard, only Save', pg.locator('#discard-session').count() == 0)
+    pg.reload(); pg.wait_for_selector('#discard-session')
+    pg.click('#discard-session'); pg.wait_for_selector('#modal .btn.danger'); pg.click('#modal .btn.danger'); pg.wait_for_selector('#today-card')
+    check('Discard on a review that came back: nothing saved, nothing waiting', len(store("m.getSessions()")) == 2 and store("m.getPendingReview()") is None and pg.locator('#pending-review').count() == 0)
+    check('no page errors at 360 x 698', not errors, errors)
+    ctx2.close()
 
     browser.close()
 server.terminate()

@@ -15,6 +15,14 @@ def check(name, cond, info=''):
     print(('  ok   ' if cond else '  FAIL ') + name + ('' if cond else f'  -> {info}'))
     if not cond: fails.append(name)
 
+def tap_main(page, sel='.player-actions button.btn.primary'):
+    """v1.18: the app ignores a main-button tap within 0.6 s of the one before (a double tap), so a test that taps on
+    purpose lets the clock move that far first."""
+    gap = page.evaluate("Date.now() - (window.__lastMainTap || 0)")
+    if gap < 650: page.clock.run_for(int(650 - gap))
+    page.click(sel)
+    page.evaluate("window.__lastMainTap = Date.now()")
+
 TARGETS = {'back_squat': {'weight': 170, 'reps': 4}, 'rdl': {'weight': 150, 'reps': 6}, 'calf_raise': {'weight': 135, 'reps': 10}, 'bss': {'weight': 60, 'reps': 8},
            'leg_curl': {'weight': 80, 'reps': 8}, 'curl': {'weight': 50, 'reps': 10}, 'oh_tri_ext': {'weight': 40, 'reps': 10}}
 
@@ -34,9 +42,9 @@ def run_out(page):
 def step(page):
     """Move one step forward the way Cameron would: Set-up done (or Ready), Done on a set, or let a timer run out."""
     k = kind(page)
-    if page.locator('#confirm-btn').count(): page.click('#confirm-btn'); page.clock.run_for(700)   # v1.18: a second tap within 0.6 s is ignored
+    if page.locator('#confirm-btn').count(): tap_main(page, '#confirm-btn'); page.clock.run_for(700)   # v1.18: a second tap within 0.6 s is ignored
     elif k in ('timed', 'stretch') or (k == 'set up' and not page.locator('#up-next').count()): run_out(page)
-    else: page.click('.player-actions button.btn.primary')
+    else: tap_main(page, '.player-actions button.btn.primary')
     page.wait_for_timeout(60)
 def save_review(page):
     page.wait_for_selector('h1:has-text("Review and save")')

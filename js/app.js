@@ -7,7 +7,7 @@ import { Player, playTones } from './player.js';
 import { learnPacing, pacingLines, pacingConfig } from './pacing.js';
 import { saveSession, renderSummary, renderReview, setsTable, gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from './logger.js';
 import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progression.js';
-import { getTargets, setTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
+import { getTargets, setTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getPendingReview, setPendingReview, clearPendingReview, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
@@ -20,7 +20,7 @@ import { renderPlan } from './plan-view.js';
 import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp } from './ui.js';
 import { weekRings, ringsCard } from './rings.js';
-import { flaggedGroups, applyNumberFix } from './sanity.js';
+import { flaggedGroups, applyNumberFix, impossibleNumber } from './sanity.js';
 
 const view = document.getElementById('view');
 let D = null; // { plan, rules, settingsDefaults, architecture }
@@ -173,12 +173,33 @@ async function syncCoach(rerender) {
 
 async function openApp() {
   const inProgress = await getInProgress();
+  // v1.18: a finished session that was never saved comes back first (the app closed or reloaded on Review)
+  const pending = await pendingReview();
+  if (pending) {
+    // its own in-progress copy, if the app closed before that was cleared, is not offered as a Resume
+    if (inProgress && inProgress.startedISO === pending.startedAt) clearInProgress().catch(() => {});
+    onSessionFinished(pending, { restored: true });
+    toast('This session is not saved yet. Check it and tap Save.', 4500);
+    return;
+  }
   if (inProgress && inProgress.status === 'running' && Date.now() - (inProgress.lastTick || 0) < D.rules.timing.resumeWindowHours * 3600000) {
     offerResume(inProgress);
   } else {
     if (inProgress) clearInProgress().catch(() => {});
     if (!(await openShortcut())) showTab('home');
   }
+}
+
+/**
+ * v1.18: the finished session waiting on Review, or null. One that was saved after all (the app closed between Save
+ * and the summary) or that cannot be read is dropped.
+ */
+async function pendingReview() {
+  const p = await getPendingReview().catch(() => null);
+  if (!p) return null;
+  const sessions = p.timeline && Array.isArray(p.sets) ? await getSessions() : null;
+  if (!sessions || (p.recordId && sessions.some(x => x.id === p.recordId))) { await clearPendingReview().catch(() => {}); return null; }
+  return p;
 }
 
 /**
@@ -354,6 +375,16 @@ async function renderHome() {
   };
   const movedNote = row => (row.status === 'open' ? `Moved here from ${new Date(row.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long' })}. If you run with your watch, it logs itself.` : 'If you run with your watch, it logs itself.');
 
+  // v1.18: a finished session that was never saved (a tab tapped on Review) waits at the top until it is
+  const pending = await pendingReview();
+  if (pending) {
+    view.appendChild(el('div', { class: 'card accent', id: 'pending-review' }, [
+      el('h3', {}, 'Not saved yet'),
+      el('p', {}, `${pending.timeline.sessionName || 'Your last session'}, ${fmtDate(toISODate(pending.startedAt))}. Its sets are kept here until you save it.`),
+      el('button', { class: 'btn primary', id: 'pending-open', onclick: () => onSessionFinished(pending, { restored: true }) }, 'Review and save')
+    ]));
+  }
+
   // v1.16: numbers that look wrong come first, until Cameron fixes or confirms them
   const flags = flaggedGroups(allSessions, D.plan, D.rules);
   if (flags.length) view.appendChild(checkNumbersCard(flags, allSessions));
@@ -510,9 +541,12 @@ function checkNumbersCard(flags, sessions) {
     ...flags.map(g => {
       const rec = sessions.find(s => s.id === g.recordId);
       const ws = g.sets.map(i => rec.sets[i].weight).filter(w => w != null);
+      // v1.18: a flag about reps shows the reps
+      const f0 = g.flagged[0].flag;
+      const sub = f0.code === 'reps' ? `${g.sets.map(i => rec.sets[i].reps).filter(r => r != null).join(', ')} reps · ${f0.short}` : `${ws.map(fmtWeight).join(', ')} lb · ${f0.short}`;
       return el('button', { type: 'button', class: 'check-row', 'data-ex': g.exerciseId, onclick: () => fixNumbers(g, sessions) }, [
         el('span', { class: 'cr-main' }, [el('b', {}, g.name), el('span', { class: 'muted' }, ` · ${fmtDate(g.date)}`)]),
-        el('span', { class: 'cr-sub' }, `${ws.map(fmtWeight).join(', ')} lb · ${g.flagged[0].flag.short}`),
+        el('span', { class: 'cr-sub' }, sub),
         el('span', { class: 'cr-go' }, 'Fix ›')
       ]);
     })
@@ -538,6 +572,9 @@ function fixNumbers(g, sessions) {
   const save = async keep => {
     const weights = {};
     if (!keep) for (const [i, x] of Object.entries(inputs)) if (x.value !== '') weights[i] = Number(x.value);
+    // v1.18: a weight below 0 is refused (the sheet stays open)
+    const bad = Object.values(weights).map(w => impossibleNumber({ weight: w }, ex)).find(Boolean);
+    if (bad) { refused.textContent = `${bad}.`; refused.hidden = false; return; }
     const [allSessions, targets, settings] = await Promise.all([getSessions(), getTargets(), getSettings()]);
     const r = applyNumberFix({ sessions: allSessions, targets, recordId: g.recordId, exerciseId: g.exerciseId, weights, checked: g.sets, plan: D.plan, rules: D.rules, settings });
     await putSession(r.record);
@@ -546,11 +583,14 @@ function fixNumbers(g, sessions) {
     toast(keep ? `${ex.name}: kept as logged` : (r.retargeted && r.target.weight != null ? `${ex.name} fixed. Next time ${weightWithPair(ex, r.target.weight)} × ${r.target.reps}` : `${ex.name} fixed`), 4000);
     renderHome();
   };
+  // v1.18: a weight below 0 is refused, said inside the sheet (a toast sits behind it)
+  const refused = el('div', { class: 'num-flag', id: 'fix-refused', role: 'alert', hidden: true });
   showModal(el('div', { class: 'fix-sheet' }, [
     el('h2', {}, ex.name || g.name),
     el('p', { class: 'muted' }, `${rec.sessionName}, ${fmtDate(rec.date)}. Put in what you actually lifted${isPair(ex) ? ' (the total of both dumbbells)' : ''}.`),
     el('div', { class: 'field' }, [el('label', { for: 'fix-all' }, 'Same weight for every set'), all]),
     ...rows,
+    refused,
     el('div', { class: 'btn-row' }, [
       el('button', { class: 'btn ghost', id: 'fix-keep', onclick: () => save(true) }, 'It\'s right'),
       el('button', { class: 'btn primary', id: 'fix-save', onclick: () => save(false) }, 'Save')
@@ -608,6 +648,9 @@ function editTarget(id, ex, t, settings) {
 // ---- Pre-session overview (v1.4) ----
 // What the session is for, every exercise with sets x reps and a weight you can change, and the time it should take.
 async function previewSession(sessionRef, week) {
+  // v1.18: one session at a time: the last one is saved (or discarded) before the next starts
+  const pending = await pendingReview();
+  if (pending) { onSessionFinished(pending, { restored: true }); toast('Save your last session first (or discard it at the bottom).', 4500); return; }
   const settings = await getSettings();
   const targets = await getTargets();
   const sessions = await getSessions();
@@ -817,16 +860,39 @@ function offerResume(saved) {
   ]));
 }
 
-async function onSessionFinished(draft) {
+async function onSessionFinished(draft, { restored = false } = {}) {
   player = null;
   // v1.14: the review is not saved yet, so Back must not leave it
   const guard = () => { onBack('page', guard); toast('Tap Save at the bottom to keep this session'); };
   onBack('page', guard);
+  let saving = false;
   try {
     window.scrollTo(0, 0);
     await renderReview(view, draft, { plan: D.plan, rules: D.rules }, {
+      // v1.18: each change on Review is kept with the draft, so a reload comes back to it as he left it
+      onPaint: () => { if (!saving) setPendingReview(draft).catch(() => {}); },
+      // v1.18: a review that came back after a reload (or from Home) can be thrown away, with a confirm
+      onDiscard: restored ? async () => {
+        if (!(await confirmDialog('Discard this session?', 'Nothing from it is saved: no sets, no new targets.', 'Discard', true))) return;
+        await clearPendingReview().catch(() => {});
+        showTab('home');
+      } : null,
       onSave: async overrides => {
-        const record = await saveSession(draft, { plan: D.plan, rules: D.rules, overrides });
+        // v1.18: one save per session. A second tap before the summary showed saved it twice, and the second run of
+        // the engine counted a missed session again (two misses in a row drop the weight).
+        if (saving) return;
+        saving = true;
+        const btn = document.getElementById('save-session');
+        if (btn) btn.disabled = true;
+        let record;
+        try { record = await saveSession(draft, { plan: D.plan, rules: D.rules, overrides }); } catch (e) {
+          saving = false; if (btn) btn.disabled = false;
+          toast(`Could not save: ${e.message || e}`, 4000);
+          return;
+        }
+        await clearPendingReview().catch(() => {});
+        // and its in-progress copy, in case clearing that failed when the session ended (Resume would offer it again)
+        getInProgress().then(ip => (ip && ip.startedISO === draft.startedAt ? clearInProgress() : null)).catch(() => {});
         await updateWeekChip();
         window.scrollTo(0, 0);
         const [settings, sessions, runs, cfg] = await Promise.all([getSettings(), getSessions(), getRuns(), getSync()]);

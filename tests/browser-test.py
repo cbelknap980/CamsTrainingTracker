@@ -12,6 +12,14 @@ def check(name, cond, info=''):
     print(('  ok   ' if cond else '  FAIL ') + name + ('' if cond else f'  {info}'))
     if not cond: fails.append(name)
 
+def tap_main(page, sel='.player-actions button.btn.primary'):
+    """v1.18: the app ignores a main-button tap within 0.6 s of the one before (a double tap), so a test that taps on
+    purpose lets the clock move that far first."""
+    gap = page.evaluate("Date.now() - (window.__lastMainTap || 0)")
+    if gap < 650: page.clock.run_for(int(650 - gap))
+    page.click(sel)
+    page.evaluate("window.__lastMainTap = Date.now()")
+
 def pass_review(page, prefix, override=None):
     page.wait_for_selector('h1:has-text("Review and save")')
     check(f'{prefix}: review shows verdict badges', page.locator('.verdict').count() >= 1, page.locator('.verdict').count())
@@ -66,9 +74,9 @@ def lead_step(page, skip_rests=True):
     if page.locator('#confirm-btn').count():
         seen['confirms'] = seen.get('confirms', 0) + 1
         seen.setdefault('confirm_for', []).append(f"{page.locator('#confirm-btn').inner_text().strip()}: {page.locator('#up-next .step-name').inner_text().strip()}")
-        page.click('#confirm-btn')
+        tap_main(page, '#confirm-btn')
         page.clock.run_for(700)   # a second tap within 0.6 s is ignored, so a double tap cannot skip the rest it just kept
-    elif skip_rests: page.click('.player-actions button.btn.primary')
+    elif skip_rests: tap_main(page, '.player-actions button.btn.primary')
     else: page.clock.run_for((timer_secs(page) + 1) * 1000)
 
 def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests=True, go_behind_at=None):
@@ -103,15 +111,15 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
         if kind.startswith('baseline') or kind.startswith('retest'):
             w = baseline_weights.get(name, 135)
             page.fill('#in-weight', str(w))
-            page.click('button.btn.primary:has-text("Done")')
+            tap_main(page, 'button.btn.primary:has-text("Done")')
         elif kind.startswith(IS_SET):
             # first-time machine and cable accessories have no weight yet: the edit panel is open for it
             wv = page.locator('#in-weight')
             if wv.count() and wv.is_visible() and wv.input_value() == '':
                 page.fill('#in-weight', '30')
-                page.click('button.btn.primary')
+                tap_main(page, 'button.btn.primary')
             elif skip_rests or kind.startswith('hold'):
-                page.click('button.btn.primary')
+                tap_main(page, 'button.btn.primary')
             else:
                 page.clock.run_for((timer_secs(page) + 1) * 1000)  # v1.4: the set ends on its own timer
         elif kind.startswith(IS_LEAD) and page.locator('#up-next').count():
@@ -120,9 +128,9 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
             if page.locator('#sides').count(): seen['sided'] = seen.get('sided', 0) + 1
             run_out(page)  # let it auto-advance
         elif kind == 'your call':
-            page.click('button.btn.primary:has-text("Do it")')
+            tap_main(page, 'button.btn.primary:has-text("Do it")')
         else:
-            page.click('button.btn.primary')
+            tap_main(page, 'button.btn.primary')
         page.wait_for_timeout(60)
         steps += 1
     pass_review(page, shots_prefix, override=('Back squat', 170) if shots_prefix == 'lift1' else None)
@@ -218,7 +226,7 @@ with sync_playwright() as p:
         if k == 'timed':
             run_out(page)
         else:
-            page.click('button.btn.primary')
+            tap_main(page, 'button.btn.primary')
         page.wait_for_timeout(80)
     before_idx = page.locator('.player-head .block').inner_text()
     page.reload(); page.wait_for_selector('h1')
@@ -234,18 +242,18 @@ with sync_playwright() as p:
     while steps2 < 400 and page.locator('.player').count():
         kind = page.locator('.step-kind').inner_text().strip().lower(); name = page.locator('.step-name').first.inner_text().strip()
         if kind.startswith('baseline'):
-            page.fill('#in-weight', '95' if 'press' in name.lower() else '25'); page.click('button.btn.primary:has-text("Done")')
+            page.fill('#in-weight', '95' if 'press' in name.lower() else '25'); tap_main(page, 'button.btn.primary:has-text("Done")')
         elif kind.startswith(IS_SET):
             wv = page.locator('#in-weight')
             if wv.count() and wv.is_visible() and wv.input_value() == '': page.fill('#in-weight', '40')
             if 'incline dumbbell press' in name.lower() and not saw_bench:
                 saw_bench = True
                 check('v1.5 typed preview total (100) is the set target, shown with 2 x 50', '100' in page.locator('.tile-weight').inner_text() and '2 × 50' in page.locator('.tile-weight').inner_text(), page.locator('.tile-weight').inner_text())
-            page.click('button.btn.primary')
+            tap_main(page, 'button.btn.primary')
         elif kind.startswith(IS_LEAD) and page.locator('#up-next').count(): lead_step(page)
         elif kind in ('timed', 'stretch', 'set up'):
             run_out(page)
-        else: page.click('button.btn.primary')
+        else: tap_main(page, 'button.btn.primary')
         page.wait_for_timeout(60); steps2 += 1
     pass_review(page, 'lift2')
     check('lift2 reached summary', page.locator('h1', has_text='Session').count() == 1)
@@ -418,12 +426,12 @@ with sync_playwright() as p:
             page.clock.run_for((timer_secs(page) + 20) * 1000); page.wait_for_timeout(120)
             check('v1.5 set-up clock runs out and holds for the tap', 'confirm' in page.locator('.step-kind').inner_text().lower() and timer_secs(page) == 0 and page.evaluate('window.__said.slice(-1)[0]') == 'Tap set-up done when you are ready.', (page.locator('.step-kind').inner_text(), page.evaluate('window.__said.slice(-1)[0]')))
             page.screenshot(path=f'{SHOTS}/v15-confirm-setup.png')
-            page.click('#confirm-btn'); page.wait_for_timeout(120)
+            tap_main(page, '#confirm-btn'); page.wait_for_timeout(120)
             check('v1.4 get-ready: screen turns amber for the last 5 s', page.evaluate("document.body.getAttribute('data-kind')") == 'ready' and 'get ready' in page.locator('.step-kind').inner_text().lower(), page.locator('.step-kind').inner_text())
             page.screenshot(path=f'{SHOTS}/v14-get-ready.png')
             page.clock.run_for(6000); page.wait_for_timeout(120)
             continue
-        page.click('.player-actions button.btn.primary')
+        tap_main(page, '.player-actions button.btn.primary')
         page.wait_for_timeout(50)
     check('week 3 squat starts with a ramp-up set at 45 lb', page.locator('.step-kind').inner_text().lower().startswith('ramp') and page.locator('.step-target .hw-num').inner_text().strip() == '45' and page.locator('.step-target .hw-unit').inner_text().strip() == 'lb', page.locator('.step-target').inner_text())
     page.screenshot(path=f'{SHOTS}/week3-ramp.png')
@@ -452,8 +460,8 @@ with sync_playwright() as p:
         if k == 'work': break
         if page.locator('#confirm-btn').count():
             bar_changes += 1
-            page.click('#confirm-btn'); page.clock.run_for(700)
-        else: page.click('.player-actions button.btn.primary')
+            tap_main(page, '#confirm-btn'); page.clock.run_for(700)
+        else: tap_main(page, '.player-actions button.btn.primary')
         page.wait_for_timeout(60)
     check('v1.18 every bar change on the way up waited for Set-up done', bar_changes >= 3, bar_changes)
     check('v1.4 work set: large name, set n of N, focus cues, plain effort', 'Set 1 of 3' in page.locator('.step-where').inner_text() and page.locator('.tips .tip').count() >= 2 and 'Leave 2-3 in the tank' in page.locator('.hl-effort').inner_text(), page.locator('.step-main').inner_text()[:200])
@@ -474,7 +482,7 @@ with sync_playwright() as p:
     page.click('button:has-text("Edit")'); page.fill('#in-weight', '195'); page.fill('#in-reps', '5')
     page.clock.run_for(120 * 1000); page.wait_for_timeout(100)
     check('v1.4 a set with the edit panel open waits for Done', page.locator('.step-kind').inner_text().lower() == 'work')
-    page.click('.player-actions button.btn.primary')
+    tap_main(page, '.player-actions button.btn.primary')
     page.wait_for_timeout(200)
     check('heavier set triggers PR toast', page.locator('#toast').is_visible() and 'PR' in page.locator('#toast').inner_text(), page.locator('#toast').inner_text())
     check('rest screen shows the clock bar and up-next', page.locator('#rest-fill').count() == 1 and 'up next' in page.locator('.step-main').inner_text().lower(), page.locator('.step-main').inner_text()[:80])

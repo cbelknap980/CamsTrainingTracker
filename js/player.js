@@ -12,11 +12,11 @@
 // State lives in `this.s` and is saved to IndexedDB on every change so a session can be resumed.
 
 import { trimToFit, remainingSeconds, leadIns, setTiming, blankStep } from './builder.js';
-import { setInProgress, clearInProgress } from './store.js';
+import { setInProgress, clearInProgress, setPendingReview, newId } from './store.js';
 import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText } from './data.js';
 import { incrementFor, checkPR } from './progression.js';
 import { el, showModal, closeModal, toast, hideToast, effortChips, onBack, dropBack, haptic } from './ui.js';
-import { numberFlag } from './sanity.js';
+import { numberFlag, impossibleNumber } from './sanity.js';
 import { icon } from './icons.js';
 import { learnPacing } from './pacing.js';
 
@@ -111,7 +111,7 @@ export class Player {
       sideAt: null, sidePhase: null, stepT0: null, stepPausedMs: 0, stepExt: 0, stepPlan: 0
     };
     this.audio = null; this.wakeLock = null; this.timer = null; this.editOpen = false; this.swReg = null;
-    this.pendingRpe = null; this.said = []; this.savedAt = 0; this.confirmedMs = 0;
+    this.pendingRpe = null; this.said = []; this.savedAt = 0; this.confirmedMs = 0; this.mainTapMs = 0;
     this._onVis = () => this.onVisibility();
     this._onResize = () => this.fit();
   }
@@ -377,7 +377,8 @@ export class Player {
     const a = this.s.sideAt; const step = this.step;
     if (!a || !step || this.s.pausedAt != null) return;
     const e = this.elapsedInStep();
-    if (e >= a.rightStart) return;
+    // only while the left side runs or during the change-over (a tap in the get-set seconds once broke the clocks)
+    if (e < a.start || e >= a.rightStart) return;
     const rightLen = a.end - a.rightStart;
     a.leftEnd = Math.min(a.leftEnd, e); a.rightStart = e; a.end = e + rightLen;
     if (step.kind === 'set' && step.auto && !step.holdSeconds) step.seconds = a.end;
@@ -681,8 +682,11 @@ export class Player {
     const w = this.container.querySelector('#in-weight');
     const r = this.container.querySelector('#in-reps');
     const num = x => (x && x.value !== '' ? Number(x.value) : null);
-    return { weight: num(w), reps: num(r), rpe: this.pendingRpe != null ? this.pendingRpe : this.defaultRpe(this.step) };
+    const prior = this.priorRecord(this.step);
+    return { weight: num(w), reps: num(r), rpe: this.pendingRpe != null ? this.pendingRpe : (prior && prior.rpe != null ? prior.rpe : this.defaultRpe(this.step)) };
   }
+  /** What this set was logged as before he went Back onto it (null for a set not yet done, or skipped). */
+  priorRecord(s) { return s && s.record && s.record.done && !s.record.skipped ? s.record : null; }
   /** The effort button that is pre-selected for a set: the level its target falls in. */
   defaultRpe(s) {
     if (!s || s.rpeDefault == null) return null;
@@ -717,10 +721,19 @@ export class Player {
     // timer keeps what was typed there instead of logging the target (the typed weight used to be lost)
     const panel = this.container.querySelector('#edit-panel');
     const panelOpen = !!(panel && !panel.hidden);
-    const typed = auto && panelOpen ? this.readInputs() : null;
-    const v = auto ? { weight: typed && typed.weight != null ? typed.weight : (s.target ? s.target.weight : null), reps: s.holdSeconds || (typed && typed.reps != null ? typed.reps : (s.target ? s.target.reps : null)), rpe: typed ? typed.rpe : this.defaultRpe(s) } : this.readInputs();
-    if (s.holdSeconds && v.reps == null) v.reps = s.holdSeconds;
     const ex = this.plan.exercises[s.exerciseId];
+    let typed = auto && panelOpen ? this.readInputs() : null;
+    // v1.18: a number that cannot be right (reps below 0, part of a rep) typed there is not logged by the timer
+    if (typed && impossibleNumber(typed, ex, { hold: !!s.holdSeconds })) typed = { ...typed, weight: null, reps: null };
+    // v1.18: a set already logged once (he went Back onto it) keeps what was logged or corrected on its card when its
+    // timer runs out again; it used to be logged a second time with the target numbers
+    const prior = this.priorRecord(s);
+    const planned = k => (prior && prior[k] != null ? prior[k] : (s.target ? s.target[k] : null));
+    const v = auto ? { weight: typed && typed.weight != null ? typed.weight : planned('weight'), reps: s.holdSeconds || (typed && typed.reps != null ? typed.reps : planned('reps')), rpe: typed ? typed.rpe : (prior && prior.rpe != null ? prior.rpe : this.defaultRpe(s)) } : this.readInputs();
+    if (s.holdSeconds && v.reps == null) v.reps = s.holdSeconds;
+    // v1.18: refused on Done, with the sheet left open to fix it
+    const bad = auto ? '' : impossibleNumber(v, ex, { hold: !!s.holdSeconds });
+    if (bad) { toast(bad); haptic('warn'); this.openEdit(); return; }
     const needsWeight = ex && ex.equipment !== 'bodyweight' && !s.holdSeconds;
     if (needsWeight && v.weight == null && !auto && !this.isAutoSet(s)) { toast('Enter the weight you used'); this.openEdit(); return; }
     if (v.reps == null && !auto && !s.holdSeconds) { toast('Enter reps'); this.openEdit(); return; }
@@ -744,9 +757,14 @@ export class Player {
     s.done = true; s.skipped = false; s.actualSeconds = Math.round(this.stepActive());
     s.record = { ...this.baseRecord(s), weight: v.weight, reps: v.reps, rpe: v.rpe, done: true, skipped: false, at: new Date().toISOString() };
     if (numberOk) s.record.numberOk = true;
+    if (prior && prior.weight === v.weight && prior.reps === v.reps) {
+      if (prior.numberOk) s.record.numberOk = true;
+      if (prior.edited) s.record.edited = true;
+    }
     // v1.18: a set that ended on its own timer with no effort picked is logged as planned (target weight, target
-    // reps, the usual effort). Nobody confirmed that, so it is marked: the last-set card and Review show it.
-    if (auto && !s.holdSeconds && !s.ramp && this.pendingRpe == null) s.record.unconfirmed = true;
+    // reps, the usual effort). Nobody confirmed that, so it is marked: the last-set card and Review show it. What he
+    // had already confirmed for this set (before going Back onto it) stays confirmed.
+    if (auto && !s.holdSeconds && !s.ramp && this.pendingRpe == null && !(prior && !prior.unconfirmed)) s.record.unconfirmed = true;
     // v1.18: how long the set took against its timer, and how the countdown before it went (pacing.js). A set whose
     // numbers were typed while its clock ran says nothing about pace.
     if (s.auto && !s.ramp && !s.baseline && !s.retest && !s.holdSeconds && !s.amrap) {
@@ -1011,10 +1029,14 @@ export class Player {
       plannedSeconds: this.s.timeline.plannedSeconds, trims: this.s.trims, livePrs: this.s.prs,
       // v1.14: minutes of the Engine finisher actually done, for the Hard efforts ring on Home
       engineMinutes: Math.round(this.steps.filter(x => x.blockType === 'emom' && x.done && !x.skipped).reduce((m, x) => m + (x.actualSeconds || x.seconds || 0), 0) / 60),
-      sets: this.steps.filter(s => s.kind === 'set' && s.record).map(s => s.record)
+      sets: this.steps.filter(s => s.kind === 'set' && s.record).map(s => s.record),
+      // v1.18: the id the record gets on Save, fixed now so a review restored after a reload saves the same session
+      recordId: newId('ses')
     };
     this.teardown();
-    clearInProgress().catch(() => {});
+    // v1.18: the review is kept until it is saved, so a reload or a closed app on the Review page does not lose the
+    // workout. The in-progress copy goes once the review is stored (if storing fails, Resume still has the session).
+    setPendingReview(draft).then(() => clearInProgress()).catch(() => {});
     this.onFinish(draft);
   }
   abandon() { this.teardown(); clearInProgress().catch(() => {}); }
@@ -1310,17 +1332,23 @@ export class Player {
     const wStep = ex ? incrementFor(this.rules, p.exerciseId, ex) : 5;
     const wVal = p.record.weight != null ? p.record.weight : (p.target && p.target.weight != null ? p.target.weight : '');
     const num = id => { const x = document.getElementById(id); return x && x.value !== '' ? Number(x.value) : null; };
+    // v1.18: a number that cannot be right is refused here, said inside the sheet (a toast sits behind it)
+    const refused = el('div', { class: 'num-flag', id: 'fix-refused', role: 'alert', hidden: true });
     showModal(el('div', { class: 'fix-set' }, [
       el('h2', {}, `${p.name}${p.setIndex ? ', ' + (p.round ? 'round ' : 'set ') + p.setIndex : ''}`),
       el('div', { class: 'num-fields' + (isBw || p.holdSeconds ? ' one' : '') }, [
         isBw || p.holdSeconds ? null : field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight (lb)'), 'fix-weight', wVal, wStep || 2.5),
         field(p.holdSeconds ? 'Seconds' : 'Reps', 'fix-reps', p.record.reps != null ? p.record.reps : '', 1)
       ]),
+      refused,
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
-        el('button', { class: 'btn primary', onclick: () => {
+        el('button', { class: 'btn primary', id: 'jd-fix-save', onclick: () => {
           const patch = { reps: num('fix-reps') };
           if (!isBw && !p.holdSeconds) patch.weight = num('fix-weight');
+          // v1.18: reps below 0 or part of a rep are refused here; the sheet stays open
+          const bad = impossibleNumber(patch, ex, { hold: !!p.holdSeconds });
+          if (bad) { refused.textContent = `${bad}.`; refused.hidden = false; haptic('warn'); return; }
           this.fixRecord(idx, patch); closeModal(); this.renderStep();
         } }, 'Save')
       ])
@@ -1554,6 +1582,7 @@ export class Player {
   /**
    * v1.18: Left and Right side by side, each with its own clock and color. The side to work is lit, the other is
    * dim; a done side shows a check. Tapping Right while Left is still running starts it now (he finished early).
+   * Right cannot be tapped in the get-set seconds before the left side starts: there is no left side to cut short.
    */
   sidesPanel(s) {
     const info = this.sideInfo() || { phase: 'left' };
@@ -1564,11 +1593,11 @@ export class Player {
     const half = (side, state, tap) => el(tap ? 'button' : 'div', { class: `side ${side} ${state}`, id: `side-${side}`, type: tap ? 'button' : null, 'aria-label': tap ? 'Start the right side now' : null, onclick: tap ? () => this.switchSideNow() : null }, [
       el('span', { class: 'side-name' }, side === 'left' ? 'Left' : 'Right'),
       el('span', { class: 'side-time', id: `side-${side}-time` }, state === 'done' ? '✓' : '0:00'),
-      el('small', { class: 'side-note', id: `side-${side}-note` }, state === 'active' ? (hold ? 'hold' : 'now') : (state === 'done' ? 'done' : (side === 'right' && ph === 'switch' ? 'switch sides' : (side === 'right' ? 'tap to start now' : 'get set'))))
+      el('small', { class: 'side-note', id: `side-${side}-note` }, state === 'active' ? (hold ? 'hold' : 'now') : (state === 'done' ? 'done' : (side === 'left' ? 'get set' : (ph === 'switch' ? 'switch sides' : (ph === 'set' ? 'next' : 'tap to start now')))))
     ]);
     return el('div', { class: `sides phase-${ph}${hold ? ' is-hold' : ''}`, id: 'sides' }, [
       half('left', leftState, false),
-      half('right', rightState, ph === 'set' || ph === 'left' || ph === 'switch')
+      half('right', rightState, ph === 'left' || ph === 'switch')
     ]);
   }
 
@@ -1656,6 +1685,17 @@ export class Player {
     }
   }
 
+  /**
+   * v1.18: the big button changes under his thumb (Done becomes Skip rest or Set-up done). A second tap on it within
+   * 0.6 s is taken as the same tap, so a double tap cannot skip the rest or confirm a bar change he has not made.
+   */
+  mainTap(fn) {
+    return () => {
+      const now = Date.now();
+      if (now - this.mainTapMs < 600) return;
+      this.mainTapMs = now; fn();
+    };
+  }
   renderActions(s) {
     const actions = el('div', { class: 'player-actions' });
     const swap = () => (this.swapChoices().length ? el('button', { class: 'btn', id: 'swap-btn', onclick: () => this.openSwap() }, 'Equipment taken') : null);
@@ -1663,22 +1703,22 @@ export class Player {
       const ex = this.plan.exercises[s.exerciseId];
       const showEdit = this.editOpen || (s.target && s.target.weight == null && ex && ex.equipment !== 'bodyweight' && !s.holdSeconds) || s.baseline || s.retest || (s.repRange == null && !s.holdSeconds);
       actions.appendChild(this.editPanel(s, ex, showEdit));
-      actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.logSet() }, [icon('check'), s.holdSeconds ? 'Done early' : 'Done']));
+      actions.appendChild(el('button', { class: 'btn primary', onclick: this.mainTap(() => this.logSet()) }, [icon('check'), s.holdSeconds ? 'Done early' : 'Done']));
       actions.appendChild(el('div', { class: 'secondary' }, [
         this.isAutoSet(s) ? el('button', { class: 'btn', id: 'extend-btn', onclick: () => this.addSeconds(this.rules.timing.extendSeconds) }, [icon('plus'), `${this.rules.timing.extendSeconds} s`]) : null,
         el('button', { class: 'btn', onclick: () => this.toggleEdit() }, [icon('edit'), this.editOpen ? 'Hide' : 'Edit']),
         el('button', { class: 'btn', onclick: () => this.skip() }, [icon('skip'), 'Skip'])
       ]));
     } else if (s.kind === 'decision') {
-      actions.appendChild(el('button', { class: 'btn primary', onclick: () => this.decide(true) }, 'Do it'));
+      actions.appendChild(el('button', { class: 'btn primary', onclick: this.mainTap(() => this.decide(true)) }, 'Do it'));
       actions.appendChild(el('div', { class: 'secondary' }, [el('button', { class: 'btn', onclick: () => this.decide(false) }, 'Skip it')]));
     } else if (this.waiting()) {
       // v1.5: what comes next starts only after this tap; then the get-ready count runs
       const next = this.steps[this.s.idx + 1];
-      actions.appendChild(el('button', { class: 'btn primary', id: 'confirm-btn', onclick: () => this.confirmSetup() }, [icon('check'), next && next.kind === 'set' ? 'Set-up done' : 'Ready']));
+      actions.appendChild(el('button', { class: 'btn primary', id: 'confirm-btn', onclick: this.mainTap(() => this.confirmSetup()) }, [icon('check'), next && next.kind === 'set' ? 'Set-up done' : 'Ready']));
       actions.appendChild(el('div', { class: 'secondary' }, [el('button', { class: 'btn', onclick: () => this.addSeconds(30) }, [icon('plus'), '30 s']), swap()]));
     } else {
-      actions.appendChild(el('button', { class: 'btn primary', id: 'next-btn', onclick: () => this.advance() }, [icon('skip'), s.kind === 'rest' ? 'Skip rest' : (this.leadsIn() ? 'Start now' : 'Next')]));
+      actions.appendChild(el('button', { class: 'btn primary', id: 'next-btn', onclick: this.mainTap(() => this.advance()) }, [icon('skip'), s.kind === 'rest' ? 'Skip rest' : (this.leadsIn() ? 'Start now' : 'Next')]));
       actions.appendChild(el('div', { class: 'secondary' }, [el('button', { class: 'btn', onclick: () => this.addSeconds(30) }, [icon('plus'), '30 s']), swap()]));
     }
     return actions;
@@ -1818,12 +1858,12 @@ export class Player {
         let txt;
         if (info) {
           const a = this.s.sideAt;
-          const per = (a.leftEnd - a.start) / reps;
-          const repAt = from => `rep ${Math.min(reps, Math.floor(Math.max(0, e - from) / per) + 1)} of ${reps}`;
+          // each side paced on its own clock: Right started early or given more time keeps its own rep count
+          const repAt = (from, to) => { const per = Math.max(0.5, (to - from) / reps); return `rep ${Math.min(reps, Math.floor(Math.max(0, e - from) / per) + 1)} of ${reps}`; };
           if (info.phase === 'set') txt = 'Get set';
-          else if (info.phase === 'left') txt = `Left · ${repAt(a.start)}`;
+          else if (info.phase === 'left') txt = `Left · ${repAt(a.start, a.leftEnd)}`;
           else if (info.phase === 'switch') txt = 'Switch sides';
-          else if (info.phase === 'right') txt = `Right · ${repAt(a.rightStart)}`;
+          else if (info.phase === 'right') txt = `Right · ${repAt(a.rightStart, a.end)}`;
           else txt = 'Finish the set';
         } else {
           const w = e - (s.startSeconds || 0);

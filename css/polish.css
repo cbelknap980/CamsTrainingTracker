@@ -718,3 +718,6 @@ body.in-session .toast-msg { white-space: normal; overflow: visible; max-width: 
 .review-unchecked .open-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); cursor: pointer; }
 .review-unchecked .open-item .why { color: var(--text); font-weight: 700; white-space: nowrap; }
 .review-set .not-rated { font-style: italic; }
+
+/* v1.18: a review that came back after a reload can be thrown away; quiet, below Save */
+.btn.ghost.danger-text { color: var(--bad); }
