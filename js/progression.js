@@ -196,10 +196,12 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     }
 
     // v1.18 (rules R4, rule 1; Cameron: bad numbers must not move the plan): a set the timer logged before an effort
-    // was picked carries the app's guess. Until he rates it, the target and the flat count stay as they are.
+    // was picked carries the app's guess. Saved without a rating, the target and the flat count stay as they are for
+    // the next session. The line says nothing about rating later: a saved session has no way to rate a set (the review
+    // page, where it can still be rated, says so on its own card).
     const unrated = done.filter(s => s.unconfirmed).length;
     if (unrated) {
-      say(`${name}: ${detail}. ${unrated === 1 ? 'One set has' : `${unrated} sets have`} no effort picked, so the target holds until you rate ${unrated === 1 ? 'it' : 'them'}.`, 'hold', 'effort not rated');
+      say(`${name}: ${detail}. ${unrated === 1 ? 'One set had' : `${unrated} sets had`} no effort picked, so the target stays the same next time.`, 'hold', 'effort not rated');
       next[id] = cur;
       continue;
     }

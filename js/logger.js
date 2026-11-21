@@ -150,13 +150,15 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
     }
 
     // v1.18: sets whose timer ran out before an effort was picked. Nobody confirmed them, so they are listed here.
-    // Saving does not wait for them, but their lift's next target holds until they are rated (rules R4, rule 1).
+    // Saving does not wait for them, but a lift saved with one unrated keeps its target for the next session (rules R4,
+    // rule 1). This page is the only place to rate them: a saved session has no rating control.
     const unchecked = record.sets.filter(st => isUnchecked(st) && !open.some(x => x.st === st));
     if (unchecked.length) {
       const one = unchecked.length === 1;
+      const oneLift = new Set(unchecked.map(st => st.exerciseId)).size === 1;
       container.appendChild(el('div', { class: 'card review-unchecked', id: 'review-unchecked' }, [
         el('h2', {}, `${unchecked.length} ${one ? 'set was' : 'sets were'} logged by the timer`),
-        el('p', { class: 'muted', style: 'margin:0 0 6px' }, `The clock ran out before an effort was picked. Until you rate ${one ? 'it' : 'them'}, the next target for ${one ? 'that lift' : 'those lifts'} stays the same. Tap one to rate it or correct it.`),
+        el('p', { class: 'muted', style: 'margin:0 0 6px' }, `The clock ran out before an effort was picked. Saved without a rating, ${oneLift ? 'that lift keeps its' : 'those lifts keep their'} target next time. Tap one to rate it or correct it.`),
         ...unchecked.map(st => {
           const ex = plan.exercises[st.exerciseId];
           return el('div', { class: 'open-item unchecked', onclick: () => editSet(st, ex) }, [
