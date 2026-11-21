@@ -185,7 +185,7 @@
     }
   },
   "pacing": {
-    "note": "v1.18, Cameron Nov 20: adjust the time a set gets when he keeps ending it early or keeps needing more. A set counts as early when Done is tapped with at least max(earlySeconds, earlyFraction x the set's time) left for the reps he did; late when it was extended (+15 s) or paused for pausedLateSeconds or more. After inARow sets of an exercise in a row the same way, the seconds per rep become the slowest of those sets (plus cushion when shortening), kept between minFactor and maxFactor of the plan's tempo; within deadband of the tempo it goes back to the tempo. A lift with keepTempo in plan.json is never shortened. Ramp-up, baseline, retest, hold and all-out sets, sets typed in by hand and taps under minRepSeconds a rep are left out. Set-up time before an exercise's first set follows the time he takes until the Set-up done tap: after setup.inARow sessions in a row off by max(moreSeconds or lessSeconds, fraction x the allowed time) it becomes their average, between minSeconds and maxSeconds. Rest times are never changed here: they are part of the plan.",
+    "note": "v1.18, Cameron Nov 20: adjust the time a set gets when he keeps ending it early or keeps needing more. A set counts as early when Done is tapped with at least max(earlySeconds, earlyFraction x the set's time) left for the reps he did; late when it was extended (+15 s), or paused for pausedLateSeconds or more and not ended early (a pause and an early Done is a break, not slow reps; at most pauseCapSeconds of a pause count). After inARow sets of an exercise in a row the same way, the seconds per rep become the slowest of those sets (plus cushion when shortening), kept between minFactor and maxFactor of the plan's tempo; within deadband of the tempo it goes back to the tempo. A lift with keepTempo in plan.json is never shortened. Ramp-up, baseline, retest, hold and all-out sets, sets typed in by hand and taps under minRepSeconds a rep are left out. Set-up time before an exercise's first set follows the time he takes until the Set-up done tap: after setup.inARow sessions in a row off by max(moreSeconds or lessSeconds, fraction x the allowed time) it becomes their average, between minSeconds and maxSeconds; of a pause during the set-up, at most setup.pauseCapSeconds count. Rest times are never changed here: they are part of the plan.",
     "inARow": 3,
     "earlySeconds": 5,
     "earlyFraction": 0.15,
@@ -202,7 +202,8 @@
       "lessSeconds": 10,
       "fraction": 0.25,
       "minSeconds": 10,
-      "maxSeconds": 300
+      "maxSeconds": 300,
+      "pauseCapSeconds": 60
     }
   },
   "e1rm": {
@@ -370,11 +371,12 @@
     "hardRun": "run1"
   },
   "numberCheck": {
-    "note": "v1.16, Cameron Nov 19: any number that doesn't make sense is flagged for him to review before it can move the plan. A work set is flagged when a barbell weight is under the empty bar (rampUp.barWeightLb), when the weight is at most lighterThan or at least heavierThan times its target and at least minGapLb away from it, when a weight with no target is over maxLb, or when reps are more than max(2 x the top of the rep range, the top + extraReps). A set he confirms (numberOk) is never flagged again.",
+    "note": "v1.16, Cameron Nov 19: any number that doesn't make sense is flagged for him to review before it can move the plan. A work set is flagged when a barbell weight is under the empty bar (rampUp.barWeightLb), when the weight is at most lighterThan or at least heavierThan times its target and at least minGapLb away from it, when a weight with no target is over maxLb, when a dumbbell, machine or cable weight is under minLoadLb (0 included; v1.18), or when reps are more than max(2 x the top of the rep range, the top + extraReps). A set he confirms (numberOk) is never flagged again.",
     "lighterThan": 0.5,
     "heavierThan": 1.5,
     "minGapLb": 15,
     "maxLb": 500,
-    "extraReps": 10
+    "extraReps": 10,
+    "minLoadLb": 2.5
   }
 }

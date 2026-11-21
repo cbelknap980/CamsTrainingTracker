@@ -195,6 +195,15 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
       continue;
     }
 
+    // v1.18 (rules R4, rule 1; Cameron: bad numbers must not move the plan): a set the timer logged before an effort
+    // was picked carries the app's guess. Until he rates it, the target and the flat count stay as they are.
+    const unrated = done.filter(s => s.unconfirmed).length;
+    if (unrated) {
+      say(`${name}: ${detail}. ${unrated === 1 ? 'One set has' : `${unrated} sets have`} no effort picked, so the target holds until you rate ${unrated === 1 ? 'it' : 'them'}.`, 'hold', 'effort not rated');
+      next[id] = cur;
+      continue;
+    }
+
     // 4. excluded lifts (power clean)
     if (ex.autoProgress === false || rules.excludeFromAutoProgression.includes(id)) {
       say(`${name}: ${detail}. Not auto-progressed; raise the target yourself when it feels crisp.`, 'hold', 'your call: raise when crisp');

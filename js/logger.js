@@ -149,13 +149,14 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
       container.appendChild(el('div', { class: 'card review-open clear', id: 'review-clear' }, [el('b', {}, '✓ Every set is filled in or marked skipped.')]));
     }
 
-    // v1.18: sets whose timer ran out with no effort tapped were saved as planned. Nobody confirmed them, so they
-    // are listed here. Saving does not wait for them.
+    // v1.18: sets whose timer ran out before an effort was picked. Nobody confirmed them, so they are listed here.
+    // Saving does not wait for them, but their lift's next target holds until they are rated (rules R4, rule 1).
     const unchecked = record.sets.filter(st => isUnchecked(st) && !open.some(x => x.st === st));
     if (unchecked.length) {
+      const one = unchecked.length === 1;
       container.appendChild(el('div', { class: 'card review-unchecked', id: 'review-unchecked' }, [
-        el('h2', {}, `${unchecked.length} ${unchecked.length === 1 ? 'set was' : 'sets were'} logged by the timer`),
-        el('p', { class: 'muted', style: 'margin:0 0 6px' }, `The clock ran out and no effort was tapped, so ${unchecked.length === 1 ? 'it is' : 'they are'} saved as planned: the target weight and reps. Tap one to correct it.`),
+        el('h2', {}, `${unchecked.length} ${one ? 'set was' : 'sets were'} logged by the timer`),
+        el('p', { class: 'muted', style: 'margin:0 0 6px' }, `The clock ran out before an effort was picked. Until you rate ${one ? 'it' : 'them'}, the next target for ${one ? 'that lift' : 'those lifts'} stays the same. Tap one to rate it or correct it.`),
         ...unchecked.map(st => {
           const ex = plan.exercises[st.exerciseId];
           return el('div', { class: 'open-item unchecked', onclick: () => editSet(st, ex) }, [
@@ -218,7 +219,8 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
     const w = el('input', { type: 'number', step: '2.5', value: st.weight == null ? '' : st.weight, inputmode: 'decimal' });
     const r = el('input', { type: 'number', step: '1', value: st.reps == null ? '' : st.reps, inputmode: 'numeric' });
     let rpe = st.rpe;
-    const chips = effortChips(rules, rpe, lvl => { rpe = lvl.rpe; chips.querySelectorAll('.effort-chip').forEach(b => b.classList.toggle('on', b.dataset.key === lvl.key)); });
+    let picked = false;
+    const chips = effortChips(rules, rpe, lvl => { rpe = lvl.rpe; picked = true; chips.querySelectorAll('.effort-chip').forEach(b => b.classList.toggle('on', b.dataset.key === lvl.key)); });
     const flag = st.done ? numberFlag(st, ex, rules) : null;
     // v1.18: the effort on a set the timer logged is the app's guess, so no button is lit until he picks one
     const guess = isUnchecked(st);
@@ -228,7 +230,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
     showModal(el('div', {}, [
       el('h2', {}, `${st.name}${st.setIndex ? ', set ' + st.setIndex : ''}`),
       flag ? el('div', { class: 'num-flag', id: 'num-flag' }, [el('b', {}, 'Check this number. '), `${flag.text}.`]) : null,
-      guess ? el('p', { class: 'muted', id: 'unchecked-note', style: 'margin:0 0 10px' }, 'The timer logged this set as planned. Change what is off and pick the effort, then save.') : null,
+      guess ? el('p', { class: 'muted', id: 'unchecked-note', style: 'margin:0 0 10px' }, 'The timer logged this set before an effort was picked. Change what is off and pick the effort, then save.') : null,
       el('div', { class: 'grid2' }, [
         isBw ? el('div') : el('div', { class: 'field' }, [el('label', {}, ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight')), w]),
         el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r])
@@ -246,6 +248,8 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
           // v1.18: reps below 0 or part of a rep are refused; the sheet stays open
           const bad = impossibleNumber(typed, ex, { hold: !!st.holdSeconds });
           if (bad) { refused.textContent = `${bad}.`; refused.hidden = false; return; }
+          // v1.18: the effort on a set the timer logged is a guess, so saving it needs a pick (Save used to keep the guess)
+          if (guess && !picked && !st.holdSeconds) { refused.textContent = 'Pick the effort too, so this set can count.'; refused.hidden = false; return; }
           st.weight = typed.weight; st.reps = typed.reps; st.rpe = rpe; st.done = true; st.skipped = false; st.skipOk = false; delete st.unconfirmed; closeModal(); paint(); } }, st.skipped ? 'I did it: save' : 'Save')
       ])
     ]));

@@ -13,7 +13,7 @@ import { repSecondsFor, setupSecondsFor } from './builder.js';
 const DEFAULTS = {
   inARow: 3, earlySeconds: 5, earlyFraction: 0.15, pausedLateSeconds: 5, pauseCapSeconds: 30, minRepSeconds: 0.8,
   cushion: 0.08, minFactor: 0.5, maxFactor: 1.75, deadband: 0.07,
-  setup: { inARow: 2, moreSeconds: 15, lessSeconds: 10, fraction: 0.25, minSeconds: 10, maxSeconds: 300 }
+  setup: { inARow: 2, moreSeconds: 15, lessSeconds: 10, fraction: 0.25, minSeconds: 10, maxSeconds: 300, pauseCapSeconds: 60 }
 };
 
 export function pacingConfig(rules) {
@@ -47,16 +47,16 @@ export function setObservation(rec, plan, rules) {
   const allot = ((x.plan - start) / (1 + m) - sw) / (targetReps * sides);
   if (!(allot > 0)) return null;
   const paused = x.paused || 0;
-  const late = (x.ext || 0) > 0 || paused >= cfg.pausedLateSeconds;
+  // early: Done with time to spare for the reps he did, counting only the seconds the clock ran
+  const planForReps = start + (reps * allot * sides + sw) * (1 + m);
+  const early = x.by === 'done' && planForReps - x.took >= Math.max(cfg.earlySeconds, cfg.earlyFraction * planForReps);
+  // v1.18: a pause makes a set late only when the set still used its time. A pause and an early Done is a break, not
+  // slow reps (it read as late when Done came after Resume, and as early when Done came during the pause).
+  const late = (x.ext || 0) > 0 || (paused >= cfg.pausedLateSeconds && !early);
   const need = x.took + (late ? Math.min(paused, cfg.pauseCapSeconds) : 0);
   const used = (need - start - sw) / (reps * sides);
   if (!(used >= cfg.minRepSeconds)) return null;
-  let dir = 'fit';
-  if (late) dir = 'late';
-  else if (x.by === 'done') {
-    const planForReps = start + (reps * allot * sides + sw) * (1 + m);
-    if (planForReps - x.took >= Math.max(cfg.earlySeconds, cfg.earlyFraction * planForReps)) dir = 'early';
-  }
+  const dir = late ? 'late' : (early ? 'early' : 'fit');
   return { dir, used, allot, at: rec.at || null };
 }
 
@@ -73,7 +73,9 @@ export function setupObservation(rec, rules) {
   const cfg = pacingConfig(rules).setup;
   const g = (rules.timing && rules.timing.getReadySeconds) || 0;
   const rest = Math.max(0, (l.plan || 0) - l.setup);
-  const raw = l.by === 'tap' && l.tap != null ? l.tap - rest + g : (l.took || 0) + (l.paused || 0) - rest;
+  // v1.18: of a pause, only the first cfg.pauseCapSeconds count as set-up time (a 10-minute pause made it 300 s)
+  const cap = p => Math.min(p || 0, cfg.pauseCapSeconds);
+  const raw = l.by === 'tap' && l.tap != null ? l.tap - (l.tapPaused || 0) + cap(l.tapPaused) - rest + g : (l.took || 0) + cap(l.paused) - rest;
   const need = clamp(Math.max(g, raw), cfg.minSeconds, cfg.maxSeconds);
   let dir = 'fit';
   if (need >= l.setup + Math.max(cfg.moreSeconds, cfg.fraction * l.setup)) dir = 'more';
@@ -103,8 +105,11 @@ export function learnRep(obs, tempoSeconds, cfg, keepTempo) {
       next = Math.min(cur, slow * (1 + cfg.cushion));
       if (keepTempo) next = Math.max(next, Math.min(cur, tempoSeconds));
     } else next = Math.max(cur, slow);
-    next = clamp(next, tempoSeconds * cfg.minFactor, tempoSeconds * cfg.maxFactor);
-    const value = Math.abs(next - tempoSeconds) <= cfg.deadband * tempoSeconds ? null : Math.round(next * 10) / 10;
+    const lo = tempoSeconds * cfg.minFactor, hi = tempoSeconds * cfg.maxFactor;
+    next = clamp(next, lo, hi);
+    // rounded to a tenth without going past the limits (7.875 used to round up to 7.9)
+    const tenth = Math.min(Math.floor(hi * 10 + 1e-9) / 10, Math.max(Math.ceil(lo * 10 - 1e-9) / 10, Math.round(next * 10) / 10));
+    const value = Math.abs(next - tempoSeconds) <= cfg.deadband * tempoSeconds ? null : tenth;
     const curValue = rep;
     if (value !== curValue) { changes.push({ at: o.at, dir: o.dir, from: cur, to: value != null ? value : tempoSeconds }); rep = value; }
     else if (o.dir === 'early' && keepTempo) nudge += 1;

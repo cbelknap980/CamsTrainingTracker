@@ -140,6 +140,19 @@ check('main lift miss -> same weight, reps 5, stall 1', r.targets.back_squat.wei
 // second miss -> drop 10%
 r = applyProgression({ session: mkSession(4, [ws('back_squat', 185, 4, 9, [4, 6]), ws('back_squat', 185, 4, 9, [4, 6]), ws('back_squat', 185, 3, 10, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 1 } }, rules, plan, settings });
 check('second miss -> 165 (down 10%), stall reset', r.targets.back_squat.weight === 165 && r.targets.back_squat.stall === 0, r.targets.back_squat);
+// v1.18 (rules R4, rule 1): a set the timer logged before an effort was picked does not move the target or the count
+{
+  const un = { unconfirmed: true };
+  const pass = [ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6], un)];
+  const held = applyProgression({ session: mkSession(3, pass), targets: { back_squat: { weight: 185, reps: 6, stall: 1 } }, rules, plan, settings });
+  check('v1.18 R4 rule 1: a pass with one set the timer logged (no effort picked) holds: same weight, reps and flat count', held.targets.back_squat.weight === 185 && held.targets.back_squat.reps === 6 && held.targets.back_squat.stall === 1 && held.lines[0].verdict === 'hold' && held.lines[0].reason === 'effort not rated' && /no effort picked/.test(held.lines[0].text), [held.targets.back_squat, held.lines[0]]);
+  const miss = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 3, 10, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6], un)]), targets: { back_squat: { weight: 185, reps: 5, stall: 2 } }, rules, plan, settings });
+  check('v1.18 R4 rule 1: it comes before a miss (no drop, count stays 2)', miss.targets.back_squat.weight === 185 && miss.targets.back_squat.stall === 2, miss.targets.back_squat);
+  const acc = applyProgression({ session: mkSession(3, [ws('curl', 30, 12, 7, [10, 12], un), ws('curl', 30, 12, 7, [10, 12], un), ws('curl', 30, 12, 7, [10, 12], un)]), targets: { curl: { weight: 30, reps: 12 } }, rules, plan, settings });
+  check('v1.18 R4 rule 1: accessories hold too', acc.targets.curl.weight === 30 && acc.targets.curl.reps === 12, acc.targets.curl);
+  const rated = applyProgression({ session: mkSession(3, pass.map(x => ({ ...x, unconfirmed: undefined }))), targets: { back_squat: { weight: 185, reps: 6, stall: 1 } }, rules, plan, settings });
+  check('v1.18 R4 rule 1: once rated, the same sets move the target as usual', rated.targets.back_squat.weight === 190, rated.targets.back_squat);
+}
 // skipped set fails test
 r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), { exerciseId: 'back_squat', repRange: [4, 6], done: false, skipped: true }]), targets: { back_squat: { weight: 185, reps: 6, stall: 0 } }, rules, plan, settings });
 check('skipped set -> no increase', r.targets.back_squat.weight === 185 && /skipped/.test(r.lines[0].text), r.lines[0]);
@@ -394,6 +407,13 @@ console.log('v1.9 muscle groups and coach check-ins');
   // v1.18: reps below 0 or part of a rep were saved without a flag (the hands-on test logged -2 and 2.5 reps)
   check('v1.18 flag: reps below 0 and part of a rep', code(set({ reps: -2 })) === 'reps' && code(set({ reps: 2.5 })) === 'reps' && numberFlag(set({ reps: 2.5 }), sq, rules).short === 'part of a rep');
   check('v1.18 flag: a weight below 0 on a dumbbell lift', code({ ...set(), exerciseId: 'lateral_raise', repRange: [12, 15], target: { weight: null }, weight: -10, reps: 12 }, lr) === 'negative');
+  const lrSet = w => ({ ...set(), exerciseId: 'lateral_raise', repRange: [12, 15], target: { weight: null }, weight: w, reps: 12 });
+  const calf = plan.exercises.calf_raise;
+  check('v1.18 flag: 0 lb or under 2.5 lb on a dumbbell, machine or cable lift, with no target or a small one (independent review)',
+    code(lrSet(0), lr) === 'light' && numberFlag(lrSet(0), lr, rules).text === '0 lb on a lift that uses weight'
+    && code({ ...lrSet(0), target: { weight: 10, reps: 12 } }, lr) === 'light'
+    && code({ ...lrSet(0.5), exerciseId: 'calf_raise' }, calf) === 'light'
+    && code(lrSet(5), lr) === null && code({ ...lrSet(2.5), exerciseId: 'calf_raise' }, calf) === null);
   const pu = plan.exercises.weighted_pullup;
   check('v1.18 refused where typed: reps below 0, part of a rep, a weight below 0 (on a pull-up added weight may be below 0)',
     impossibleNumber({ weight: 185, reps: -2 }, sq) !== '' && impossibleNumber({ weight: 185, reps: 2.5 }, sq) === 'Reps are whole numbers' && impossibleNumber({ weight: -5, reps: 5 }, sq) !== ''
@@ -596,6 +616,12 @@ console.log('v1.18 pacing: what one set says');
   check('v1.18 a set done per side counts both sides and the change-over: 4 s a rep allowed', rowFit.dir === 'fit' && Math.abs(rowFit.allot - 4) < 0.02, rowFit);
   const rowLate = setObservation(rowRec({ took: 98, by: 'timer', ext: 15 }), plan, rules);
   check('v1.18 the row extended by 15 s: 5.4 s a rep', rowLate.dir === 'late' && Math.abs(rowLate.used - 86 / 16) < 1e-9, rowLate);
+  // independent review: a pause and an early Done read as late when Done came after Resume, and as early during the pause
+  const brk = o({ took: 25, by: 'done', paused: 30 });
+  const brkPaused = o({ took: 25, by: 'done' });
+  check('v1.18 a 30 s pause and Done with 25 s to spare is early either way round (the pause was a break, not slow reps)', brk.dir === 'early' && brkPaused.dir === 'early' && brk.used === brkPaused.used, [brk, brkPaused]);
+  const tight = o({ took: 47, by: 'done', paused: 20 });
+  check('v1.18 a 20 s pause on a set that still used its time is late, and the pause counts as time needed', tight.dir === 'late' && Math.abs(tight.used - 63 / 12) < 1e-9, tight);
 }
 
 console.log('v1.18 pacing: when the time changes');
@@ -616,6 +642,8 @@ console.log('v1.18 pacing: when the time changes');
   check('v1.18 never more than 1.75 x the tempo', cap.repSeconds === 6.1, cap);
   const floor = learnRep([ob('early', 1), ob('early', 1), ob('early', 1)], 3.5, cfg, false);
   check('v1.18 never less than half the tempo', floor.repSeconds === 1.8, floor);
+  const bss = learnRep([ob('late', 9), ob('late', 9), ob('late', 9)], 4.5, cfg, false);
+  check('v1.18 rounding never goes past 1.75 x the tempo (4.5 s a rep: 7.8, not 7.9)', bss.repSeconds === 7.8, bss);
   const near = learnRep([ob('early', 3.1), ob('early', 3.1), ob('early', 3.1)], 3.5, cfg, false);
   check('v1.18 within 7% of the tempo it stays on the tempo', near.repSeconds === null && near.changes.length === 0, near);
   const keep = learnRep([ob('early', 3), ob('early', 3), ob('early', 3), ob('early', 3), ob('early', 3), ob('early', 3)], 6, cfg, true);
@@ -639,6 +667,10 @@ console.log('v1.18 pacing: when the time changes');
   check('v1.18 a tap during the rest itself needs the least there is', lead({ plan: 90, setup: 30, by: 'tap', tap: 10 }).need === 10);
   check('v1.18 a countdown that ran out by itself is never "less"', lead({ plan: 60, setup: 60, by: 'timer', took: 60 }).dir === 'fit' && lead({ plan: 60, setup: 60, by: 'timer', took: 20 }).dir === 'fit');
   check('v1.18 a pause during set-up counts as set-up time', lead({ plan: 60, setup: 60, by: 'timer', took: 60, paused: 45 }).dir === 'more');
+  // independent review: a 10-minute pause made the learned set-up 5 min
+  const longPause = lead({ plan: 60, setup: 60, by: 'tap', tap: 650, tapPaused: 600 });
+  check('v1.18 of a long pause before Set-up done, 1 min counts (10 min paused: 115 s, not 300)', longPause.need === 115 && longPause.dir === 'more', longPause);
+  check('v1.18 the same cap when the countdown ran out by itself', lead({ plan: 60, setup: 60, by: 'timer', took: 60, paused: 600 }).need === 120);
   check('v1.18 no set-up time in the countdown: nothing to learn', lead({ plan: 60, setup: 0, by: 'tap', tap: 100 }) === null && lead({ plan: 60, setup: 0, by: 'tap', tap: 100 }, { ramp: true }) === null && setupObservation({ exerciseId: 'front_squat' }, rules) === null);
   check('v1.18 a main lift starts with a ramp-up: the set-up before that first ramp-up counts', lead({ plan: 60, setup: 60, by: 'tap', tap: 150 }, { ramp: true }).dir === 'more' && lead({ plan: 60, setup: 60, by: 'tap', tap: 150 }, { ramp: true }).need === 155);
   const su = (dir, need) => ({ dir, need, allot: 60, at: null });
@@ -760,6 +792,40 @@ console.log('v1.18 player rules (no screen needed)');
   check('v1.18 Equipment taken before a block still offers the later blocks', p.swapChoices().map(c => c.kind + ':' + c.title.split(':')[0]).join() === 'block:Block C,block:Finisher', p.swapChoices().map(c => c.title));
   p.s.idx = work[2];
   check('v1.18 nothing to swap in the middle of a set', p.swapChoices().length === 0);
+
+  // independent review: an early Right tap or +15 s changed the set itself, so after Undo or Back it ran short or long
+  {
+    const r = mk('lift3', 3, tg);
+    const ri = r.at(s => s.kind === 'set' && s.exerciseId === 'db_row');
+    r.p.tick = () => {};
+    r.p.s.idx = ri; r.p.beginStep();
+    const planned = r.tl.steps[ri].seconds;
+    r.p.s.stepStart -= 12000;   // 12 s in: the left side is under way
+    r.p.switchSideNow();
+    const early = r.p.stepSeconds(r.tl.steps[ri]);
+    r.p.beginStep();            // the same set again, as after Undo or Back one step
+    check('v1.18 Right tapped early ends this pass sooner, but the set keeps its 83 s for the next time it runs', planned === 83 && Math.abs(early - 47.5) < 0.1 && r.tl.steps[ri].seconds === 83 && r.p.stepSeconds(r.tl.steps[ri]) === 83 && r.p.s.sideAt.end === 83, [planned, early, r.tl.steps[ri].seconds]);
+    const li = r.at(s => s.kind === 'set' && s.exerciseId === 'lateral_raise');
+    r.p.s.idx = li; r.p.beginStep();
+    const lp = r.tl.steps[li].seconds;
+    r.p.s.stepExt = 15;
+    const ext = r.p.stepSeconds(r.tl.steps[li]);
+    r.p.beginStep();
+    check('v1.18 +15 s on a set lasts for this pass only', ext === lp + 15 && r.tl.steps[li].seconds === lp && r.p.stepSeconds(r.tl.steps[li]) === lp, [lp, ext]);
+  }
+  // independent review: the loud set-end and PR beeps started in the same instant and clipped
+  {
+    const starts = [];
+    const node = () => ({ connect() {}, frequency: { value: 0 }, Q: { value: 0 }, gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} } });
+    const audio = { currentTime: 10, state: 'running', destination: {}, createBiquadFilter: node, createGain: node, createOscillator: () => ({ ...node(), start: t => starts.push(t), stop() {} }) };
+    const q = new Player({ timeline: tl, plan, rules, settings: { ...settings, cues: { ...(settings.cues || {}), beep: true, loud: true } }, targets: tg, container: null, onFinish: () => {} });
+    q.audio = audio;
+    q.tone('setEnd'); q.tone('pr');
+    const endLen = Math.max(...rules.cues.tones.setEnd.map(([, dt, dur]) => dt + dur));
+    check('v1.18 a PR beep asked for with the set-end beep starts after it ends', starts.length === 5 && starts[0] === 10 && Math.min(...starts.slice(2)) >= 10 + endLen, starts);
+    audio.currentTime = 20; starts.length = 0; q.tone('tick');
+    check('v1.18 a beep on its own plays at once', starts.length === 1 && starts[0] === 20, starts);
+  }
 
   check('v1.18 gym clock: 47:12, then 1:02:45 past the hour', fmtGym(47 * 60 + 12) === '47:12' && fmtGym(3765) === '1:02:45' && fmtGym(-3) === '0:00' && fmtGym(59.9) === '0:59');
   p.s.sessionStart = 1000000; p.s.goneMs = 0;

@@ -31,6 +31,12 @@ export function numberFlag(st, ex, rules) {
   }
   // v1.18: below 0 (on a pull-up that would be assistance, which the plan never asks for)
   if (w != null && w < 0) return { code: 'negative', short: 'below 0 lb', text: `${fmtWeight(w)} lb is below 0` };
+  // v1.18: a dumbbell, machine or cable lift at 0 lb or under the lightest real weight (with no target, or a small
+  // one, nothing caught it, and the next target would have started from it)
+  const minLoad = c.minLoadLb != null ? c.minLoadLb : 2.5;
+  if (w != null && w < minLoad && ['dumbbell', 'machine', 'cable'].includes(ex.equipment)) {
+    return { code: 'light', short: 'too light', text: w === 0 ? '0 lb on a lift that uses weight' : `${fmtWeight(w)} lb is lighter than any ${ex.equipment === 'dumbbell' ? 'dumbbell' : 'stack setting'}` };
+  }
   if (st.reps != null && st.reps < 0) return { code: 'reps', short: 'below 0', text: `${st.reps} reps is below 0` };
   if (st.reps != null && !Number.isInteger(st.reps)) return { code: 'reps', short: 'part of a rep', text: `${st.reps} reps is not a whole number` };
   if (w != null && t != null && t > 0 && ex.equipment !== 'bodyweight' && Math.abs(w - t) >= (c.minGapLb != null ? c.minGapLb : 15)) {

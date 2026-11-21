@@ -14,8 +14,11 @@ const FILES = [
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 
+// v1.18: cache: 'reload' fetches every file fresh from GitHub Pages. With the default, an install within 10 minutes
+// of the last visit could store the old files under the new version, and offline the new app.js would load an old
+// store.js that lacks what it imports.
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', event => {

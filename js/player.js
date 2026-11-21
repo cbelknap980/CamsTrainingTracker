@@ -23,6 +23,12 @@ import { learnPacing } from './pacing.js';
 const RING_R = 92;
 const RING_C = 2 * Math.PI * RING_R;
 const round1 = v => Math.round(v * 10) / 10;
+/**
+ * v1.18: which set a step is (block, exercise, set number, round). Equipment taken and Trim to fit move and drop
+ * steps, so what Undo puts back on later sets is found by this, never by position (by position it once wrote the
+ * curl's weight onto the calf raise after a swap).
+ */
+const setKey = st => (st && st.kind === 'set' && !st.ramp && st.exerciseId ? `${st.blockId}|${st.exerciseId}|${st.setIndex}|${st.round}` : null);
 const TIGHTEST = 4;   // how many steps fit() has to make the middle of the screen fit (css: .tight-1 .. .tight-4)
 
 // Used only if rules.json has no cues block (an old copy of the rules with this code).
@@ -111,7 +117,7 @@ export class Player {
       sideAt: null, sidePhase: null, stepT0: null, stepPausedMs: 0, stepExt: 0, stepPlan: 0
     };
     this.audio = null; this.wakeLock = null; this.timer = null; this.editOpen = false; this.swReg = null;
-    this.pendingRpe = null; this.said = []; this.savedAt = 0; this.confirmedMs = 0; this.mainTapMs = 0;
+    this.pendingRpe = null; this.said = []; this.savedAt = 0; this.confirmedMs = 0; this.mainTapMs = 0; this.toneUntil = 0; this.typed = null;
     this._onVis = () => this.onVisibility();
     this._onResize = () => this.fit();
   }
@@ -128,6 +134,8 @@ export class Player {
   resume(saved) {
     this.s = saved;
     if (!this.s.prs) this.s.prs = [];
+    // a set that was waiting on its open number boxes opens them again (closed, it would sit at 0:00 waiting for Done)
+    this.editOpen = !!(this.s.manual && this.step && this.step.kind === 'set');
     const st = this.step;
     // a session saved by an older version of the app
     if (this.s.stepT0 == null) { this.s.stepT0 = this.s.stepStart; this.s.stepPausedMs = 0; this.s.stepExt = 0; this.s.stepPlan = st ? (st.seconds || 0) : 0; }
@@ -215,7 +223,12 @@ export class Player {
     const which = c.loud === false ? 'normal' : 'loud';
     try {
       if (this.audio.state === 'suspended') this.audio.resume();
-      playTones(this.audio, this.audio.destination, seq, cfg[which] || FALLBACK_VOICE[which]);
+      // v1.18: a beep asked for while another still plays starts when that one ends (a set that ends on its timer and
+      // is a PR started both at once, and the loud voice clipped)
+      const now = this.audio.currentTime || 0;
+      const at = this.toneUntil > now ? this.toneUntil : now;
+      playTones(this.audio, this.audio.destination, seq, cfg[which] || FALLBACK_VOICE[which], at);
+      this.toneUntil = at + Math.max(0, ...seq.map(([, dt, dur]) => dt + dur)) + 0.08;
     } catch (e) { /* ignore */ }
   }
   buzz(pattern) {
@@ -342,6 +355,8 @@ export class Player {
   elapsedInStep() { return (this.now() - this.s.stepStart) / 1000; }
   /** v1.18: seconds really spent in this step, pauses left out. Unlike elapsedInStep it never jumps (a tap can move the countdown). */
   stepActive() { return Math.max(0, (this.now() - (this.s.stepT0 != null ? this.s.stepT0 : this.s.stepStart) - (this.s.stepPausedMs || 0)) / 1000); }
+  /** v1.18: milliseconds paused in this step, a pause still under way included. */
+  pausedInStepMs() { return (this.s.stepPausedMs || 0) + (this.s.pausedAt != null ? Math.max(0, Date.now() - this.s.pausedAt) : 0); }
   /**
    * v1.18 (Cameron: "distinguish which side I should work and make that obvious with the timer"): holds, stretches
    * and timed sets done one side at a time run left, a change-over, then right, each with its own clock.
@@ -380,15 +395,25 @@ export class Player {
     // only while the left side runs or during the change-over (a tap in the get-set seconds once broke the clocks)
     if (e < a.start || e >= a.rightStart) return;
     const rightLen = a.end - a.rightStart;
+    // v1.18: only this pass's side clock moves; the set keeps its planned time, so Undo or Back runs it in full
     a.leftEnd = Math.min(a.leftEnd, e); a.rightStart = e; a.end = e + rightLen;
-    if (step.kind === 'set' && step.auto && !step.holdSeconds) step.seconds = a.end;
     this.s.fired = false; this.s.warned = false;
     this.tick(true);
   }
+  /**
+   * How long a step runs. The step under way runs on this pass's clock: its side plan (moved by Right or +15 s) and,
+   * on a timed set, the +15 s taps. v1.18: those live in this.s only, so a set run again after Undo or Back gets its
+   * planned time back (an early Right tap used to shorten the set for good).
+   */
   stepSeconds(step) {
     if (!step) return 0;
-    if (step.perSide && (step.holdSeconds || step.sideSeconds)) return (step === this.step && this.s.sideAt ? this.s.sideAt : this.sidePlan(step)).end;
-    return step.holdSeconds ? step.holdSeconds : (step.seconds || 0);
+    if (step === this.step && this.s.sideAt && this.sided(step)) return this.s.sideAt.end;
+    if (step.perSide && (step.holdSeconds || step.sideSeconds)) return this.sidePlan(step).end;
+    return step.holdSeconds ? step.holdSeconds : (step.seconds || 0) + this.setExtra(step);
+  }
+  /** The +15 s taps on the timed set under way (a set done one side at a time keeps them in its side plan instead). */
+  setExtra(step) {
+    return step && step === this.step && step.kind === 'set' && step.auto && !step.holdSeconds && !(this.s.sideAt && this.sided(step)) ? (this.s.stepExt || 0) : 0;
   }
   remainingInStep(step = this.step) {
     if (!step) return 0;
@@ -448,6 +473,7 @@ export class Player {
     const step = this.step;
     this.s.confirmed = true; this.confirmedMs = Date.now();
     this.s.tapAt = round1((this.now() - (this.s.stepT0 != null ? this.s.stepT0 : this.s.stepStart)) / 1000);
+    this.s.tapPaused = Math.round((this.s.stepPausedMs || 0) / 1000);   // the pauses inside tapAt (one under way is not)
     this.cue('tap');
     const total = this.stepSeconds(step); const g = this.holdAt(step);
     // v1.18: a tap during a rest keeps the rest; only the set-up time added to it is dropped. With no rest left
@@ -473,7 +499,7 @@ export class Player {
     let remaining = remainingSeconds(this.steps, this.s.idx + 1);
     const cur = this.step;
     if (cur) {
-      const total = this.s.sideAt && this.sided(cur) ? this.s.sideAt.end : (cur.seconds || 0);
+      const total = this.s.sideAt && this.sided(cur) ? this.s.sideAt.end : (cur.seconds || 0) + this.setExtra(cur);
       remaining += Math.max(0, total - this.elapsedInStep());
     }
     const plannedFinish = this.s.sessionStart + tl.plannedSeconds * 1000 + this.s.pausedTotal;
@@ -507,12 +533,18 @@ export class Player {
 
   tick(force) {
     if (!this.step || this.s.status !== 'running') return;
-    if (this.s.pausedAt != null && !force) { this.updateTimerDom(); return; }
+    if (this.s.pausedAt != null && !force) {
+      this.updateTimerDom();
+      // v1.18: saved now and then while paused too, so a reload after a long pause with the app open is not taken
+      // for hours away (the gym clock would lose the pause)
+      if (Date.now() - (this.s.lastTick || 0) > 5000) this.persist();
+      return;
+    }
     const step = this.step;
     if (this.s.pausedAt == null && this.sided(step)) this.sideTick(step);
     if (this.isAutoSet(step)) {
       // once the edit panel has been opened the set waits for a Done tap, so typed numbers are not lost
-      if (step.seconds - this.elapsedInStep() <= 0 && !this.s.fired && !this.s.manual && !modalOpen() && this.s.pausedAt == null) {
+      if (this.stepSeconds(step) - this.elapsedInStep() <= 0 && !this.s.fired && !this.s.manual && !modalOpen() && this.s.pausedAt == null) {
         this.s.fired = true;
         this.cue('setEnd');
         this.logSet({ auto: true });
@@ -574,12 +606,12 @@ export class Player {
     const st = this.step;
     Object.assign(this.s, {
       stepStart: t, stepT0: t, stepPausedMs: 0, stepExt: 0, stepPlan: st ? (st.seconds || 0) : 0,
-      warned: false, fired: false, readySaid: false, lastTickSec: null, manual: false, confirmed: false, waitSaid: false, tapAt: null,
+      warned: false, fired: false, readySaid: false, lastTickSec: null, manual: false, confirmed: false, waitSaid: false, tapAt: null, tapPaused: 0,
       sideAt: st && this.sided(st) ? this.sidePlan(st) : null, sidePhase: null, sideWarned: false
     });
   }
   goTo(idx) {
-    this.s.idx = idx; this.editOpen = false; this.pendingRpe = null;
+    this.s.idx = idx; this.editOpen = false; this.pendingRpe = null; this.typed = null;
     this.cancelScheduledNotification();
     if (idx >= this.steps.length) { this.finish('complete'); return; }
     this.beginStep();
@@ -594,8 +626,9 @@ export class Player {
     if (!s || !this.leadsIntoSet()) { this.s.leadObs = null; return; }
     this.s.leadObs = {
       idx: this.s.idx + 1, plan: this.s.stepPlan, setup: s.setupSeconds || 0, took: round1(this.stepActive()),
-      paused: Math.round((this.s.stepPausedMs || 0) / 1000), by: this.s.confirmed && this.s.tapAt != null ? 'tap' : by,
-      ...(this.s.tapAt != null ? { tap: this.s.tapAt } : {}), ...(this.s.stepExt ? { ext: this.s.stepExt } : {})
+      paused: Math.round(this.pausedInStepMs() / 1000), by: this.s.confirmed && this.s.tapAt != null ? 'tap' : by,
+      // tapPaused: the paused seconds inside tap (pacing.js counts only part of a long pause as set-up time)
+      ...(this.s.tapAt != null ? { tap: this.s.tapAt, ...(this.s.tapPaused ? { tapPaused: this.s.tapPaused } : {}) } : {}), ...(this.s.stepExt ? { ext: this.s.stepExt } : {})
     };
   }
   advance(by) {
@@ -624,9 +657,14 @@ export class Player {
     const u = p.undo;
     if (u.prs != null) this.s.prs.length = u.prs;
     if (u.target !== undefined) { if (u.target) this.targets[p.exerciseId] = u.target; else delete this.targets[p.exerciseId]; }
-    if (u.carried) u.carried.forEach(([i, t]) => { if (this.steps[i]) this.steps[i].target = t; });
+    // v1.18: each later set is found by which set it is (Equipment taken and Trim move steps); one already done stays
+    const find = key => {
+      if (typeof key === 'number') { const o = this.steps[key]; return o && setKey(o) && o.exerciseId === p.exerciseId ? o : null; }   // kept by an older version
+      return this.steps.find((o, i) => i > idx && setKey(o) === key) || null;
+    };
+    if (u.carried) u.carried.forEach(([k, t]) => { const o = find(k); if (o && !o.done) o.target = t; });
     // v1.18: and the set times, if this set had changed them
-    if (u.paced) u.paced.forEach(([i, seconds, repSeconds, learned]) => { const o = this.steps[i]; if (!o) return; o.seconds = seconds; o.repSeconds = repSeconds; if (learned) o.learned = true; else delete o.learned; });
+    if (u.paced) u.paced.forEach(([k, seconds, repSeconds, learned]) => { const o = find(k); if (!o || o.done) return; o.seconds = seconds; o.repSeconds = repSeconds; if (learned) o.learned = true; else delete o.learned; });
     if (u.nudged !== undefined && this.s.nudged) this.s.nudged[p.exerciseId] = u.nudged;
     p.done = false; p.skipped = false; delete p.record; delete p.pr; delete p.undo;
     hideToast();
@@ -657,7 +695,9 @@ export class Player {
       if (e < a.leftEnd) { a.leftEnd += n; a.rightStart += n; } else if (e < a.rightStart) a.rightStart += n;
       a.end += n;
     }
-    s.seconds = (s.seconds || 0) + n; this.s.stepExt = (this.s.stepExt || 0) + n;
+    // v1.18: on a timed set the extra seconds are for this pass only (setExtra); a rest or set-up simply runs longer
+    if (!(s.kind === 'set' && s.auto && !s.holdSeconds)) s.seconds = (s.seconds || 0) + n;
+    this.s.stepExt = (this.s.stepExt || 0) + n;
     this.s.fired = false; this.s.warned = false; this.s.waitSaid = false;
     if (this.s.readySaid && !this.isReady()) { this.s.readySaid = false; this.s.lastTickSec = null; this.renderStep(); }
     if (this.needsConfirm()) this.renderStep();
@@ -711,7 +751,9 @@ export class Player {
     const s = this.steps[idx]; if (!s || !s.record) return;
     const old = s.record.weight;
     Object.assign(s.record, patch);
-    s.record.edited = true; delete s.record.unconfirmed; this.savedAt = Date.now();
+    // v1.18: a set the timer logged counts once he picks its effort (rules R4, rule 1); new numbers alone leave the
+    // effort a guess, so it stays marked
+    s.record.edited = true; if ('rpe' in patch) delete s.record.unconfirmed; this.savedAt = Date.now();
     if ('weight' in patch && patch.weight !== old) this.carryWeight(idx, s, patch.weight, old != null ? old : (s.target ? s.target.weight : null));
     this.persist();
   }
@@ -722,7 +764,8 @@ export class Player {
     const panel = this.container.querySelector('#edit-panel');
     const panelOpen = !!(panel && !panel.hidden);
     const ex = this.plan.exercises[s.exerciseId];
-    let typed = auto && panelOpen ? this.readInputs() : null;
+    // v1.18: so does a set whose numbers were typed and then hidden (the boxes stay in the page behind Hide)
+    let typed = auto && (panelOpen || (this.typed && panel)) ? this.readInputs() : null;
     // v1.18: a number that cannot be right (reps below 0, part of a rep) typed there is not logged by the timer
     if (typed && impossibleNumber(typed, ex, { hold: !!s.holdSeconds })) typed = { ...typed, weight: null, reps: null };
     // v1.18: a set already logged once (he went Back onto it) keeps what was logged or corrected on its card when its
@@ -753,7 +796,7 @@ export class Player {
     }
     this.flag = null;
     // v1.14: what Undo needs to put back (PR list, the in-session best, weights carried to later sets)
-    s.undo = { prs: this.s.prs.length, target: this.targets[s.exerciseId] ? { ...this.targets[s.exerciseId] } : null, carried: this.steps.map((o, i) => [i, o.target ? { ...o.target } : o.target]).filter(([i]) => i > this.s.idx && this.steps[i].exerciseId === s.exerciseId) };
+    s.undo = { prs: this.s.prs.length, target: this.targets[s.exerciseId] ? { ...this.targets[s.exerciseId] } : null, carried: this.steps.filter((o, i) => i > this.s.idx && o.exerciseId === s.exerciseId && setKey(o)).map(o => [setKey(o), o.target ? { ...o.target } : o.target]) };
     s.done = true; s.skipped = false; s.actualSeconds = Math.round(this.stepActive());
     s.record = { ...this.baseRecord(s), weight: v.weight, reps: v.reps, rpe: v.rpe, done: true, skipped: false, at: new Date().toISOString() };
     if (numberOk) s.record.numberOk = true;
@@ -768,9 +811,11 @@ export class Player {
     // v1.18: how long the set took against its timer, and how the countdown before it went (pacing.js). A set whose
     // numbers were typed while its clock ran says nothing about pace.
     if (s.auto && !s.ramp && !s.baseline && !s.retest && !s.holdSeconds && !s.amrap) {
+      // a pause still under way when Done is tapped counts like one he resumed from (the same set read two ways)
+      const pausedMs = this.pausedInStepMs();
       s.record.secs = {
         plan: this.s.stepPlan, took: round1(this.stepActive()), by: auto ? 'timer' : (panelOpen || this.s.manual ? 'manual' : 'done'),
-        ...(this.s.stepExt ? { ext: this.s.stepExt } : {}), ...((this.s.stepPausedMs || 0) >= 1000 ? { paused: Math.round(this.s.stepPausedMs / 1000) } : {})
+        ...(this.s.stepExt ? { ext: this.s.stepExt } : {}), ...(pausedMs >= 1000 ? { paused: Math.round(pausedMs / 1000) } : {})
       };
     }
     if (this.s.leadObs && this.s.leadObs.idx === this.s.idx) { const { idx: _i, ...lead } = this.s.leadObs; s.record.lead = lead; }
@@ -820,7 +865,7 @@ export class Player {
       if (i <= this.s.idx || o.kind !== 'set' || o.exerciseId !== id || !o.auto || o.ramp || o.holdSeconds || o.done || o.skipped) return;
       const tm = setTiming(this.rules, ex, o.target && o.target.reps, o.perSide, e);
       if (tm.seconds === o.seconds) return;
-      paced.push([i, o.seconds, o.repSeconds, !!o.learned]);
+      paced.push([setKey(o), o.seconds, o.repSeconds, !!o.learned]);
       change = change || { from: o.seconds, to: tm.seconds };
       o.seconds = tm.seconds; o.repSeconds = tm.repSeconds;
       if (tm.learned) o.learned = true; else delete o.learned;
@@ -1292,6 +1337,9 @@ export class Player {
     const where = p.round ? `round ${p.round}` : (p.ramp ? 'ramp-up' : (p.baseline ? 'top set' : (p.setIndex ? `set ${p.setIndex}` : '')));
     const canUndo = p.undo && idx === this.s.idx - 1;
     const pair = hasWeight ? pairText(ex, rec.weight) : '';
+    // "as planned" only when the timer logged the target numbers (typed ones before Hide are his own)
+    const planT = p.target || {};
+    const asPlanned = rec.unconfirmed && rec.reps === planT.reps && (rec.weight == null ? planT.weight == null : rec.weight === planT.weight);
     // v1.18: a ramp-up set feeds nothing (no effort, no progression), so its card is one line: on the rest where the
     // bar changes, the room goes to the plates to add and the sets to come. The title still opens the type-in sheet.
     const slim = !!p.ramp;
@@ -1306,7 +1354,7 @@ export class Player {
         el('button', { type: 'button', class: 'jd-title', 'aria-label': 'Fix the numbers of this set', onclick: () => this.openFix(idx) }, [
           el('div', { class: 'jd-name' }, p.name),
           el('div', { class: 'jd-sub' }, [
-            el('span', slim ? {} : { class: `fit-${fold}` }, [el('span', { class: 'jd-saved' + (fresh ? ' flash' : ''), id: 'jd-saved' }, rec.edited ? 'Saved' : (rec.unconfirmed ? 'Logged as planned' : 'Logged')), where ? ' · ' : '']),
+            el('span', slim ? {} : { class: `fit-${fold}` }, [el('span', { class: 'jd-saved' + (fresh ? ' flash' : ''), id: 'jd-saved' }, rec.edited ? 'Saved' : (asPlanned ? 'Logged as planned' : 'Logged')), where ? ' · ' : '']),
             where || null,
             el('span', slim ? { id: 'jd-nums' } : { class: `only-${fold}`, id: 'jd-nums' }, `${where ? ' · ' : ''}${hasWeight ? `${rec.weight != null ? fmtWeight(rec.weight) : '?'} lb × ` : ''}${rec.reps != null ? rec.reps : '?'}${p.holdSeconds ? ' s' : ''} ›`)
           ])
@@ -1740,14 +1788,15 @@ export class Player {
   editPanel(s, ex, open) {
     const rec = s.record || {};
     // v1.16: a flagged number stays in the boxes while it waits for a fix or a second Done
-    const held = this.flag && this.flag.idx === this.s.idx ? this.flag : null;
+    // v1.18: so do numbers typed before Hide
+    const held = this.flag && this.flag.idx === this.s.idx ? this.flag : (this.typed || null);
     const wVal = held ? (held.weight == null ? '' : held.weight) : (rec.weight != null ? rec.weight : (s.target && s.target.weight != null ? s.target.weight : ''));
     const rVal = held ? (held.reps == null ? '' : held.reps) : (rec.reps != null ? rec.reps : (s.holdSeconds ? s.holdSeconds : (s.target && s.target.reps != null ? s.target.reps : '')));
     const pVal = this.pendingRpe != null ? this.pendingRpe : (rec.rpe != null ? rec.rpe : this.defaultRpe(s));
     const wStep = ex ? incrementFor(this.rules, s.exerciseId, ex) : 5;
     const isBw = ex && ex.equipment === 'bodyweight';
     const panel = el('div', { class: 'edit-panel' + (isBw ? ' one' : ''), id: 'edit-panel', hidden: !open });
-    if (held) panel.appendChild(el('div', { class: 'num-flag', id: 'num-flag', role: 'alert' }, [el('b', {}, 'Check this number. '), `${held.text}. Fix it, or tap Done again to keep it.`]));
+    if (held && held.text) panel.appendChild(el('div', { class: 'num-flag', id: 'num-flag', role: 'alert' }, [el('b', {}, 'Check this number. '), `${held.text}. Fix it, or tap Done again to keep it.`]));
     // v1.15: on a barbell lift, + on an empty box starts at the empty bar (one tap used to log 5 lb)
     const bar = ex && ex.equipment === 'barbell' && this.rules.rampUp ? this.rules.rampUp.barWeightLb : null;
     if (!isBw) panel.appendChild(field(ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight (lb)'), 'in-weight', wVal, wStep || 2.5, bar));
@@ -1762,7 +1811,21 @@ export class Player {
     }
     return panel;
   }
-  toggleEdit() { this.editOpen = !this.editOpen; if (this.editOpen) this.s.manual = true; this.renderStep(); }
+  /**
+   * Edit opens the boxes and the set waits for Done. v1.18: Hide keeps what was typed (the boxes stay behind it) and
+   * lets the timer end the set again, logging those numbers; it used to drop them and leave the set at 0:00. A number
+   * held for a second look keeps waiting for Done.
+   */
+  toggleEdit() {
+    if (this.editOpen) {
+      const v = this.readInputs();
+      this.typed = { weight: v.weight, reps: v.reps };
+      if (!(this.flag && this.flag.idx === this.s.idx)) this.s.manual = false;
+    }
+    this.editOpen = !this.editOpen;
+    if (this.editOpen) this.s.manual = true;
+    this.renderStep();
+  }
   openEdit() { this.editOpen = true; this.s.manual = true; this.renderStep(); }
 
   /**
@@ -1849,7 +1912,7 @@ export class Player {
       // pace bar: which rep the tempo says you should be on
       const e = this.elapsedInStep();
       const auto = this.autoOn();
-      const tt = auto ? fmtClock(Math.ceil(Math.max(0, s.seconds - e))) : fmtClock(e);
+      const tt = auto ? fmtClock(Math.ceil(Math.max(0, this.stepSeconds(s) - e))) : fmtClock(e);
       if (t.textContent !== tt) t.textContent = tt;
       const reps = s.target && s.target.reps ? s.target.reps : null;
       const pt = c.querySelector('#pace-text');
@@ -1871,7 +1934,7 @@ export class Player {
         }
         if (pt.textContent !== txt) pt.textContent = txt;
       }
-      if (pf) pf.style.width = `${Math.min(100, 100 * e / (s.seconds || 1)).toFixed(1)}%`;
+      if (pf) pf.style.width = `${Math.min(100, 100 * e / (this.stepSeconds(s) || 1)).toFixed(1)}%`;
     } else if (t && this.isCountdown(s)) {
       // v1.5: a set-up step that waits for the tap counts down to zero and holds there. v1.18: after a tap during
       // a rest the clock runs on to that same zero (the get-ready count follows it), so it does not jump at the tap
