@@ -1,4 +1,5 @@
-// runs-view.js - v1.10: the Runs tab. v1.12: runs count for the planned run they most likely are, whatever the day.
+// runs-view.js - v1.10: the Runs tab. v1.12: a run counts for its planned run whatever the day. v1.18.1: a run from
+// Garmin counts for a planned run only when Cameron taps Count it.
 // This week's two runs with what each asks for, miles by week, every run
 // with its numbers, the run sheet and form, and Garmin set-up. The numbers come from runs.js.
 
@@ -7,7 +8,7 @@ import { APP_VERSION, weekNumber, toISODate, parseISODate, fmtDate, getData } fr
 import { getRuns, putRun, deleteRun, getSettings, newId, ignoreGarmin } from './store.js';
 import { getSync, garminLinks, garminJobState, GARMIN_SECRET, GARMIN_FILE } from './sync.js';
 import { getGarminState, importFromGarmin, checkGarminNow } from './garmin.js';
-import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles, settleWeek, openRunDays, isAuto } from './runs.js';
+import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles, settleWeek, openRunDays, needsCredit, creditOptions, countAs, keepAsSide, countCandidates, weekRange } from './runs.js';
 import { svg, tooltip, yTicks } from './progress.js';
 
 const clock = iso => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -33,6 +34,41 @@ export function openRunText(ctx, runId, week, today) {
   const names = days.map(d => (d.today ? 'today' : d.name));
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0];
   return `${list[0].toUpperCase()}${list.slice(1)} works.`;
+}
+
+/**
+ * v1.18.1 (Cameron, Nov 21: "Maybe make me log it to take credit"): this week's Garmin runs that could be this planned
+ * run, each with Count it. Nothing when there are none. `onCounted(run)` after the tap is saved.
+ */
+export function countItBlock(row, ctx, onCounted) {
+  const { plan, rules, settings, runs, week } = ctx;
+  const run = (plan.runs || []).find(r => r.id === row.id);
+  if (!run || row.status === 'done') return null;
+  const cands = countCandidates(plan, runs, run, weekRange(settings, week));
+  if (!cands.length) return null;
+  return el('div', { class: 'count-it', 'data-count-for': row.id }, [
+    el('p', { class: 'count-it-head' }, cands.length === 1 ? `From Garmin this week. Was it the ${row.short.toLowerCase()}?` : `From Garmin this week. Was one of these the ${row.short.toLowerCase()}?`),
+    ...cands.map(c => el('div', { class: 'count-it-row' }, [
+      el('span', {}, [el('b', {}, shortDay(c.date)), ` · ${runLine(c, rules, true) || c.type}`]),
+      el('div', { class: 'count-it-btns' }, [
+        el('button', { class: 'btn small', 'data-count': c.id, onclick: async e => {
+          e.stopPropagation();
+          const next = countAs(c, run);
+          await putRun(next);
+          toast(`Counted as ${row.short}`);
+          if (onCounted) onCounted(next);
+        } }, 'Count it'),
+        // the other answer: a run on the side, which stops every planned run asking about it
+        el('button', { class: 'btn small ghost', 'data-side': c.id, onclick: async e => {
+          e.stopPropagation();
+          const next = keepAsSide(c);
+          await putRun(next);
+          toast('Kept as a side run. It counts toward your miles only.');
+          if (onCounted) onCounted(next);
+        } }, 'Side run')
+      ])
+    ]))
+  ]);
 }
 
 // ---- the run form ----
@@ -100,7 +136,15 @@ function runSheet(r, ctx) {
     ]),
     readOnly ? null : el('h3', { style: 'margin-top:14px' }, 'Counts as'),
     readOnly ? null : el('div', { class: 'tag-row', id: 'run-type-row' }, plan.runTypes.map(t => el('button', { class: 'tag-btn' + (t === r.type ? ' on' : ''), onclick: () => { const pr = planRunForType(plan, t); save({ type: t, planId: pr ? pr.id : null, typeLocked: true, autoType: false, autoWhy: null }); } }, t))),
-    !readOnly && isAuto(r) && r.autoWhy ? el('p', { class: 'muted', id: 'run-auto-why', style: 'margin:-2px 0 12px;font-size:var(--t-small)' }, `The app counted it as ${r.type} because ${r.autoWhy}. Tap another to change it; your pick sticks.`) : null,
+    // v1.18.1: a Garmin run counts toward miles, and for a planned run only once he says which it was
+    !readOnly && needsCredit(r) && creditOptions(plan, r).length ? el('div', { class: 'count-it', id: 'run-count-it' }, [
+      el('p', { class: 'count-it-head' }, 'From Garmin it counts toward your miles, not for a planned run. If it was one, count it:'),
+      el('div', { class: 'btn-row' }, creditOptions(plan, r).map(run => el('button', { class: 'btn small', 'data-count-as': run.id, onclick: async () => {
+        const next = countAs(r, run);
+        await putRun(next);
+        toast(`Counted as ${run.name.includes(': ') ? run.name.split(': ')[1] : run.name}`); refresh(); runSheet(next, ctx);
+      } }, run.name.includes(': ') ? run.name.split(': ')[1] : run.name)))
+    ]) : null,
     readOnly ? null : el('h3', {}, 'Effort (1 easy, 10 all out)'),
     readOnly ? (r.rpe ? el('p', {}, `Effort ${r.rpe} of 10`) : null) : el('div', { class: 'tag-row', id: 'run-effort-row' }, [3, 4, 5, 6, 7, 8, 9, 10].map(n => el('button', { class: 'tag-btn' + (Number(r.rpe) === n ? ' on' : ''), 'data-rpe': n, onclick: () => save({ rpe: n }) }, String(n)))),
     r.notes ? el('p', { class: 'muted' }, r.notes) : null,
@@ -259,6 +303,7 @@ export async function renderRunsTab(view, ctx) {
           el('div', { class: 'run-ask' }, row.plan.text),
           el('div', { class: 'muted run-detail' }, row.plan.detail),
           row.status === 'open' ? el('div', { class: 'run-moved' }, `Not done ${/weekend/i.test(row.day) ? 'yet' : shortDay(row.date)}. ${openRunText({ plan, rules, settings }, row.id, week, today)}`) : null,
+          phone ? countItBlock(row, { plan, rules, settings, runs, week }, () => refresh()) : null,
           row.run ? el('button', { class: 'run-result', onclick: () => runSheet(row.run, full) }, runLine(row.run, rules, true) || 'Logged') : null
         ])
       ])),

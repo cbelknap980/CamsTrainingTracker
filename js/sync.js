@@ -5,6 +5,7 @@
 // and nothing here writes to the app's own repo.
 
 import { kvGet, kvSet, kvDel, exportAll, importAll, onDataChange } from './store.js';
+import { runUpgrades } from './upgrade.js';
 
 export const SYNC_FILE = 'tracker-data.json';
 // v1.10: Garmin. A job in the same private repo writes GARMIN_FILE; the phone reads it and adds the runs.
@@ -145,7 +146,11 @@ export async function pullNow() {
     const data = await res.json();
     if (!data || data.app !== 'CamsTrainingTracker') throw new Error(`${SYNC_FILE} in that repo is not a tracker file.`);
     const changed = cfg.lastPulledExport !== data.exportedAt;
-    if (changed) await importAll(data, { quiet: true });
+    if (changed) {
+      await importAll(data, { quiet: true });
+      // v1.18.1: the phone's copy may come from an older version (it updates when it next opens)
+      await runUpgrades().catch(() => null);
+    }
     await saveSync({ lastPulledExport: data.exportedAt, lastPulledAt: new Date().toISOString(), lastError: null });
     return { ok: true, changed, at: data.exportedAt, sessions: (data.sessions || []).length, runs: (data.runs || []).length };
   } catch (e) {

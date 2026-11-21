@@ -5,22 +5,23 @@ import { buildTimeline, lastResults } from './builder.js';
 import { icon } from './icons.js';
 import { Player, playTones } from './player.js';
 import { learnPacing, pacingLines, pacingConfig } from './pacing.js';
-import { saveSession, renderSummary, renderReview, setsTable, gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from './logger.js';
-import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progression.js';
-import { getTargets, setTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getPendingReview, setPendingReview, clearPendingReview, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
+import { saveSession, renderSummary, renderReview, setsTable, rateUnratedButton, gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from './logger.js';
+import { epley, targetFromBenchmark, estimateStart, incrementFor, heavyStartDue, heavyStartTarget, flatWords } from './progression.js';
+import { getTargets, setTarget, setTargets, replaceTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getPendingReview, setPendingReview, clearPendingReview, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
 import { renderProgress } from './progress.js';
 import { weekOwed, owedLines, buildCatchUpSession, slackDays } from './catchup.js';
-import { renderRunsTab, runForm, openRunText } from './runs-view.js';
+import { renderRunsTab, runForm, openRunText, countItBlock } from './runs-view.js';
 import { weekRuns, runLine, openRunDays } from './runs.js';
 import { importFromGarmin } from './garmin.js';
 import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
 import { renderPlan } from './plan-view.js';
+import { runUpgrades } from './upgrade.js';
 import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
-import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp } from './ui.js';
+import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp, effortChips } from './ui.js';
 import { weekRings, ringsCard } from './rings.js';
-import { flaggedGroups, applyNumberFix, impossibleNumber } from './sanity.js';
+import { flaggedGroups, applyNumberFix, rateSavedSet, impossibleNumber } from './sanity.js';
 import { getExNotes, getKneeLog } from './store.js';
 import { noteText, noteLine, editNote } from './notes.js';
 import { swapScore, swappable, applyKneeSwap, morningDue } from './knee.js';
@@ -94,6 +95,12 @@ async function startSync() {
     if (cfg && cfg.role === 'viewer') await Promise.race([pullNow(), new Promise(r => setTimeout(r, 8000))]);
   } catch (e) { /* sync never stops the app from opening */ }
   startAutoSync(() => ({ appVersion: APP_VERSION, planVersion: D.plan.planVersion }), r => { if (!r.ok) toast('Upload to the computer copy failed. It will retry.', 3500); updateSyncChip(); });
+  // v1.18.1: one-time changes to data an older version saved (after the computer's pull, before the Garmin import,
+  // and with the upload listening, so the phone's copy goes up changed)
+  try {
+    const up = await runUpgrades();
+    if (up && up.runs) toast('Garmin runs now count for a planned run only after you tap Count it on the Runs tab.', 6000);
+  } catch (e) { /* an upgrade never stops the app from opening */ }
   // v1.10: the phone picks up new Garmin runs in the background when the app opens
   getSync().then(cfg => {
     if (!cfg || cfg.role !== 'phone') return;
@@ -326,13 +333,36 @@ function showTab(name, { restore = false } = {}) {
   return done;
 }
 
+/**
+ * v1.18.1 (rules R4 rule 7): in the heavy weeks, a main lift whose target has not had its heavy start gets it now
+ * (5% over the target going in, 3 reps), stored with heavyStart, so Home, the start page and the Plan tab show what
+ * the session will ask for and a weight typed on the start page is not raised a second time. The engine applies the
+ * same rule to a session that reaches it first (builder.js shows it the same way).
+ */
+async function applyHeavyStarts(settings, week) {
+  const phase = phaseForWeek(D.plan, week);
+  if (!phase || phase.id !== 'heavy') return false;
+  const targets = await getTargets();
+  let changed = false;
+  for (const [id, t] of Object.entries(targets)) {
+    const ex = D.plan.exercises[id];
+    if (!heavyStartDue(D.rules, id, ex, t, 'heavy')) continue;
+    const from = { weight: t.weight, reps: t.reps };
+    Object.assign(t, heavyStartTarget(D.rules, id, ex, t, settings), { heavyStart: { week, from }, source: 'engine', updated: new Date().toISOString() });
+    changed = true;
+  }
+  if (changed) await setTargets(targets);
+  return changed;
+}
+
 // ---- Home ----
 async function renderHome() {
   await updateWeekChip();
   const settings = await getSettings();
-  const targets = await getTargets();
   const today = new Date();
   const week = weekNumber(today, settings.startDate);
+  await applyHeavyStarts(settings, week);
+  const targets = await getTargets();
   const phase = phaseForWeek(D.plan, week);
   const todayId = todaysSessionId(D.plan, today);
   const session = todayId ? sessionById(D.plan, todayId) : null;
@@ -342,6 +372,9 @@ async function renderHome() {
   // v1.8 catch-up: sets skipped or not reached this week, and lifts whose day passed with nothing logged
   const allSessions = await getSessions();
   const allRuns = await getRuns();
+  // v1.18.1: Count it writes a run, so the computer (which only views the phone's copy) does not offer it
+  const homeSync = await getSync();
+  const canCount = !(homeSync && homeSync.role === 'viewer');
   // v1.18: the minutes shown here use the set and set-up times learned from his pace, like the workout itself
   const pacing = learnPacing({ sessions: allSessions, plan: D.plan, rules: D.rules, settings });
   const owed = week >= 1 && week <= 12 ? weekOwed({ plan: D.plan, sessions: allSessions, week, today }) : { lifts: [], totalSets: 0, missed: [] };
@@ -378,10 +411,14 @@ async function renderHome() {
       card.appendChild(el('p', { id: primary ? 'run-done' : null, style: 'color:var(--good);font-weight:700' }, `✓ Done${row.run.date !== toISODate(today) ? ' ' + fmtDate(row.run.date) : ''} · ${runLine(row.run, D.rules) || 'logged'}`));
       card.appendChild(el('button', { class: 'btn', onclick: () => showTab('runs') }, 'Open Runs'));
     } else {
-      card.appendChild(el('button', { class: 'btn ' + (primary ? 'primary' : ''), onclick: () => runForm(D.plan, settings, null, () => renderHome(), { type: row.type }) }, 'Log this run'));
+      // v1.18.1: a Garmin run this week that could be this one waits for his Count it
+      const counted = canCount ? countItBlock(row, { ...runCtx, runs: allRuns, week }, () => renderHome()) : null;
+      if (counted) card.appendChild(counted);
+      card.appendChild(el('button', { class: 'btn ' + (primary && !counted ? 'primary' : ''), onclick: () => runForm(D.plan, settings, null, () => renderHome(), { type: row.type }) }, 'Log this run'));
     }
   };
-  const movedNote = row => (row.status === 'open' ? `Moved here from ${new Date(row.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long' })}. If you run with your watch, it logs itself.` : 'If you run with your watch, it logs itself.');
+  // v1.18.1: a watch run comes in from Garmin and counts once he taps Count it
+  const movedNote = row => (row.status === 'open' ? `Moved here from ${new Date(row.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long' })}. If you run with your watch, the run comes in from Garmin and waits here for Count it.` : 'If you run with your watch, the run comes in from Garmin and waits here for Count it.');
 
   // v1.18: a finished session that was never saved (a tab tapped on Review) waits at the top until it is
   const pending = await pendingReview();
@@ -471,8 +508,8 @@ async function renderHome() {
   const stillOpen = runRows.filter(r => r.status === 'open' && r !== movedRun);
   if (stillOpen.length) {
     view.appendChild(el('div', { class: 'card', id: 'runs-open-card' }, [
-      el('h3', {}, ['Still to run this week', infoBtn('Runs off schedule', 'Run whenever it suits you. A run from Garmin counts for whichever planned run it most likely is.')]),
-      ...stillOpen.map(r => el('p', { style: 'margin:0 0 6px' }, [el('b', {}, `${r.name}. `), el('span', { class: 'muted' }, `${r.plan.text}. ${openRunText(runCtx, r.id, week, today)}`)]))
+      el('h3', {}, ['Still to run this week', infoBtn('Runs off schedule', 'Run whenever it suits you. A run from Garmin counts toward your miles, and for a planned run once you tap Count it, here or on the Runs tab.')]),
+      ...stillOpen.flatMap(r => [el('p', { style: 'margin:0 0 6px' }, [el('b', {}, `${r.name}. `), el('span', { class: 'muted' }, `${r.plan.text}. ${openRunText(runCtx, r.id, week, today)}`)]), canCount ? countItBlock(r, { ...runCtx, runs: allRuns, week }, () => renderHome()) : null])
     ]));
   }
   // v1.4: install card, only while the app is running in a browser tab. v1.6: on a phone it sits right under
@@ -545,7 +582,7 @@ function mainLiftsCard(targets, settings, flags = [], sessions = []) {
     ]);
   });
   return el('div', { class: 'card', id: 'next-targets' }, [
-    el('h3', {}, ['Main lifts', infoBtn('Main lifts', 'Next time is the weight and reps the app will ask for the next time you do the lift. It comes from your last session: hit the top of the rep range on every set at Solid or easier and the weight goes up, otherwise it holds. e1RM is your estimated one-rep max from your best set. Tap a lift to change its target by hand, or to enter a benchmark (the weight you can do for 5 with 2 left). Pull-up weights are the weight you add.')]),
+    el('h3', {}, ['Main lifts', infoBtn('Main lifts', `Next time is the weight and reps the app will ask for the next time you do the lift. It comes from your last session: every set at the top of the rep range at Solid or easier adds weight, the target made at Solid or easier adds a rep, and anything else holds. ${flatWords(D.rules)} The power clean follows the weight you use; the app never raises it. e1RM is your estimated one-rep max from your best set. Tap a lift to change its target by hand, or to enter a benchmark (the weight you can do for 5 with 2 left). Pull-up weights are the weight you add.`)]),
     el('table', { class: 'tgt-table' }, [el('tr', {}, [el('th', {}, 'Lift'), el('th', { class: 'num' }, 'Next time')]), ...rows]),
     el('p', { class: 'muted', style: 'margin-top:8px' }, 'Other lifts show their targets on the start page of that day\'s workout.')
   ]);
@@ -597,7 +634,8 @@ function fixNumbers(g, sessions) {
     const [allSessions, targets, settings] = await Promise.all([getSessions(), getTargets(), getSettings()]);
     const r = applyNumberFix({ sessions: allSessions, targets, recordId: g.recordId, exerciseId: g.exerciseId, weights, checked: g.sets, plan: D.plan, rules: D.rules, settings });
     await putSession(r.record);
-    await setTarget(g.exerciseId, r.target);
+    // v1.18.1: swapped whole, so a heavy-start mark the re-run took off is gone from storage too
+    await replaceTarget(g.exerciseId, r.target);
     closeModal();
     toast(keep ? `${ex.name}: kept as logged` : (r.retargeted && r.target.weight != null ? `${ex.name} fixed. Next time ${weightWithPair(ex, r.target.weight)} × ${r.target.reps}` : `${ex.name} fixed`), 4000);
     renderHome();
@@ -617,6 +655,49 @@ function fixNumbers(g, sessions) {
   ]));
 }
 
+// ---- v1.18.1: rate a set after Save ----
+// A set the timer logged before an effort was picked holds its lift's target for a session (rules R4, rule 1). On the
+// summary or a session in Progress it can be rated afterwards; when that is the lift's latest session, its next target
+// is worked out again from the target it had going in (rule 12, sanity.js rateSavedSet).
+function rateSetSheet(record, index, { onSaved, onCancel } = {}) {
+  const st = record.sets[index];
+  if (!st) return;
+  const ex = D.plan.exercises[st.exerciseId] || {};
+  let rpe = null;
+  const save = el('button', { class: 'btn primary', id: 'rate-save', disabled: true, onclick: async () => {
+    if (rpe == null) return;
+    save.disabled = true;
+    const [sessions, targets, settings] = await Promise.all([getSessions(), getTargets(), getSettings()]);
+    const r = rateSavedSet({ sessions, targets, recordId: record.id, index, rpe, plan: D.plan, rules: D.rules, settings });
+    await putSession(r.record);
+    if (r.retargeted) await replaceTarget(st.exerciseId, r.target);
+    closeModal();
+    const name = ex.name || st.name;
+    const t = r.target || {};
+    const nextText = t.weight != null ? `${weightWithPair(ex, t.weight)} × ${t.reps}` : `${t.reps} reps`;
+    toast(r.why === 'latest'
+      ? (r.stillUnrated ? `Rated. ${r.stillUnrated} more ${name} ${r.stillUnrated === 1 ? 'set' : 'sets'} to rate before its target moves` : `${name} rated. Next time ${nextText}`)
+      : (r.why === 'hand' ? `Rated. You set ${name}'s next target yourself, so it stays`
+        : (r.why === 'coach' ? `Rated. The coach has set ${name}'s next target since, so it stays` : `Rated. A later session has set ${name}'s target since`)), 4500);
+    if (onSaved) onSaved(r.record);
+  } }, 'Save');
+  const chips = effortChips(D.rules, null, lvl => {
+    rpe = lvl.rpe;
+    chips.querySelectorAll('.effort-chip').forEach(b => b.classList.toggle('on', b.dataset.key === lvl.key));
+    save.disabled = false;
+  });
+  const what = `${st.weight != null ? weightWithPair(ex, st.weight) + ' × ' : ''}${st.reps != null ? st.reps : '?'}${st.weight != null ? '' : ' reps'}`;
+  showModal(el('div', { class: 'rate-sheet', id: 'rate-sheet' }, [
+    el('h2', {}, `${ex.name || st.name}${st.round ? ', round ' + st.round : (st.setIndex ? ', set ' + st.setIndex : '')}`),
+    el('p', { class: 'muted' }, `${record.sessionName}, ${fmtDate(record.date)}: ${what}. The timer logged it before an effort was picked. How did it feel?`),
+    chips,
+    el('div', { class: 'btn-row', style: 'margin-top:12px' }, [
+      el('button', { class: 'btn ghost', id: 'rate-cancel', onclick: () => { closeModal(); if (onCancel) onCancel(); } }, 'Cancel'),
+      save
+    ])
+  ]));
+}
+
 function editBenchmark(id, ex, t, settings) {
   const w = el('input', { type: 'number', step: '2.5', value: t.benchmarkWeight != null ? t.benchmarkWeight : (t.weight != null ? t.weight : ''), inputmode: 'decimal', placeholder: 'lb' });
   const range = repRangeFor(id);
@@ -631,7 +712,7 @@ function editBenchmark(id, ex, t, settings) {
   w.addEventListener('input', upd); upd();
   showModal(el('div', {}, [
     el('h2', {}, ex.name),
-    el('p', { class: 'muted' }, ex.equipment === 'weighted_bw' ? 'Added weight for a set of 5 with 2 reps left.' : (id === 'power_clean' ? 'A crisp, fast double. The app trains at 90% of it.' : 'Weight for a set of 5 with 2 reps left.')),
+    el('p', { class: 'muted' }, ex.equipment === 'weighted_bw' ? 'Added weight for a set of 5 with 2 reps left.' : (id === 'power_clean' ? 'A crisp, fast double. That weight is your target.' : 'Weight for a set of 5 with 2 reps left.')),
     el('div', { class: 'field' }, [el('label', {}, 'Benchmark (lb)'), w]),
     preview,
     el('div', { class: 'btn-row' }, [
@@ -671,6 +752,7 @@ async function previewSession(sessionRef, week) {
   const pending = await pendingReview();
   if (pending) { onSessionFinished(pending, { restored: true }); toast('Save your last session first (or discard it at the bottom).', 4500); return; }
   const settings = await getSettings();
+  await applyHeavyStarts(settings, week);
   const targets = await getTargets();
   const sessions = await getSessions();
   const lastTime = lastResults(sessions);
@@ -926,7 +1008,7 @@ async function onSessionFinished(draft, { restored = false } = {}) {
       } : null,
       onSave: async overrides => {
         // v1.18: one save per session. A second tap before the summary showed saved it twice, and the second run of
-        // the engine counted a missed session again (two misses in a row drop the weight).
+        // the engine counted a missed session again (flat sessions in a row drop the weight).
         if (saving) return;
         saving = true;
         const btn = document.getElementById('save-session');
@@ -947,11 +1029,14 @@ async function onSessionFinished(draft, { restored = false } = {}) {
         const prev = sessions.find(x => x.id !== record.id && x.sessionId === record.sessionId && !x.catchUp && (x.startedAt || x.date) < (record.startedAt || record.date)) || null;
         const rings = record.week >= 1 && record.week <= 12 ? weekRings({ plan: D.plan, rules: D.rules, settings, sessions, runs, week: record.week, today: new Date() }) : null;
         onBack('page', () => showTab('home'));
-        transition(() => renderSummary(view, record, {
+        // v1.18.1: a set the timer logged can be rated here; the summary is drawn again with the rated session
+        const summary = rec => renderSummary(view, rec, {
           prev, rings, syncOn: !!(cfg && cfg.repo && cfg.role !== 'viewer'),
           onDone: () => showTab('home'),
-          onBackup: () => backupNow(settings, D.plan.planVersion)
-        }), 'fade');
+          onBackup: () => backupNow(settings, D.plan.planVersion),
+          onRate: i => rateSetSheet(rec, i, { onSaved: summary })
+        });
+        transition(() => summary(record), 'fade');
       }
     });
   } catch (e) {
@@ -1052,12 +1137,14 @@ function showExercise(id, sessions, settings) {
 }
 
 function showSession(s) {
+  // v1.18.1: a set the timer logged can be rated here; the sheet comes back with the rated session
+  const onRate = i => rateSetSheet(s, i, { onSaved: rec => showSession(rec), onCancel: () => showSession(s) });
   showModal(el('div', {}, [
     el('h2', {}, `${s.sessionName} · ${fmtDate(s.date)}`),
     el('p', { class: 'muted' }, `Week ${s.week} · ${fmtMinutes(s.actualSeconds)} (plan ${fmtMinutes(s.plannedSeconds)})${pausedInGym(s) > 30 ? ` · ${fmtLong(gymSecondsOf(s))} in the gym` : ''}${s.trims && s.trims.length ? ' · ' + s.trims.join('; ') : ''}`),
-    s.whatChanged && s.whatChanged.length ? el('div', {}, [el('h3', {}, 'What changed'), el('ul', { class: 'lines' }, s.whatChanged.map(l => el('li', {}, l.text)))]) : null,
+    s.whatChanged && s.whatChanged.length ? el('div', {}, [el('h3', {}, 'What changed'), el('ul', { class: 'lines' }, s.whatChanged.map(l => el('li', {}, l.text))), rateUnratedButton(s.sets, onRate)]) : null,
     el('h3', { style: 'margin-top:12px' }, 'Sets'),
-    setsTable(s.sets),
+    setsTable(s.sets, { onRate }),
     el('div', { class: 'btn-row', style: 'margin-top:12px' }, [
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close'),
       el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),

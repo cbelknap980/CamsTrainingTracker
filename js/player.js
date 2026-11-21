@@ -14,7 +14,7 @@
 import { trimToFit, remainingSeconds, leadIns, setTiming, blankStep } from './builder.js';
 import { setInProgress, clearInProgress, setPendingReview, newId } from './store.js';
 import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText } from './data.js';
-import { incrementFor, checkPR } from './progression.js';
+import { incrementFor, checkPR, trainingFractionFor } from './progression.js';
 import { el, showModal, closeModal, toast, hideToast, dropStepToast, effortChips, onBack, dropBack, haptic } from './ui.js';
 import { numberFlag, impossibleNumber } from './sanity.js';
 import { icon } from './icons.js';
@@ -761,6 +761,11 @@ export class Player {
     const pick = k => (typed && typed[k] != null ? typed[k] : (prior && prior[k] != null ? prior[k] : (s && s.target && s.target[k] != null ? s.target[k] : null)));
     return { weight: pick('weight'), reps: s && s.holdSeconds ? null : pick('reps') };
   }
+  /** v1.18.1: what a set after the week-1 top set is worked out from ("90% of the top set"; the clean: its weight). */
+  fromTopSet(exerciseId) {
+    const share = trainingFractionFor(this.rules, exerciseId, this.plan.exercises[exerciseId]);
+    return share === 1 ? 'the top set\'s weight' : `${Math.round(share * 100)}% of the top set`;
+  }
   /** The effort button that is pre-selected for a set: the level its target falls in. */
   defaultRpe(s) {
     if (!s || s.rpeDefault == null) return null;
@@ -773,7 +778,8 @@ export class Player {
     const ex = this.plan.exercises[s.exerciseId];
     if (s.baseline) {
       const inc = incrementFor(this.rules, s.exerciseId, ex);
-      const tw = roundTo(weight * this.rules.baseline.trainingFraction, inc);
+      // v1.18.1 (rules R4 rule 9): the power clean trains at the top double's weight, not 90% of it
+      const tw = roundTo(weight * trainingFractionFor(this.rules, s.exerciseId, ex), inc);
       this.steps.forEach((o, i) => { if (i > idx && o.exerciseId === s.exerciseId && o.fillFromBaseline && !o.done) { o.target = { ...(o.target || {}), weight: tw }; } });
       toast(`Training weight for today: ${fmtWeight(tw)} lb`);
     } else if (!s.ramp && weight !== oldWeight) {
@@ -1208,7 +1214,7 @@ export class Player {
     const w = st.target && st.target.weight != null ? st.target.weight : null;
     const reps = st.target && st.target.reps != null ? `${st.target.reps}` : (st.repRange ? repsText(st.repRange) : 'max');
     const r = `× ${reps}${st.perSide ? ' / side' : ''}`;
-    if (w == null) return st.fillFromBaseline ? `90% of the top set ${r}`.replace('90%', `${Math.round(this.rules.baseline.trainingFraction * 100)}%`) : r;
+    if (w == null) return st.fillFromBaseline ? `${this.fromTopSet(st.exerciseId)} ${r}` : r;
     const pair = pairText(ex, w);
     return `${ex && ex.equipment === 'weighted_bw' ? '+' : ''}${fmtWeight(w)} lb${pair ? ` (${pair})` : ''} ${r}`;
   }
@@ -1239,7 +1245,8 @@ export class Player {
       let what = '';
       if (os && top && os.fillFromBaseline && !(os.target && os.target.weight != null)) {
         // week 1 and week 12: the weight comes from the top set, so say that in one short line
-        what = `top set, then ${count} of ${os.target && os.target.reps != null ? os.target.reps : '?'} at ${Math.round(this.rules.baseline.trainingFraction * 100)}%`;
+        const share = trainingFractionFor(this.rules, os.exerciseId, this.plan.exercises[os.exerciseId]);
+        what = `top set, then ${count} of ${os.target && os.target.reps != null ? os.target.reps : '?'} ${share === 1 ? 'at that weight' : `at ${Math.round(share * 100)}%`}`;
       } else if (os) {
         const noWeight = !os.holdSeconds && !(os.target && os.target.weight != null) && ex && ex.equipment !== 'bodyweight';
         what = `${top ? 'top set, then ' : ''}${count ? count + ' · ' : ''}${noWeight ? 'pick a weight ' : ''}${this.shortTarget(os)}`;
@@ -1547,7 +1554,7 @@ export class Player {
     const isBw = ex && ex.equipment === 'bodyweight';
     let weight;
     if (w != null) weight = el('span', { class: 'tile-weight' }, [el('b', {}, `${ex && ex.equipment === 'weighted_bw' ? '+' : ''}${fmtWeight(w)}`), ' lb', pair ? el('small', {}, ` (${pair})`) : null]);
-    else weight = el('span', { class: 'tile-weight word' }, isBw ? 'Bodyweight' : (x.baseline ? 'Work up' : (x.fillFromBaseline ? `${Math.round(this.rules.baseline.trainingFraction * 100)}% of the top set` : 'Pick a weight')));
+    else weight = el('span', { class: 'tile-weight word' }, isBw ? 'Bodyweight' : (x.baseline ? 'Work up' : (x.fillFromBaseline ? this.fromTopSet(x.exerciseId) : 'Pick a weight')));
     return el('div', { class: 'un-target step-target' }, [
       weight, el('span', { class: 'un-x', 'aria-hidden': 'true' }, '×'),
       el('span', { class: 'un-reps' }, [el('b', {}, reps), x.perSide ? ' / side' : (reps === '1' ? ' rep' : ' reps')])

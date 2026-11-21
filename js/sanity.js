@@ -80,11 +80,71 @@ export function flaggedGroups(sessions, plan, rules) {
 
 const workOf = (s, id) => (s.sets || []).filter(st => st.exerciseId === id && st.done && !st.skipped && !st.ramp && st.weight != null && st.reps && !st.holdSeconds);
 const when = s => String(s.startedAt || s.date || '');
+// v1.18.1: a set the timer logged that nobody rated (as logger.js isUnchecked; this file stays free of the DOM)
+const notRated = st => !!(st && st.unconfirmed && st.done && !st.skipped && !st.ramp);
+const loggedLift = (s, id) => (s.sets || []).some(st => st.exerciseId === id && st.done && !st.skipped && !st.ramp);
+
+/** True when `record` is the newest session that logged this lift: only that one sets its next target. */
+function isLatestFor(all, id, record) {
+  const latest = all.filter(s => loggedLift(s, id)).sort((a, b) => when(b).localeCompare(when(a)))[0];
+  return !!latest && latest.id === record.id;
+}
+
+/**
+ * A target set after this session stays as it was set, and a late rating or a number fix changes the session only:
+ * one he set himself (on this session's Review or since) gives 'hand', one the coach set since (coach.json from the
+ * nightly review, or a Plan check-in) gives 'coach'. Otherwise ''.
+ */
+function setSince(cur, record) {
+  if (!cur || !cur.updated || cur.updated < (record.endedAt || '')) return '';
+  return cur.source === 'you' ? 'hand' : (cur.source === 'coach' ? 'coach' : '');
+}
+
+/**
+ * v1.18.1 (rules R4, rule 12): one lift of a saved session worked out again from the target it had going into that
+ * session, not from what the session already produced (that counted the session twice). Sessions saved from v1.18.1
+ * on keep that target on the record (targetsBefore, with the flat count and any heavy-start mark). Older ones start
+ * from the target the screen showed, at count 0; in a heavy week that already was the heavy start, so it is marked
+ * and not added again. Returns { going, target, line }.
+ */
+export function rerunLift({ record, exerciseId, plan, rules, settings }) {
+  const id = exerciseId;
+  let going;
+  if (record.targetsBefore && Object.prototype.hasOwnProperty.call(record.targetsBefore, id)) {
+    going = record.targetsBefore[id] ? JSON.parse(JSON.stringify(record.targetsBefore[id])) : {};
+  } else {
+    const first = (record.sets || []).find(st => st.exerciseId === id && !st.ramp && !st.baseline && !st.retest);
+    going = first && first.target && first.target.weight != null ? { weight: first.target.weight, reps: first.target.reps, stall: 0 } : {};
+    if (going.weight != null && record.phase && record.phase.id === 'heavy') going.heavyStart = { week: record.week };
+  }
+  const res = applyProgression({ session: { ...record, sets: (record.sets || []).filter(st => st.exerciseId === id) }, targets: { [id]: going }, rules, plan, settings });
+  return { going, target: res.targets[id] || {}, line: res.lines.find(l => l.exerciseId === id) || null };
+}
+
+// what a re-run decides about the target; bests and e1RM are worked out over every session instead. A heavy-start
+// mark the re-run did not keep is taken off, so the next heavy-week screen applies it from the corrected target.
+const RERUN_KEYS = ['weight', 'reps', 'stall', 'heavyStart', 'source', 'baselineWeight', 'baselineE1rm', 'updated', 'sessionId'];
+function takeRerun(cur, t) {
+  for (const k of RERUN_KEYS) {
+    if (k in t) cur[k] = t[k] && typeof t[k] === 'object' ? JSON.parse(JSON.stringify(t[k])) : t[k];
+    else if (k === 'heavyStart') delete cur.heavyStart;
+  }
+}
+
+/** The session's what-changed line for this lift replaced by the re-run's, with a note on why it changed. */
+function putLine(record, id, line, note) {
+  if (!line) return;
+  const fixed = note ? { ...line, text: `${line.text} (${note})` } : { ...line };
+  const lines = [...(record.whatChanged || [])];
+  const at = lines.findIndex(l => l.exerciseId === id);
+  if (at >= 0) lines.splice(at, 1, fixed); else lines.push(fixed);
+  record.whatChanged = lines.filter((l, i) => l.exerciseId !== id || i === (at >= 0 ? at : lines.length - 1));
+}
 
 /**
  * A saved session corrected: new weights for some of its sets (by index), every listed set marked checked, then that
- * exercise's records, e1RM and, when this was its latest session and no later hand-set target exists, its next
- * target and what-changed lines worked out again from the right numbers.
+ * exercise's records, e1RM and, when this was its latest session and no hand-set target since, its next target and
+ * what-changed line worked out again from the right numbers (v1.18.1: from the target it had going in, rule 12).
  * Returns { record, target, retargeted, line } (new objects; the inputs are not changed).
  */
 export function applyNumberFix({ sessions, targets, recordId, exerciseId, weights, checked, plan, rules, settings }) {
@@ -114,25 +174,45 @@ export function applyNumberFix({ sessions, targets, recordId, exerciseId, weight
   const cur = { ...((targets || {})[id] || {}) };
   if (best.e1rm) cur.bestE1rm = best.e1rm;
   if (best.weight) cur.bestWeight = best.weight;
-  const latest = all.filter(s => workOf(s, id).length).sort((a, b) => when(b).localeCompare(when(a)))[0];
-  const handSetLater = cur.source === 'you' && cur.updated && cur.updated > (record.endedAt || '');
   let retargeted = false, line = null;
-  if (latest && latest.id === recordId && !handSetLater) {
-    const first = record.sets.find(st => st.exerciseId === id && !st.ramp && !st.baseline && !st.retest);
-    const going = first && first.target && first.target.weight != null ? { weight: first.target.weight, reps: first.target.reps, stall: cur.stall || 0 } : {};
-    const res = applyProgression({ session: { ...record, sets: record.sets.filter(st => st.exerciseId === id) }, targets: { [id]: going }, rules, plan, settings });
-    const t = res.targets[id] || {};
-    for (const k of ['weight', 'reps', 'stall', 'source', 'baselineWeight', 'baselineE1rm', 'updated', 'sessionId']) if (k in t) cur[k] = t[k];
+  if (isLatestFor(all, id, record) && !setSince(cur, record)) {
+    const run = rerunLift({ record, exerciseId: id, plan, rules, settings });
+    takeRerun(cur, run.target);
     if (ex && ex.benchmark && mine.e1rm) cur.e1rm = mine.e1rm;
-    line = res.lines.find(l => l.exerciseId === id) || null;
-    if (line) {
-      const fixed = { ...line, text: `${line.text} (numbers corrected)` };
-      const lines = [...(record.whatChanged || [])];
-      const at = lines.findIndex(l => l.exerciseId === id);
-      if (at >= 0) lines.splice(at, 1, fixed); else lines.push(fixed);
-      record.whatChanged = lines.filter((l, i) => l.exerciseId !== id || i === (at >= 0 ? at : lines.length - 1));
-    }
+    line = run.line;
+    putLine(record, id, line, 'numbers corrected');
     retargeted = true;
   }
   return { record, target: cur, retargeted, line };
+}
+
+/**
+ * v1.18.1: the effort picked for a set the timer logged, after the session was saved (the summary or Progress). The
+ * set counts from then on. When this is the lift's latest session and he has not set its target by hand since, the
+ * next target is worked out again from where the lift started that session (rule 12); another set of that lift
+ * still not rated keeps it where it is (rule 1).
+ * Returns { record, target, retargeted, why, line, stillUnrated }: why is 'latest', 'later' (a later session set the
+ * target), 'hand' (he set it himself) or 'coach' (the coach set it since). New objects; the inputs are not changed.
+ */
+export function rateSavedSet({ sessions, targets, recordId, index, rpe, plan, rules, settings }) {
+  const src = sessions.find(s => s.id === recordId);
+  const record = JSON.parse(JSON.stringify(src));
+  const st = record.sets[index];
+  const id = st && st.exerciseId;
+  const cur = { ...((targets || {})[id] || {}) };
+  if (!st || rpe == null) return { record, target: cur, retargeted: false, why: 'none', line: null, stillUnrated: 0 };
+  st.rpe = rpe;
+  delete st.unconfirmed;
+  const all = sessions.map(s => (s.id === recordId ? record : s));
+  const stillUnrated = record.sets.filter(x => x.exerciseId === id && notRated(x)).length;
+  const why = !isLatestFor(all, id, record) ? 'later' : (setSince(cur, record) || 'latest');
+  let retargeted = false, line = null;
+  if (why === 'latest') {
+    const run = rerunLift({ record, exerciseId: id, plan, rules, settings });
+    takeRerun(cur, run.target);
+    line = run.line;
+    putLine(record, id, line, stillUnrated ? '' : 'rated after saving');
+    retargeted = true;
+  }
+  return { record, target: cur, retargeted, why, line, stillUnrated };
 }
