@@ -182,12 +182,15 @@ async function openApp() {
     toast('This session is not saved yet. Check it and tap Save.', 4500);
     return;
   }
-  if (inProgress && inProgress.status === 'running' && Date.now() - (inProgress.lastTick || 0) < D.rules.timing.resumeWindowHours * 3600000) {
-    offerResume(inProgress);
-  } else {
-    if (inProgress) clearInProgress().catch(() => {});
-    if (!(await openShortcut())) showTab('home');
+  if (inProgress && inProgress.status === 'running') {
+    const fresh = Date.now() - (inProgress.lastTick || 0) < D.rules.timing.resumeWindowHours * 3600000;
+    // v1.18: past the resume window a session with sets logged is offered to save or discard (it was deleted
+    // without a word after 3 hours away, logged sets and all)
+    const logged = ((inProgress.timeline && inProgress.timeline.steps) || []).some(st => st.kind === 'set' && st.record && st.record.done && !st.record.skipped);
+    if (fresh || logged) { offerResume(inProgress, { stale: !fresh }); return; }
   }
+  if (inProgress) clearInProgress().catch(() => {});
+  if (!(await openShortcut())) showTab('home');
 }
 
 /**
@@ -833,14 +836,17 @@ async function askNotificationPermission(settings) {
   try { await Notification.requestPermission(); } catch (e) { /* ignore */ }
 }
 
-function offerResume(saved) {
+/** stale: v1.18, left open longer than the resume window: no Resume, only save what was logged or discard it. */
+function offerResume(saved, { stale = false } = {}) {
   view.innerHTML = '';
   const tl = saved.timeline;
-  view.appendChild(el('div', { class: 'card accent' }, [
-    el('h1', {}, 'Resume session?'),
-    el('p', { class: 'muted' }, `${tl.sessionName}, step ${saved.idx + 1} of ${tl.steps.length}, started ${fmtDate(saved.startedISO)}.`),
+  view.appendChild(el('div', { class: 'card accent', id: 'resume-card' }, [
+    el('h1', {}, stale ? 'Unfinished session' : 'Resume session?'),
+    el('p', { class: 'muted' }, stale
+      ? `${tl.sessionName}, started ${fmtDate(saved.startedISO)}, was left open for more than ${D.rules.timing.resumeWindowHours} hours. Save the sets you logged, or discard it.`
+      : `${tl.sessionName}, step ${saved.idx + 1} of ${tl.steps.length}, started ${fmtDate(saved.startedISO)}.`),
     el('div', { class: 'stack' }, [
-      el('button', { class: 'btn primary', onclick: async () => {
+      stale ? null : el('button', { class: 'btn primary', onclick: async () => {
         const settings = await getSettings();
         const targets = await getTargets();
         const sessions = await getSessions();
@@ -848,14 +854,14 @@ function offerResume(saved) {
         player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished, sessions, pacing });
         player.resume(saved);
       } }, 'Resume'),
-      el('button', { class: 'btn', onclick: async () => {
+      el('button', { class: stale ? 'btn primary' : 'btn', id: 'resume-save', onclick: async () => {
         const settings = await getSettings();
         player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, container: view, onFinish: onSessionFinished });
         // v1.15.1: the session ended when the app was last used, not now (it counted the hours away as workout time)
         player.s = saved; player.finish('ended_early', saved.pausedAt != null ? saved.pausedAt : saved.lastTick);
       } }, 'Save what I did and stop'),
-      el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
-      el('button', { class: 'btn danger', onclick: async () => { await clearInProgress(); showTab('home'); } }, 'Discard it')
+      stale ? null : el('button', { class: 'btn', id: 'arch-open', onclick: () => { closeModal(); showTab('architecture'); } }, 'How the app works'),
+      el('button', { class: 'btn danger', id: 'resume-discard', onclick: async () => { await clearInProgress(); showTab('home'); } }, 'Discard it')
     ])
   ]));
 }

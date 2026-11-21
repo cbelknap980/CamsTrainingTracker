@@ -15,7 +15,7 @@ import { trimToFit, remainingSeconds, leadIns, setTiming, blankStep } from './bu
 import { setInProgress, clearInProgress, setPendingReview, newId } from './store.js';
 import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText } from './data.js';
 import { incrementFor, checkPR } from './progression.js';
-import { el, showModal, closeModal, toast, hideToast, effortChips, onBack, dropBack, haptic } from './ui.js';
+import { el, showModal, closeModal, toast, hideToast, dropStepToast, effortChips, onBack, dropBack, haptic } from './ui.js';
 import { numberFlag, impossibleNumber } from './sanity.js';
 import { icon } from './icons.js';
 import { learnPacing } from './pacing.js';
@@ -30,6 +30,7 @@ const round1 = v => Math.round(v * 10) / 10;
  */
 const setKey = st => (st && st.kind === 'set' && !st.ramp && st.exerciseId ? `${st.blockId}|${st.exerciseId}|${st.setIndex}|${st.round}` : null);
 const TIGHTEST = 4;   // how many steps fit() has to make the middle of the screen fit (css: .tight-1 .. .tight-4)
+const HIDE_KEEPS_WAITING = 5;   // seconds: Hide with this little of the set's time left leaves the set waiting for Done
 
 // Used only if rules.json has no cues block (an old copy of the rules with this code).
 const FALLBACK_TONES = { warn: [[1175, 0, 0.12]], tick: [[1175, 0, 0.14]], go: [[1568, 0, 0.6]], setEnd: [[1175, 0, 0.2], [784, 0.24, 0.42]], end: [[1175, 0, 0.2], [1568, 0.24, 0.36]], side: [[1047, 0, 0.16], [1047, 0.26, 0.16]], pr: [[784, 0, 0.14], [1047, 0.16, 0.14], [1568, 0.32, 0.42]] };
@@ -134,6 +135,9 @@ export class Player {
   resume(saved) {
     this.s = saved;
     if (!this.s.prs) this.s.prs = [];
+    // v1.18: the bests raised by PRs earlier in this session (targets come fresh from storage, without them, and the
+    // next set with the same numbers was announced as a PR again)
+    for (const pr of this.s.prs) if (pr && pr.exerciseId && pr.weight != null && pr.reps) this.raiseBest(pr.exerciseId, pr.weight, pr.reps, pr.kinds || []);
     // a set that was waiting on its open number boxes opens them again (closed, it would sit at 0:00 waiting for Done)
     this.editOpen = !!(this.s.manual && this.step && this.step.kind === 'set');
     const st = this.step;
@@ -197,6 +201,8 @@ export class Player {
       this.tick(true);
     } else {
       this.scheduleNotification();
+      // v1.18: stored now, so a reload or a closed app counts its time away from here (it lost up to 5 s before it)
+      this.persist();
     }
   }
 
@@ -472,8 +478,10 @@ export class Player {
     if (!this.waiting()) return;
     const step = this.step;
     this.s.confirmed = true; this.confirmedMs = Date.now();
-    this.s.tapAt = round1((this.now() - (this.s.stepT0 != null ? this.s.stepT0 : this.s.stepStart)) / 1000);
-    this.s.tapPaused = Math.round((this.s.stepPausedMs || 0) / 1000);   // the pauses inside tapAt (one under way is not)
+    // tapAt: wall seconds from the start of the step to the tap; tapPaused: the paused seconds inside them, a pause
+    // still under way included (a tap made while paused used to leave that pause out and read as a 5 s set-up)
+    this.s.tapAt = round1((Date.now() - (this.s.stepT0 != null ? this.s.stepT0 : this.s.stepStart)) / 1000);
+    this.s.tapPaused = Math.round(this.pausedInStepMs() / 1000);
     this.cue('tap');
     const total = this.stepSeconds(step); const g = this.holdAt(step);
     // v1.18: a tap during a rest keeps the rest; only the set-up time added to it is dropped. With no rest left
@@ -484,7 +492,7 @@ export class Player {
     this.s.fired = false; this.s.readySaid = false; this.s.lastTickSec = null;
     this.renderStep(); this.persist();
     // a rest with time left runs on: say so once, at the tap (the chip beside the clock stays)
-    if (step.kind === 'rest' && !this.isReady()) toast('It starts when the rest ends.', 2600);
+    if (step.kind === 'rest' && !this.isReady()) toast('It starts when the rest ends.', 2600, { step: true });
     if (document.hidden) this.scheduleNotification();
   }
   isReady() {
@@ -613,6 +621,7 @@ export class Player {
   goTo(idx) {
     this.s.idx = idx; this.editOpen = false; this.pendingRpe = null; this.typed = null;
     this.cancelScheduledNotification();
+    dropStepToast();
     if (idx >= this.steps.length) { this.finish('complete'); return; }
     this.beginStep();
     this.renderStep();
@@ -725,8 +734,30 @@ export class Player {
     const prior = this.priorRecord(this.step);
     return { weight: num(w), reps: num(r), rpe: this.pendingRpe != null ? this.pendingRpe : (prior && prior.rpe != null ? prior.rpe : this.defaultRpe(this.step)) };
   }
+  /** A live PR raises the lift's best for the rest of the session; returns the set's e1RM. */
+  raiseBest(exerciseId, weight, reps, kinds) {
+    const ex = this.plan.exercises[exerciseId];
+    const bwAdd = ex && ex.equipment === 'weighted_bw' ? (this.settings.bodyweightLb || 0) : 0;
+    const e = Math.round((weight + bwAdd) * (1 + reps / 30));
+    if (!this.targets) return e;
+    const t = this.targets[exerciseId] = { ...(this.targets[exerciseId] || {}) };
+    if (kinds.includes('e1rm') && !(t.bestE1rm >= e)) t.bestE1rm = e;
+    if (kinds.includes('weight') && !(t.bestWeight >= weight)) t.bestWeight = weight;
+    return e;
+  }
   /** What this set was logged as before he went Back onto it (null for a set not yet done, or skipped). */
   priorRecord(s) { return s && s.record && s.record.done && !s.record.skipped ? s.record : null; }
+  /**
+   * v1.18: the weight and reps a set screen shows, the numbers Done or its timer would log: typed in Edit and hidden,
+   * else what it was logged with when he went Back onto it, else the target (the screen showed the target either way).
+   */
+  shownNumbers(s) {
+    const prior = this.priorRecord(s);
+    const ex = s ? this.plan.exercises[s.exerciseId] : null;
+    const typed = s && s === this.step && this.typed && !impossibleNumber(this.typed, ex, { hold: !!s.holdSeconds }) ? this.typed : null;
+    const pick = k => (typed && typed[k] != null ? typed[k] : (prior && prior[k] != null ? prior[k] : (s && s.target && s.target[k] != null ? s.target[k] : null)));
+    return { weight: pick('weight'), reps: s && s.holdSeconds ? null : pick('reps') };
+  }
   /** The effort button that is pre-selected for a set: the level its target falls in. */
   defaultRpe(s) {
     if (!s || s.rpeDefault == null) return null;
@@ -831,10 +862,7 @@ export class Player {
         s.record.pr = kinds; s.pr = kinds;
         this.s.prs.push({ exerciseId: s.exerciseId, name: s.name, kinds, weight: v.weight, reps: v.reps });
         // keep the in-session best so a second PR in the same session is measured against it
-        const t = this.targets[s.exerciseId] = { ...(this.targets[s.exerciseId] || {}) };
-        const e = Math.round((v.weight + bwAdd) * (1 + v.reps / 30));
-        if (kinds.includes('e1rm')) t.bestE1rm = e;
-        if (kinds.includes('weight')) t.bestWeight = v.weight;
+        const e = this.raiseBest(s.exerciseId, v.weight, v.reps, kinds);
         this.cue('pr');
         toast(kinds.includes('e1rm') ? `PR: ${s.name} e1RM ${e} lb` : `PR: heaviest ${s.name} ${fmtWeight(v.weight)} lb`, 3000);
       }
@@ -919,9 +947,10 @@ export class Player {
    * v1.18 (Cameron: "I don't see equipment taken on the standing calf raise finisher"): inside a finisher, another
    * exercise of this round first, or this exercise after the last round. v1.5: a later block that has not been started.
    */
-  swapChoices() {
-    if (!this.leadsIntoSet()) return [];
-    const n = this.s.idx + 1;
+  /** The swaps open from the countdown at `at` (this one by default) into the set after it. */
+  swapChoices(at = this.s.idx) {
+    if (!this.leadsIntoSet(at)) return [];
+    const n = at + 1;
     const cur = this.steps[n];
     const out = [];
     if (cur.blockType === 'finisher' && cur.exerciseId) {
@@ -948,7 +977,7 @@ export class Player {
       const part = this.steps.slice(i, to);
       if (part[0].kind !== 'set' || part.some(x => x.done || x.skipped)) continue;
       // only from the countdown in front of a block: a block that is under way stays in one piece
-      if (this.steps[this.s.idx].blockId === cur.blockId) continue;
+      if (this.steps[at].blockId === cur.blockId) continue;
       out.push({ kind: 'block', blockId: st.blockId, from: i, to, title: this.blockTitle(st.blockId), sub: `${this.blockSetNames(cur.blockId).join(' and ')} ${this.blockSetNames(cur.blockId).length > 1 ? 'move' : 'moves'} to right after it` });
     }
     return out;
@@ -1030,8 +1059,9 @@ export class Player {
     const behind = p.deltaSeconds >= 60 || p.overCapSeconds > 0;
     const s = this.step;
     const item = (ic, label, fn, cls) => el('button', { class: 'menu-item ' + (cls || ''), onclick: () => { closeModal(); fn(); } }, [icon(ic), el('span', {}, label)]);
-    // v1.18: the set has started and the equipment turns out to be taken: step back to its countdown and choose there
-    const onSet = s && s.kind === 'set' && !s.done && this.s.idx > 0 && this.leadsIntoSet(this.s.idx - 1);
+    // v1.18: the set has started and the equipment turns out to be taken: step back to its countdown and choose there.
+    // Offered only when that countdown has a swap (it stepped back first and then found none, dropping the set)
+    const onSet = s && s.kind === 'set' && !s.done && this.s.idx > 0 && this.swapChoices(this.s.idx - 1).length > 0;
     const cue = this.cueStep();
     showModal(el('div', {}, [
       el('div', { class: 'menu' }, [
@@ -1040,7 +1070,7 @@ export class Player {
         cue ? item('plan', `Cues: ${cue.name}`, () => this.openCues(cue), 'cues-item') : null,
         this.s.idx > 0 ? item('back', 'Back one step', () => this.back()) : null,
         this.swapChoices().length ? item('skip', 'Equipment taken: do something else now', () => this.openSwap()) : null,
-        onSet ? item('skip', 'Equipment taken: do something else now', () => { this.back(); if (this.swapChoices().length) this.openSwap(); else toast('Nothing later in this session to swap with'); }) : null,
+        onSet ? item('skip', 'Equipment taken: do something else now', () => { this.back(); this.openSwap(); }) : null,
         behind ? item('scissors', `Trim to fit (${Math.round(Math.max(p.deltaSeconds, p.overCapSeconds) / 60)} min over)`, () => this.trimPreview()) : null,
         item('stop', 'End session early', () => this.confirmEnd(), 'danger')
       ]),
@@ -1346,7 +1376,8 @@ export class Player {
     // on a screen that waits for his tap there is something to set up, so the steppers fold before the up-next
     // details go; on a plain rest it is the other way round (see fit())
     const fold = this.setupScreen() ? 3 : 4;
-    // a set the timer logged shows its effort as an outline (the app's guess) until he taps one
+    // a set the timer logged lights no effort until he taps one, the same as Review (the app's guess, lit as an
+    // outline, read as rated)
     return el('div', { class: 'just-done' + (rec.unconfirmed ? ' unconfirmed' : '') + (slim ? ' slim' : ''), id: 'just-done' }, [
       el('div', { class: 'jd-head' }, [
         el('div', { class: 'jd-check' + (fresh ? ' flash' : ''), 'aria-hidden': 'true' }, icon('check')),
@@ -1370,7 +1401,7 @@ export class Player {
         stepper('r', p.holdSeconds ? 'seconds' : 'reps', rec.reps != null ? `${rec.reps}` : '?', p.holdSeconds ? (p.perSide ? 's / side' : 'seconds') : (p.perSide ? '/ side' : 'reps'),
           () => change({ reps: Math.max(0, (rec.reps || 0) - 1) }), () => change({ reps: (rec.reps || 0) + 1 }))
       ]),
-      p.holdSeconds || slim ? null : effortChips(this.rules, rec.rpe, lvl => change({ rpe: lvl.rpe }))
+      p.holdSeconds || slim ? null : effortChips(this.rules, rec.unconfirmed ? null : rec.rpe, lvl => change({ rpe: lvl.rpe }))
     ]);
   }
   openFix(idx) {
@@ -1607,8 +1638,11 @@ export class Player {
     const effort = this.effortWords(s);
     const isBw = ex && ex.equipment === 'bodyweight';
     const added = ex && ex.equipment === 'weighted_bw';
-    const w = s.target && s.target.weight != null ? s.target.weight : null;
-    const reps = s.target && s.target.reps != null ? `${s.target.reps}` : (s.repRange ? repsText(s.repRange) : 'max');
+    // on a set he went Back onto, the numbers it was logged or corrected with: what Done or the timer logs again
+    // (the screen showed the target while the timer logged the correction)
+    const shown = this.shownNumbers(s);
+    const w = shown.weight;
+    const reps = shown.reps != null ? `${shown.reps}` : (s.repRange ? repsText(s.repRange) : 'max');
     const repsLabel = s.perSide ? 'reps / side' : (reps === '1' ? 'rep' : 'reps');
     const pair = w != null ? pairText(ex, w) : '';
     let big = null;
@@ -1820,7 +1854,10 @@ export class Player {
     if (this.editOpen) {
       const v = this.readInputs();
       this.typed = { weight: v.weight, reps: v.reps };
-      if (!(this.flag && this.flag.idx === this.s.idx)) this.s.manual = false;
+      // the timer ends the set again, unless a flagged number waits for a look, or the set's time is (nearly) up:
+      // then Hide only closes the boxes and the set waits for Done (it was logged the moment Hide was tapped)
+      const left = this.step && this.step.kind === 'set' ? this.stepSeconds(this.step) - this.elapsedInStep() : 0;
+      if (!(this.flag && this.flag.idx === this.s.idx) && left > HIDE_KEEPS_WAITING) this.s.manual = false;
     }
     this.editOpen = !this.editOpen;
     if (this.editOpen) this.s.manual = true;
@@ -1914,7 +1951,7 @@ export class Player {
       const auto = this.autoOn();
       const tt = auto ? fmtClock(Math.ceil(Math.max(0, this.stepSeconds(s) - e))) : fmtClock(e);
       if (t.textContent !== tt) t.textContent = tt;
-      const reps = s.target && s.target.reps ? s.target.reps : null;
+      const reps = this.shownNumbers(s).reps || null;
       const pt = c.querySelector('#pace-text');
       const pf = c.querySelector('#pace-fill');
       if (pt && reps) {

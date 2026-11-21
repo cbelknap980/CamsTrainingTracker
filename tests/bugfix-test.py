@@ -152,17 +152,35 @@ with sync_playwright() as p:
 
     check('reached Power clean set 2', go_to('work', 'Power clean') and step2() == at + 2, step2())
     at = step2()
+    pg.click('#more-btn'); pg.wait_for_selector('#modal .menu')
+    menu_items = pg.locator('#modal .menu-item').all_inner_texts()
+    pg.click('#modal .btn.ghost'); pg.wait_for_timeout(60)
+    check('set 2 of a block under way: the menu has no Equipment taken, there is nothing to swap with (it stepped back, dropped the set and then said so)', not any('Equipment taken' in x for x in menu_items) and step2() == at and k2() == 'work', (menu_items, step2(), at))
     pg.click('.player-actions button.btn.primary'); pg.wait_for_timeout(120); pg.click('.player-actions button.btn.primary'); pg.wait_for_timeout(120)
     check('a quick second tap on Done does not skip the rest that comes up under the thumb (it did)', k2() == 'rest' and step2() == at + 1 and secs(pg) >= 80, (k2(), step2(), at, pg.locator('#timer').inner_text()))
     pg.click('#jd-r-minus'); pg.wait_for_timeout(80)
     check('the card corrects set 2 to 1 rep', pg.locator('#jd-r').inner_text().strip() == '1', pg.locator('#jd-r').inner_text())
     pg.click('#more-btn'); pg.locator('.menu-item', has_text='Back one step').click(); pg.wait_for_timeout(100)
     check('Back one step returns to set 2', step2() == at and k2() == 'work', (step2(), k2()))
+    hero_reps = pg.locator('#hero-readout .hl-reps b').inner_text().strip()
+    check('set 2 run again shows the corrected 1 rep, what it will log (it showed the planned 2 and logged 1)', hero_reps == '1', hero_reps)
     for _ in range(120):
         if step2() != at: break
         run(1)
     check('set 2 run again and ended by its timer keeps the corrected 1 rep (it went back to the planned 2)', step2() == at + 1 and pg.locator('#jd-r').inner_text().strip() == '1' and pg.locator('#jd-saved').inner_text() == 'Saved', (step2(), pg.locator('#jd-r').inner_text(), pg.locator('#jd-saved').inner_text()))
 
+    def go_setup(want_name, limit=400):
+        # a screen that waits for Set-up done, with this exercise up next (its name is the first .step-name there)
+        for _ in range(limit):
+            if pg.locator('#confirm-btn').count() and n2() == want_name: return True
+            if k2() in ('timed', 'stretch'): run(secs(pg) + 1)
+            else: main_tap()
+        return False
+    check('reached the set-up before the first dumbbell row set', go_setup('Dumbbell row'))
+    pg.click('#pause-btn'); pg.wait_for_timeout(60)
+    pg.clock.run_for(600 * 1000); pg.wait_for_timeout(60)
+    main_tap()   # Set-up done while still paused
+    pg.click('#pause-btn'); pg.wait_for_timeout(60)
     check('reached the first dumbbell row set', go_to('work', 'Dumbbell row'))
     at = step2()
     cls = pg.locator('#sides').get_attribute('class')
@@ -183,6 +201,8 @@ with sync_playwright() as p:
 
     # ---- what the independent code review found ----
     ip = store("m.getInProgress()")
+    lead = (ip['timeline']['steps'][at].get('record') or {}).get('lead') or {}
+    check('Set-up done tapped during a 10 min pause: the pause is in the set-up record, so at most a minute of it counts (it read as a 5 s set-up)', lead.get('by') == 'tap' and lead.get('tapPaused', 0) >= 595 and lead.get('tap', 0) >= lead.get('tapPaused', 0), lead)
     row_secs = ip['timeline']['steps'][at]['seconds']
     check('review F2: the early Right tap leaves the set its planned 83 s (it was cut to where Right was tapped)', row_secs == 83, row_secs)
     pg.click('#jd-undo'); pg.wait_for_timeout(100)
@@ -193,12 +213,14 @@ with sync_playwright() as p:
     pg.fill('#in-reps', '6')
     pg.locator('.player-actions button', has_text='Hide').click(); pg.wait_for_timeout(60)
     check('Hide keeps the typed reps in the boxes behind it (they were dropped)', pg.locator('#in-reps').input_value() == '6' and not pg.locator('#edit-panel').is_visible(), pg.locator('#in-reps').input_value())
+    hero_reps = pg.locator('#hero-readout .hl-reps b').inner_text().strip()
+    check('and the set screen shows the typed 6 reps the timer will log (it kept showing the planned 8)', hero_reps == '6', hero_reps)
     for _ in range(100):
         if step2() != at: break
         run(1)
     jd_saved = pg.locator('#jd-saved').inner_text() if pg.locator('#jd-saved').count() else ''
     check('after Edit and Hide the set still ends on its timer and logs the typed 6 reps (it sat at 0:00 waiting for Done)', step2() == at + 1 and pg.locator('#jd-r').inner_text().strip() == '6' and jd_saved == 'Logged', (step2(), at, pg.locator('#jd-r').inner_text() if pg.locator('#jd-r').count() else '', jd_saved))
-    check('review F3: with no effort picked it stays marked for a rating', pg.locator('#just-done.unconfirmed').count() == 1)
+    check('review F3: with no effort picked it stays marked for a rating, and no effort is lit on its card (the guess was lit and read as rated)', pg.locator('#just-done.unconfirmed').count() == 1 and pg.locator('#just-done .effort-chip').count() == 4 and pg.locator('#just-done .effort-chip.on').count() == 0)
     pg.click('#jd-r-plus'); pg.wait_for_timeout(80)
     check('review F3: new reps alone leave it marked, the effort is still a guess (a fix used to confirm it)', pg.locator('#jd-r').inner_text().strip() == '7' and pg.locator('#jd-saved').inner_text() == 'Saved' and pg.locator('#just-done.unconfirmed').count() == 1)
 
@@ -207,8 +229,14 @@ with sync_playwright() as p:
     skey = lambda st: f"{st.get('blockId')}|{st.get('exerciseId')}|{st.get('setIndex')}|{st.get('round')}|{st.get('ramp')}"
     targets_of = lambda ip: {skey(st): st.get('target') for st in ip['timeline']['steps'] if st.get('kind') == 'set'}
     t0 = targets_of(store("m.getInProgress()"))
+    curl_secs = store("m.getInProgress()")['timeline']['steps'][curl_at]['seconds']
     pg.locator('.player-actions button', has_text='Edit').click(); pg.wait_for_timeout(60)
-    pg.fill('#in-weight', '35'); main_tap()
+    pg.fill('#in-weight', '35')
+    run(curl_secs + 5)
+    waited = step2() == curl_at
+    pg.locator('.player-actions button', has_text='Hide').click(); pg.wait_for_timeout(60); run(3)
+    check("Hide after the set's time ran out only closes the boxes: the set waits for Done (it was logged the moment Hide was tapped)", waited and step2() == curl_at and k2() == 'work' and not pg.locator('#edit-panel').is_visible(), (waited, step2(), curl_at, k2()))
+    main_tap()
     t_carried = targets_of(store("m.getInProgress()"))
     carried_ok = [t_carried[k]['weight'] for k in t_carried if '|preacher_curl|' in k and not k.endswith('|1|1|False')] == [35, 35]
     pg.click('#swap-btn'); pg.wait_for_selector('.swap-choice[data-kind="later"]')
@@ -236,8 +264,10 @@ with sync_playwright() as p:
     row_card = pg.locator('.review-card', has_text='Dumbbell row')
     check('review F3: Review lists the row set the timer logged, and the row target holds until it is rated (a guessed effort moved targets)', un.count() == 1 and 'Dumbbell row' in un.inner_text() and 'effort not rated' in row_card.inner_text(), (un.inner_text() if un.count() else 'no card', row_card.inner_text()))
     un.locator('.open-item.unchecked', has_text='Dumbbell row').first.click(); pg.wait_for_selector('#edit-set-save')
-    pg.click('#edit-set-save'); pg.wait_for_timeout(80)
-    check('review F3: saving that set with no effort picked asks for the effort (Save kept the guess)', pg.locator('#edit-refused').is_visible() and 'effort' in pg.locator('#edit-refused').inner_text(), pg.locator('#edit-refused').inner_text() if pg.locator('#edit-refused').count() else '')
+    pg.locator('#modal input[inputmode="numeric"]').fill('8'); pg.click('#edit-set-save'); pg.wait_for_timeout(150)
+    un = pg.locator('#review-unchecked')
+    check('review F3: new reps saved there with no effort picked are kept, and the set stays not rated (Save kept the guess, then made him pick one)', pg.locator('#edit-set-save').count() == 0 and un.count() == 1 and '× 8' in un.inner_text() and 'effort not rated' in pg.locator('.review-card', has_text='Dumbbell row').inner_text(), un.inner_text() if un.count() else 'no card')
+    un.locator('.open-item.unchecked', has_text='Dumbbell row').first.click(); pg.wait_for_selector('#edit-set-save')
     pg.locator('#modal .effort-chip[data-key="solid"]').click(); pg.click('#edit-set-save'); pg.wait_for_timeout(200)
     check('review F3: once rated, the row has its normal verdict again', 'effort not rated' not in pg.locator('.review-card', has_text='Dumbbell row').inner_text() and pg.locator('#review-unchecked').count() == 0, pg.locator('.review-card', has_text='Dumbbell row').inner_text())
     pg.evaluate("() => { const b = document.getElementById('save-session'); b.click(); b.click(); }")
@@ -258,6 +288,51 @@ with sync_playwright() as p:
     check('Discard on a review that came back: nothing saved, nothing waiting', len(store("m.getSessions()")) == 2 and store("m.getPendingReview()") is None and pg.locator('#pending-review').count() == 0)
     check('no page errors at 360 x 698', not errors, errors)
     ctx2.close()
+
+    # ---- v1.18.0: the second hands-on test: a PR after a reload, a toast that outlived its screen, a session left open ----
+    print('v1.18.0 second hands-on test, 360 x 698')
+    ctx3 = browser.new_context(viewport={'width': 360, 'height': 698}, reduced_motion='reduce', is_mobile=True, has_touch=True, timezone_id='America/Denver')
+    pg = ctx3.new_page()
+    pg.on('pageerror', lambda e: errors.append(str(e)))
+    pg.add_init_script("window.SpeechSynthesisUtterance = function (t) { this.text = t; }; Object.defineProperty(window, 'speechSynthesis', { value: { cancel() {}, speak() {} }, configurable: true });")
+    pg.clock.install(time=datetime.datetime.fromisoformat('2026-12-04T06:00:00-07:00'))
+    pg.goto(f'http://localhost:{PORT}/'); pg.wait_for_selector('.card.accent h1')
+    pr_targets = dict(TARGETS, power_clean={'weight': 115, 'reps': 2, 'bestE1rm': 110, 'bestWeight': 110})
+    pg.evaluate("([t, s]) => import('./js/store.js').then(async m => { await m.setTargets(t); await m.putSession(s); await m.setPairTotals('none'); await m.saveSettings({ bodyweightLb: 200 }); })", [pr_targets, SESSION])
+    pg.reload(); pg.wait_for_selector('#today-card')
+    store = lambda js: pg.evaluate(f"import('./js/store.js').then(m => {js})")
+    toast_on = lambda: pg.locator('#toast').is_visible()
+    pg.click('#today-card .btn.primary'); pg.wait_for_selector('#start-workout'); pg.click('#start-workout'); pg.wait_for_selector('.player')
+    found = False
+    for _ in range(80):
+        if k2() == 'rest' and pg.locator('#confirm-btn').count() and secs(pg) > 15: found = True; break
+        if k2() in ('timed', 'stretch'): run(secs(pg) + 1)
+        else: main_tap()
+    pg.click('#confirm-btn'); pg.clock.run_for(700); pg.wait_for_timeout(30)
+    said = toast_text()
+    main_tap()   # Skip rest
+    check('a toast about the rest goes when the rest does (It starts when the rest ends stayed over the next screen)', found and 'starts when the rest ends' in said and not toast_on(), (found, said, toast_text()))
+    check('reached Power clean set 1', go_to('work', 'Power clean'))
+    main_tap()
+    pr1 = toast_text()
+    pg.reload(); pg.wait_for_selector('button:has-text("Resume")'); pg.click('button:has-text("Resume")'); pg.wait_for_selector('.player')
+    check('reached Power clean set 2 after a reload', go_to('work', 'Power clean'))
+    main_tap()
+    pr2 = toast_text()
+    prs = store("m.getInProgress()")['prs']
+    check('a PR set, a reload, then the same numbers again: no second PR (it was announced again and listed twice)', 'PR' in pr1 and 'PR' not in pr2 and len(prs) == 1, (pr1, pr2, prs))
+    pg.click('#pause-btn'); pg.wait_for_timeout(60)
+    pg.goto('about:blank'); pg.clock.fast_forward('03:10:00')
+    pg.goto(f'http://localhost:{PORT}/'); pg.wait_for_selector('#view > *'); pg.wait_for_timeout(300)
+    card = pg.locator('#resume-card')
+    check('a session left open for more than 3 hours is offered to save or discard (it was deleted without a word)', card.count() == 1 and 'Unfinished session' in card.inner_text() and card.locator('button', has_text='Resume').count() == 0 and pg.locator('#resume-save').count() == 1, card.inner_text() if card.count() else pg.locator('#view').inner_text()[:200])
+    if pg.locator('#resume-save').count():
+        pg.click('#resume-save'); pg.wait_for_selector('h1:has-text("Review and save")')
+        pend = store("m.getPendingReview()")
+        done = [x for x in (pend or {}).get('sets', []) if x.get('exerciseId') == 'power_clean' and x.get('done') and not x.get('ramp')]
+        check('Save what I did and stop opens the review with the sets that were logged', len(done) == 2, [(x.get('weight'), x.get('reps')) for x in done])
+    check('no page errors in the second hands-on checks', not errors, errors)
+    ctx3.close()
 
     browser.close()
 server.terminate()

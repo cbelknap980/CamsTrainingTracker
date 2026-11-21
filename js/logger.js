@@ -232,7 +232,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
     showModal(el('div', {}, [
       el('h2', {}, `${st.name}${st.setIndex ? ', set ' + st.setIndex : ''}`),
       flag ? el('div', { class: 'num-flag', id: 'num-flag' }, [el('b', {}, 'Check this number. '), `${flag.text}.`]) : null,
-      guess ? el('p', { class: 'muted', id: 'unchecked-note', style: 'margin:0 0 10px' }, 'The timer logged this set before an effort was picked. Change what is off and pick the effort, then save.') : null,
+      guess ? el('p', { class: 'muted', id: 'unchecked-note', style: 'margin:0 0 10px' }, 'The timer logged this set before an effort was picked. Pick the effort so it counts. New numbers alone are saved, and the set stays not rated.') : null,
       el('div', { class: 'grid2' }, [
         isBw ? el('div') : el('div', { class: 'field' }, [el('label', {}, ex && ex.equipment === 'weighted_bw' ? 'Added lb' : (isPair(ex) ? 'Total of both (lb)' : 'Weight')), w]),
         el('div', { class: 'field' }, [el('label', {}, st.holdSeconds ? 'Seconds' : 'Reps'), r])
@@ -250,9 +250,13 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
           // v1.18: reps below 0 or part of a rep are refused; the sheet stays open
           const bad = impossibleNumber(typed, ex, { hold: !!st.holdSeconds });
           if (bad) { refused.textContent = `${bad}.`; refused.hidden = false; return; }
-          // v1.18: the effort on a set the timer logged is a guess, so saving it needs a pick (Save used to keep the guess)
-          if (guess && !picked && !st.holdSeconds) { refused.textContent = 'Pick the effort too, so this set can count.'; refused.hidden = false; return; }
-          st.weight = typed.weight; st.reps = typed.reps; st.rpe = rpe; st.done = true; st.skipped = false; st.skipOk = false; delete st.unconfirmed; closeModal(); paint(); } }, st.skipped ? 'I did it: save' : 'Save')
+          // v1.18: the effort on a set the timer logged is a guess. Without a pick, Save keeps the new numbers and the
+          // set stays not rated (a correction alone is not a rating, as on the workout's last-set card); it used to
+          // confirm the guess, and then refused the numbers until an effort was picked, which pushed him to make one up
+          const rated = !guess || picked || !!st.holdSeconds;
+          st.weight = typed.weight; st.reps = typed.reps; st.done = true; st.skipped = false; st.skipOk = false;
+          if (rated) { st.rpe = rpe; delete st.unconfirmed; }
+          closeModal(); paint(); } }, st.skipped ? 'I did it: save' : 'Save')
       ])
     ]));
   }

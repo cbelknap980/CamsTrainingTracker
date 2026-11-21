@@ -33,6 +33,8 @@ export function toast(msg, ms, opts = {}) {
   t.innerHTML = '';
   t.appendChild(el('span', { class: 'toast-msg' }, msg));
   t.classList.toggle('has-action', !!opts.action);
+  // v1.18: step: about the workout screen it was shown on, so it goes when that screen does (dropStepToast)
+  t.dataset.step = opts.step ? '1' : '';
   if (opts.action) {
     t.appendChild(el('button', { type: 'button', class: 'toast-action', id: 'toast-action', onclick: e => {
       e.stopPropagation(); clearTimeout(toastTimer); t.hidden = true; haptic('undo');
@@ -45,6 +47,8 @@ export function toast(msg, ms, opts = {}) {
   toastTimer = setTimeout(() => { t.hidden = true; if (opts.onExpire) opts.onExpire(); }, ms || (opts.action ? 5000 : 2200));
 }
 export function hideToast() { const t = document.getElementById('toast'); if (t) t.hidden = true; clearTimeout(toastTimer); }
+/** v1.18: hides a toast shown with { step: true } (it stayed over the next workout screen). */
+export function dropStepToast() { const t = document.getElementById('toast'); if (t && !t.hidden && t.dataset.step === '1') hideToast(); }
 
 // ---- v1.14: haptics. A short buzz when a button is pressed (Android Chrome; iPhone web apps cannot vibrate).
 // Follows Settings > "Vibrate when a set or rest ends". ----

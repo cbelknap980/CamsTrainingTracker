@@ -215,6 +215,9 @@ body.computer #topbar { background: var(--bg); }
 .toast { display: flex; align-items: center; gap: 14px; bottom: calc(84px + env(safe-area-inset-bottom)); }
 .toast.has-action { padding: 6px 6px 6px 18px; }
 .toast-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
+/* v1.18: a toast with no button wraps onto a second line instead of being cut ("This session is not saved y…") */
+.toast:not(.has-action) { border-radius: 20px; width: max-content; max-width: min(calc(100vw - 32px), 520px); }
+.toast:not(.has-action) .toast-msg { white-space: normal; max-width: none; overflow: visible; }
 .toast-action { flex: none; min-height: 40px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: inherit; font-weight: 800; cursor: pointer; }
 body.in-session .toast { bottom: calc(24px + env(safe-area-inset-bottom)); }
 
@@ -569,11 +572,9 @@ body[data-kind="ready"] .lead-top.big .timer { font-size: clamp(4.8rem, 27vw, 6.
 .jd-sub { font-size: 0.8rem; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; }
 .jd-sub.wrap { white-space: normal; }
 .player .jd-sub .jd-saved { display: inline; padding: 0; background: none; border-radius: 0; font-size: inherit; font-weight: 750; color: var(--good); animation: none; }
-/* a set the timer logged: the effort is the app's guess, shown as an outline until he taps one */
+/* a set the timer logged: muted until he taps an effort (no effort is lit until then) */
 .just-done.unconfirmed .jd-sub .jd-saved { color: var(--muted); }
 .just-done.unconfirmed .jd-check { background: rgba(255, 255, 255, 0.1); color: var(--muted); }
-.just-done.unconfirmed .effort-chip.on { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 2px var(--eff); }
-.just-done.unconfirmed .effort-chip.on .ec-hint { color: var(--muted); }
 .player .jd-undo { flex: none; min-height: 40px; min-width: 60px; padding: 0 12px; }
 .player .jd-steps { grid-template-columns: 1.3fr 1fr; gap: 8px; margin-top: 6px; }
 .player .jd-steps.one { grid-template-columns: 1fr; }
