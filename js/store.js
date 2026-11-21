@@ -63,6 +63,13 @@ export async function setTarget(exerciseId, target) {
   await setTargets(all);
   return all[exerciseId];
 }
+/** v1.18.1: one target swapped whole (a re-run that drops a field, such as a heavy-start mark, must drop it here too). */
+export async function replaceTarget(exerciseId, target) {
+  const all = await getTargets();
+  all[exerciseId] = { ...target };
+  await setTargets(all);
+  return all[exerciseId];
+}
 
 // ---- sessions ----
 export const putSession = s => tx('sessions', 'readwrite', st => st.put(s)).then(changed);
@@ -211,6 +218,8 @@ export async function importAll(backup, opts = {}) {
     t.objectStore('kv').put(backup.settings || {}, 'settings');
     t.objectStore('kv').delete('inProgress');
     t.objectStore('kv').delete('pendingReview');
+    // v1.18.1: the version that wrote this data, so upgrade.js runs the one-time changes it has not had yet
+    t.objectStore('kv').put(String(backup.appVersion || '0'), 'dataVersion');
     // v1.9: a backup from before check-ins existed leaves them as they are
     if (backup.checkins) t.objectStore('kv').put(backup.checkins, 'checkins');
     if (backup.coachApplied) t.objectStore('kv').put(backup.coachApplied, 'coachApplied');

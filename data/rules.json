@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.8",
+  "rulesVersion": "1.9",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -27,10 +27,12 @@
     "repsFirst": true
   },
   "stall": {
-    "description": "Two consecutive sessions that fail the test: drop 10% and rebuild.",
-    "sessionsBeforeDrop": 2,
-    "dropFraction": 0.1,
-    "message": "Second miss in a row. Check sleep, food and ski load."
+    "description": "v1.18.1 (rules R4, approved by Cameron Nov 20 2026): a flat session falls short of the target reps at the target weight, or makes them with a set rated flatAtRpe or higher (9 = Hard or Maxed, 10 = Maxed only, null = only missed reps count). sessionsBeforeDrop flat sessions in a row take dropFraction off, rounded to the grid and at least one step, never below the empty bar (+0 on the pull-up); resetReps keep = same reps, bottom = bottom of the range. Only a target that moves clears the count. Was 2 sessions and 10% until v1.18.1.",
+    "sessionsBeforeDrop": 3,
+    "dropFraction": 0.05,
+    "flatAtRpe": 9,
+    "resetReps": "keep",
+    "message": "Check sleep, food and ski load."
   },
   "baseline": {
     "weeks": [
@@ -63,7 +65,7 @@
         5
       ],
       "startWeightFactor": 1.05,
-      "description": "Main lifts move to 3-5 reps. First heavy-week target = last 4-6 target plus 5%, rounded to the increment (assumption, editable)."
+      "description": "Main lifts move to 3-5 reps. v1.18.1 (rules R4 rule 7): the first heavy-week session of each main lift starts at the target it had going into the heavy weeks x startWeightFactor (on bodyweight + added weight for the pull-up), rounded to the increment, at 3 reps, whether or not the lighter week was logged; once per lift."
     },
     "retest": {
       "weeks": [
@@ -328,7 +330,7 @@
     }
   },
   "garmin": {
-    "note": "Which Garmin activities become runs in the log. match is tested against Garmin's activity type (lower case). type null means a run: what it counts as is settled for the week by garmin.assign (v1.12). Shorter activities than minMinutes are left out. Location fields never leave Garmin's side: the job in the private repo drops them.",
+    "note": "Which Garmin activities become runs in the log. match is tested against Garmin's activity type (lower case). type null means a run: it lands as an Easy run. v1.18.1 (Cameron, Nov 21: \"make me log it to take credit\"): an activity counts for a planned run only when he taps Count it or picks its type, except a type with countsForPlan (a ski day replaces the long run, as the plan says). Shorter activities than minMinutes are left out. Location fields never leave Garmin's side: the job in the private repo drops them.",
     "types": [
       {
         "match": "run",
@@ -338,7 +340,8 @@
       {
         "match": "ski|snowboard",
         "type": "Ski day",
-        "minMinutes": 30
+        "minMinutes": 30,
+        "countsForPlan": true
       },
       {
         "match": "cycling|biking|rowing",
@@ -349,7 +352,7 @@
     "lookbackDays": 28,
     "checkWaitSeconds": 150,
     "assign": {
-      "note": "v1.12: which planned run a Garmin run counts as, whatever day it was. Clear signs first: an interval-looking run takes the intervals, a run at least as long as this week's long-run target (or longMinutes) takes the long run. Then in date order: a planned run's own day, the intervals while open (intervalMinMinutes to intervalMaxMinutes), the long run if at least longOffDayShare of the target, otherwise Easy run. A type Cameron taps is never changed.",
+      "note": "v1.18.1: no longer picks a planned run for a Garmin run (it took the intervals for an easy run on Nov 18). These only mark a run that looked like intervals (intervalLike on the record): Garmin's training-effect label, its anaerobic effect, or max speed against average.",
       "intervalLabels": [
         "VO2MAX",
         "ANAEROBIC_CAPACITY",
@@ -357,12 +360,7 @@
         "LACTATE_THRESHOLD"
       ],
       "anaerobicEffectAtLeast": 2.0,
-      "speedRatioAtLeast": 1.45,
-      "longMinutes": 50,
-      "longOnDayShare": 0.6,
-      "longOffDayShare": 0.85,
-      "intervalMinMinutes": 15,
-      "intervalMaxMinutes": 50
+      "speedRatioAtLeast": 1.45
     }
   },
   "weekRings": {

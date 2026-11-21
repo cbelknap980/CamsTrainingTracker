@@ -722,3 +722,15 @@ body.in-session .toast-msg { white-space: normal; overflow: visible; max-width: 
 
 /* v1.18: a review that came back after a reload can be thrown away; quiet, below Save */
 .btn.ghost.danger-text { color: var(--bad); }
+
+/* v1.18.1: a set the timer logged can be rated after Save (summary, a session in Progress) */
+.rate-btn { min-height: 34px; padding: 4px 14px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: inherit; font-size: var(--t-small); font-weight: 800; cursor: pointer; }
+.rate-sheet .effort-chips { margin-top: 4px; }
+/* v1.18.1: a Garmin run counts for a planned run only after Count it (Runs tab, Home, the run sheet) */
+.count-it { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.count-it-head { margin: 0 0 6px; font-size: var(--t-small); color: var(--muted); }
+.count-it-row { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: var(--t-small); }
+.count-it-row:first-of-type { border-top: 0; }
+.count-it-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.count-it-row .btn.small { flex: none; }
+#run-count-it .btn-row { justify-content: flex-start; flex-wrap: wrap; }

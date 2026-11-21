@@ -2,6 +2,7 @@
 // Pure functions, no DOM, no storage. Tested in tests/builder.test.mjs.
 
 import { effortText, effortToRpe, roundTo, equipmentFor } from './data.js';
+import { effectiveTarget } from './progression.js';
 
 /**
  * v1.9: coach check-ins move rest times in small steps. restAdjust = { exerciseId | 'session:<id>': seconds }.
@@ -131,7 +132,8 @@ function repRangeFor(ctx, item, ex) {
 }
 
 function targetFor(ctx, exerciseId, repRange) {
-  const t = ctx.targets[exerciseId];
+  // v1.18.1 (rules R4 rule 7): a main lift's first heavy-week session shows its heavy start (5% over, 3 reps)
+  const t = effectiveTarget({ rules: ctx.rules, plan: ctx.plan, settings: ctx.settings, exerciseId, target: ctx.targets[exerciseId], phaseId: ctx.phase.id });
   let weight = t && t.weight != null ? t.weight : null;
   let reps = t && t.reps != null ? t.reps : (repRange ? repRange[0] : null);
   if (repRange && reps != null) reps = Math.min(Math.max(reps, repRange[0]), repRange[1]);

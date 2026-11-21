@@ -44,6 +44,9 @@ export async function saveSession(draft, { plan, rules, overrides }) {
   record.whatChanged = result.lines;
   record.e1rms = result.e1rms;
   record.prs = result.prs || [];
+  // v1.18.1 (rules R4, rule 12): each lift's target and flat count going in, so a later correction or rating re-runs
+  // the session from there (sanity.js rerunLift)
+  record.targetsBefore = result.before || {};
   await setTargets(result.targets);
   await putSession(record);
   return record;
@@ -151,7 +154,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
 
     // v1.18: sets whose timer ran out before an effort was picked. Nobody confirmed them, so they are listed here.
     // Saving does not wait for them, but a lift saved with one unrated keeps its target for the next session (rules R4,
-    // rule 1). This page is the only place to rate them: a saved session has no rating control.
+    // rule 1). v1.18.1: they can be rated after Save too, on the summary or the session in Progress.
     const unchecked = record.sets.filter(st => isUnchecked(st) && !open.some(x => x.st === st));
     if (unchecked.length) {
       const one = unchecked.length === 1;
@@ -263,7 +266,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
   await paint();
 }
 
-export function renderSummary(container, record, { onDone, onBackup, prev, rings, syncOn } = {}) {
+export function renderSummary(container, record, { onDone, onBackup, prev, rings, syncOn, onRate } = {}) {
   container.innerHTML = '';
   const n = sessionNumbers(record, prev);
   const { done, planned } = n;
@@ -297,7 +300,8 @@ export function renderSummary(container, record, { onDone, onBackup, prev, rings
   ]) : null;
   const changes = el('div', { class: 'card' }, [
     el('h2', {}, 'What changed for next time'),
-    record.whatChanged.length ? el('ul', { class: 'lines' }, record.whatChanged.map(l => el('li', {}, l.text))) : el('p', { class: 'muted' }, 'Nothing logged, nothing changed.')
+    record.whatChanged.length ? el('ul', { class: 'lines' }, record.whatChanged.map(l => el('li', {}, l.text))) : el('p', { class: 'muted' }, 'Nothing logged, nothing changed.'),
+    rateUnratedButton(record.sets, onRate)
   ]);
   const e1 = Object.entries(record.e1rms || {});
   const bench = e1.length ? el('div', { class: 'card' }, [
@@ -306,7 +310,7 @@ export function renderSummary(container, record, { onDone, onBackup, prev, rings
   ]) : null;
   const sets = el('div', { class: 'card' }, [
     el('h2', {}, 'Sets'),
-    setsTable(record.sets)
+    setsTable(record.sets, { onRate })
   ]);
   const saveImage = el('button', { class: 'btn', id: 'save-image', onclick: async () => {
     saveImage.disabled = true;
@@ -326,14 +330,31 @@ export function renderSummary(container, record, { onDone, onBackup, prev, rings
   container.append(stats, prs || '', actions, changes, bench || '', sets);
 }
 
-export function setsTable(sets) {
-  const rows = sets.filter(s => !s.ramp).map(s => el('tr', {}, [
+/**
+ * The sets of a saved session. v1.18.1: with onRate, a set the timer logged without an effort gets a Rate button
+ * (onRate(index) with its index in `sets`), so it can be rated after Save.
+ */
+export function setsTable(sets, { onRate } = {}) {
+  const rows = sets.map((s, i) => [s, i]).filter(([s]) => !s.ramp).map(([s, i]) => el('tr', {}, [
     el('td', {}, [`${s.name}${s.baseline ? ' (baseline)' : ''}${s.retest ? ' (retest)' : ''}`, s.pr && s.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null]),
     el('td', { class: 'num' }, s.setIndex != null ? (s.round ? `R${s.round}` : `${s.setIndex || ''}`) : ''),
     el('td', { class: 'num' }, s.skipped ? 'skipped' : `${s.weight != null ? weightWithPair(getData().plan.exercises[s.exerciseId], s.weight) : (s.holdSeconds ? '' : 'bw')} × ${s.reps != null ? s.reps : '?'}${s.holdSeconds ? ' s' : ''}`),
-    el('td', { class: 'num' + (isUnchecked(s) ? ' muted' : '') }, isUnchecked(s) ? 'not rated' : (s.rpe != null && !s.skipped ? effortLabel(getData().rules, s.rpe) : ''))
+    isUnchecked(s) && onRate
+      ? el('td', { class: 'num' }, el('button', { type: 'button', class: 'rate-btn', 'data-i': String(i), 'aria-label': `Rate ${s.name}${s.setIndex ? ', set ' + s.setIndex : ''}`, onclick: () => onRate(i) }, 'Rate'))
+      : el('td', { class: 'num' + (isUnchecked(s) ? ' muted' : '') }, isUnchecked(s) ? 'not rated' : (s.rpe != null && !s.skipped ? effortLabel(getData().rules, s.rpe) : ''))
   ]));
   return el('table', {}, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Set'), el('th', { class: 'num' }, 'Weight × reps'), el('th', { class: 'num' }, 'Effort')]), ...rows]);
+}
+
+/**
+ * v1.18.1: under What changed on a saved session, a button for the sets the timer logged without an effort
+ * (it opens the first one; onRate(index) as in setsTable). Null when every set is rated.
+ */
+export function rateUnratedButton(sets, onRate) {
+  const idx = (sets || []).map((s, i) => (isUnchecked(s) ? i : -1)).filter(i => i >= 0);
+  if (!onRate || !idx.length) return null;
+  return el('button', { type: 'button', class: 'btn small', id: 'rate-unrated', style: 'margin-top:10px', onclick: () => onRate(idx[0]) },
+    idx.length === 1 ? 'Rate the set the timer logged' : `Rate the ${idx.length} sets the timer logged`);
 }
 
 // ---- pace as m:ss per mile ----

@@ -62,6 +62,53 @@ export function planRunForType(plan, type) {
   return (plan.runs || []).find(r => r.type === type) || (plan.runs || []).find(r => (r.alsoCounts || []).includes(type)) || null;
 }
 
+/**
+ * v1.18.1 (Cameron, Nov 21: "Maybe make me log it to take credit"): an activity that came in from Garmin counts toward
+ * miles but for no planned run until he says which one it was (Count it, or its type on the run sheet). A ski day is
+ * the exception the plan makes: it counts for the long run by itself (rules.garmin.types[].countsForPlan).
+ */
+export function needsCredit(r) {
+  return !!r && String(r.id || '').startsWith('garmin-') && !r.typeLocked && !r.planId;
+}
+
+/** v1.18.1: does logged run r count for planned run `run`? Its planId says so; a run logged by hand may go by its type. */
+export function countsFor(plan, r, run) {
+  if (!r || !run) return false;
+  if (r.planId) return r.planId === run.id;
+  if (needsCredit(r)) return false;
+  return planRunForType(plan, r.type) === run;
+}
+
+/** v1.18.1: the planned runs a Garmin activity of this type could be counted as (an easy run: either one). */
+export function creditOptions(plan, r) {
+  if (!r) return [];
+  if (r.type === 'Easy run') return [...(plan.runs || [])];
+  return (plan.runs || []).filter(run => run.type === r.type || (run.alsoCounts || []).includes(r.type));
+}
+
+/** v1.18.1: the record of Cameron's tap: this activity was that planned run (a bike or rower session stays one). */
+export function countAs(r, run) {
+  const type = r.type !== 'Easy run' && (run.alsoCounts || []).includes(r.type) ? r.type : run.type;
+  return { ...r, type, planId: run.id, typeLocked: true, autoType: false, autoWhy: null };
+}
+
+/**
+ * v1.18.1: his other answer, Side run: the activity was a run on the side ("just a secondary run", Nov 21). It keeps
+ * counting toward miles, counts for no planned run and is not asked about again (a bike or rower session keeps its type).
+ */
+export function keepAsSide(r) {
+  return { ...r, type: r.type || 'Easy run', planId: null, typeLocked: true, autoType: false, autoWhy: null };
+}
+
+/**
+ * v1.18.1: this week's Garmin activities waiting for his tap that could be this planned run, oldest first.
+ * `runs` = every logged run; `range` = { start, end } ISO dates of the week.
+ */
+export function countCandidates(plan, runs, run, { start, end }) {
+  return (runs || []).filter(r => r.date >= start && r.date <= end && needsCredit(r) && creditOptions(plan, r).some(x => x.id === run.id))
+    .sort((a, b) => (`${a.date} ${a.startTime || ''}` < `${b.date} ${b.startTime || ''}` ? -1 : 1));
+}
+
 const isLong = (run, r) => r.type === run.type || r.planId === run.id && !(run.alsoCounts || []).includes(r.type);
 
 /** Long run: the distance to aim for next, one step past the longest one done so far, up to the cap. */
@@ -112,7 +159,7 @@ export function weekRuns({ plan, settings, runs, week, today }) {
     const date = toISODate(d);
     const weekend = /weekend/i.test(run.day || '');
     const lastDay = weekend ? end : date;
-    const hit = inWeek.filter(r => r.planId === run.id || (!r.planId && planRunForType(plan, r.type) === run)).sort((a, b) => (a.date < b.date ? -1 : 1))[0] || null;
+    const hit = inWeek.filter(r => countsFor(plan, r, run)).sort((a, b) => (a.date < b.date ? -1 : 1))[0] || null;
     const status = hit ? 'done' : (todayIso >= date && todayIso <= lastDay ? 'today' : (todayIso > lastDay ? 'open' : 'later'));
     return { id: run.id, name: run.name, short: run.name.includes(': ') ? run.name.split(': ')[1] : run.name, day: run.day, date, type: run.type, plan: prescription(run, week, before), status, run: hit };
   });
@@ -177,7 +224,7 @@ export function garminToRun(a, { rules }) {
   const cadence = num(pick(a, 'averageRunningCadenceInStepsPerMinute', 'averageRunCadenceInStepsPerMinute', 'summaryDTO.averageRunCadence'));
   return {
     id: `garmin-${id}`, garminId: String(id), source: 'garmin', date: when.date, startTime: when.time,
-    type: rule.type || null, guess: !rule.type, garminType: kind, name: pick(a, 'activityName', 'summaryDTO.activityName') || '',
+    type: rule.type || null, guess: !rule.type, countsForPlan: !!rule.countsForPlan, garminType: kind, name: pick(a, 'activityName', 'summaryDTO.activityName') || '',
     distance, minutes, pace: paceOf(distance, minutes),
     hr: num(pick(a, 'averageHR', 'averageHeartRateInBeatsPerMinute', 'summaryDTO.averageHR')),
     maxHr: num(pick(a, 'maxHR', 'maxHeartRateInBeatsPerMinute', 'summaryDTO.maxHR')),
@@ -208,8 +255,9 @@ const MEASURED = ['date', 'startTime', 'distance', 'minutes', 'pace', 'hr', 'max
  * Work out what the log needs from a Garmin file.
  * - an activity already in the log has its measured numbers refreshed (type, effort and notes stay as Cameron set them)
  * - a run typed in by hand on the same day takes the activity's numbers instead of being logged twice
- * - anything else is a new run. v1.12: what it counts as is settled for the whole week by settleWeek, so a run on
- *   an off day takes the planned run it most likely is. Ski days and bike or rower sessions keep the type rules.garmin gives them.
+ * - anything else is a new run. v1.18.1: a run lands as an Easy run and counts for no planned run until Cameron taps
+ *   Count it (it used to take the planned run it most likely was, and took the intervals for an easy run on Nov 18).
+ *   Ski days and bike or rower sessions keep the type rules.garmin gives them; only a ski day counts by itself.
  * `ignored` = Garmin ids Cameron deleted; they stay out.
  * returns { put: [run records to save], added, updated, seen }
  */
@@ -242,9 +290,11 @@ export function mergeGarmin(runs, activities, { plan, rules, settings, ignored =
       continue;
     }
     const type = g.guess ? 'Easy run' : g.type;
-    const planRun = planRunForType(plan, type);
+    // v1.18.1: a run, or a bike or rower session, waits for Cameron's tap; a ski day counts for the long run by itself
+    const planRun = g.countsForPlan ? planRunForType(plan, type) : null;
     const rec = { ...g, type, planId: planRun ? planRun.id : null, week, rpe: null, notes: '', appVersion, autoType: !!g.guess };
-    delete rec.guess;
+    if (g.guess) rec.autoWhy = WHY.garmin;
+    delete rec.guess; delete rec.countsForPlan;
     all.push(rec); put.set(rec.id, rec); added += 1;
   }
   const weeks = [...new Set(all.filter(isAuto).map(r => r.week || weekNumber(parseISODate(r.date), settings.startDate)))];
@@ -252,7 +302,7 @@ export function mergeGarmin(runs, activities, { plan, rules, settings, ignored =
   return { put: [...put.values()], added, updated, seen };
 }
 
-// ---- v1.12: which planned run each run counts as ----
+// ---- v1.12: which planned run each run counts as (v1.18.1: only the one Cameron taps) ----
 
 /**
  * A run whose type the app chose and may change again: a Garmin run Cameron has not re-typed. A run logged by hand,
@@ -266,65 +316,36 @@ export function isAuto(r) {
 }
 
 const WHY = {
-  signal: 'it looked like intervals',
-  long: 'it was long enough for the long run',
-  day: 'it was on that run\'s day',
-  open: 'the week\'s intervals were still open',
-  offLong: 'it was close to the long-run distance',
-  full: 'both planned runs were already done'
+  garmin: 'a run from Garmin counts for a planned run only when you say which one it was'
 };
 
 /**
- * Settle what every automatic run in a week counts as, given the runs that are fixed. Runs with a clear sign go first
- * (looked like intervals; long enough for the long run), then the rest in date order:
- *   on a planned run's own day (Tuesday intervals; Saturday or Sunday long run, if it is at least longOnDayShare of the target)
- *   -> the intervals while they are open (most off-day runs replace a planned run; the plan has two a week)
- *   -> the long run if it is at least longOffDayShare of the target -> otherwise Easy run.
- * Numbers are in rules.garmin.assign. Returns the records whose type, planId or reason changed (edited in place).
+ * v1.18.1: every automatic run in a week is an Easy run that counts for no planned run (Cameron, Nov 21: "dont
+ * automatically count the Garmin run as intervals ... Maybe make me log it to take credit"). Until v1.18.0 this
+ * guessed the planned run from the day, the distance and Garmin's interval signs. Runs he typed or counted stay as
+ * they are. Returns the records that changed (edited in place).
  */
-export function settleWeek(all, week, { plan, rules, settings }) {
-  const cfg = (rules && rules.garmin && rules.garmin.assign) || {};
+export function settleWeek(all, week, { rules, settings }) {
   const { start, end } = weekRange(settings, week);
-  const inWeek = all.filter(r => r.date >= start && r.date <= end);
-  const auto = inWeek.filter(isAuto).sort((a, b) => (`${a.date} ${a.startTime || ''}` < `${b.date} ${b.startTime || ''}` ? -1 : 1));
-  if (!auto.length) return [];
-  const [intervals, long] = [(plan.runs || []).find(r => r.intervals), (plan.runs || []).find(r => r.distance)];
-  const taken = new Set(inWeek.filter(r => !isAuto(r)).map(r => r.planId || (planRunForType(plan, r.type) || {}).id).filter(Boolean));
-  const target = long ? longRunTarget(long, all.filter(r => r.date < start)).miles : null;
-  const dayOf = run => Number(Object.keys(plan.calendar || {}).find(k => plan.calendar[k] === run.id));
-  const isWeekend = d => d === 0 || d === 6;
-  const longEnough = (r, share) => !!(target && ((r.distance || 0) >= share * target));
-  const pickFor = {};
-  const give = (r, run, why) => { pickFor[r.id] = { run, why }; if (run) taken.add(run.id); };
-  const open = run => run && !taken.has(run.id);
-  // first pass: clear signs
-  for (const r of auto) {
-    if (r.intervalLike === true && open(intervals)) give(r, intervals, 'signal');
-    else if (r.intervalLike !== true && open(long) && (longEnough(r, 1) || (r.minutes || 0) >= (cfg.longMinutes || 999))) give(r, long, 'long');
+  return all.filter(x => x.date >= start && x.date <= end && settleRun(x, rules));
+}
+
+/**
+ * v1.18.1: one Garmin activity put right: an automatic run becomes an Easy run for no planned run; a bike or rower
+ * session the old app counted by itself loses that credit (a ski day keeps it). A type he chose is never touched.
+ * Returns true when it changed (edited in place). Also the one-time upgrade of runs saved before v1.18.1.
+ */
+export function settleRun(r, rules) {
+  if (!r || r.typeLocked) return false;
+  if (isAuto(r)) {
+    if (r.type === 'Easy run' && (r.planId || null) === null && r.autoWhy === WHY.garmin && r.autoType === true) return false;
+    Object.assign(r, { type: 'Easy run', planId: null, autoWhy: WHY.garmin, autoType: true });
+    return true;
   }
-  // second pass: the rest, in date order
-  for (const r of auto) {
-    if (pickFor[r.id]) continue;
-    const dow = parseISODate(r.date).getDay();
-    const mins = r.minutes || 0;
-    if (open(intervals) && dow === dayOf(intervals) && mins >= (cfg.intervalMinMinutes || 0)) give(r, intervals, 'day');
-    else if (open(long) && (/weekend/i.test(long.day || '') ? isWeekend(dow) : dow === dayOf(long)) && (longEnough(r, cfg.longOnDayShare || 0) || !r.distance)) give(r, long, 'day');
-    else if (open(intervals) && mins >= (cfg.intervalMinMinutes || 0) && mins <= (cfg.intervalMaxMinutes || 999)) give(r, intervals, 'open');
-    else if (open(long) && longEnough(r, cfg.longOffDayShare || 1)) give(r, long, 'offLong');
-    else give(r, null, 'full');
-  }
-  const changed = [];
-  for (const r of auto) {
-    const { run, why } = pickFor[r.id];
-    const type = run ? run.type : 'Easy run';
-    const planId = run ? run.id : null;
-    const reason = run ? WHY[why] : (taken.size >= (plan.runs || []).length ? WHY.full : 'it did not fit a planned run');
-    if (r.type !== type || (r.planId || null) !== planId || r.autoWhy !== reason || r.autoType !== true) {
-      Object.assign(r, { type, planId, autoWhy: reason, autoType: true });
-      changed.push(r);
-    }
-  }
-  return changed;
+  // a type from rules.garmin (not his), with credit the old app gave by itself
+  const rule = rules && rules.garmin && String(r.id || '').startsWith('garmin-') && r.autoType === false ? (rules.garmin.types || []).find(t => t.type && t.type === r.type) : null;
+  if (rule && !rule.countsForPlan && r.planId) { r.planId = null; return true; }
+  return false;
 }
 
 /**

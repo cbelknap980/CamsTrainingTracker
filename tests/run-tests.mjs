@@ -1,22 +1,24 @@
 // Node tests for the Session Builder and Progression Engine. Run: node tests/run-tests.mjs
 import { readFileSync } from 'node:fs';
 import { buildTimeline, trimToFit, remainingSeconds, lastResults, setTiming } from '../js/builder.js';
-import { applyProgression, epley, checkPR, estimateStart } from '../js/progression.js';
+import { applyProgression, epley, checkPR, estimateStart, effectiveTarget, flatWords } from '../js/progression.js';
 import { effortPlain, effortLevel, spokenDuration } from '../js/data.js';
 import { weekOwed, owedSetsFor, owedLines, buildCatchUpSession, slackDays, plannedDay } from '../js/catchup.js';
 import { parseRepo, toBase64, fromBase64, setupLink, readSetupLink, explainStatus } from '../js/sync.js';
 import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks, muscleSets } from '../js/progress.js';
 import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../js/coach.js';
 import { applyRestAdjust } from '../js/builder.js';
-import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays } from '../js/runs.js';
+import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays, needsCredit, countsFor, creditOptions, countAs, keepAsSide, countCandidates, weekRange, countsMiles } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
-import { numberFlag, flaggedGroups, applyNumberFix, impossibleNumber } from '../js/sanity.js';
+import { numberFlag, flaggedGroups, applyNumberFix, rateSavedSet, rerunLift, impossibleNumber } from '../js/sanity.js';
 // v1.18
 import { leadIns, setupSecondsFor, repSecondsFor } from '../js/builder.js';
 import { pacingConfig, setObservation, setupObservation, learnRep, learnSetup, learnPacing, pacingLines } from '../js/pacing.js';
 import { runAdherence, runSummary } from '../js/progress.js';
 import { gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from '../js/logger.js';
 import { Player, fmtGym, speakable } from '../js/player.js';
+// v1.18.1
+import { upgrade1181, olderThan } from '../js/upgrade.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -134,12 +136,19 @@ check('main lift pass -> +5 lb, reps to bottom', r.targets.back_squat.weight ===
 // press increments 2.5
 r = applyProgression({ session: mkSession(3, [ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6])]), targets: { strict_press: { weight: 95, reps: 6 } }, rules, plan, settings });
 check('press pass -> +2.5 lb', r.targets.strict_press.weight === 97.5, r.targets.strict_press);
-// main lift miss, nudge reps
+// v1.18.1 (rules R4): every set made the target's 4 reps, short of the top: same weight, one more rep, not a flat session
 r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 5, 8, [4, 6]), ws('back_squat', 185, 4, 8, [4, 6]), ws('back_squat', 185, 4, 8, [4, 6])]), targets: { back_squat: { weight: 185, reps: 4, stall: 0 } }, rules, plan, settings });
-check('main lift miss -> same weight, reps 5, stall 1', r.targets.back_squat.weight === 185 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 1, r.targets.back_squat);
-// second miss -> drop 10%
+check('v1.18.1 R4: target reps made short of the top -> same weight, reps 5, flat count 0', r.targets.back_squat.weight === 185 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 0, r.targets.back_squat);
+// v1.18.1 (R4): short of the target reps is a flat session; the third in a row takes 5% off
 r = applyProgression({ session: mkSession(4, [ws('back_squat', 185, 4, 9, [4, 6]), ws('back_squat', 185, 4, 9, [4, 6]), ws('back_squat', 185, 3, 10, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 1 } }, rules, plan, settings });
-check('second miss -> 165 (down 10%), stall reset', r.targets.back_squat.weight === 165 && r.targets.back_squat.stall === 0, r.targets.back_squat);
+check('v1.18.1 R4: second flat session in a row -> same target, count 2 of 3', r.targets.back_squat.weight === 185 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 2 && /2 of 3/.test(r.lines[0].text), [r.targets.back_squat, r.lines[0].text]);
+r = applyProgression({ session: mkSession(5, [ws('back_squat', 185, 4, 9, [4, 6]), ws('back_squat', 185, 4, 9, [4, 6]), ws('back_squat', 185, 3, 10, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 2 } }, rules, plan, settings });
+check('v1.18.1 R4: third flat session -> 175 x 5 (5% off, rounded to 5 lb), count back to 0, says why', r.targets.back_squat.weight === 175 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 0 && r.lines[0].verdict === 'drop' && /3 flat sessions in a row/.test(r.lines[0].text), [r.targets.back_squat, r.lines[0]]);
+r = applyProgression({ session: mkSession(5, [ws('strict_press', 45, 4, 9, [4, 6]), ws('strict_press', 45, 4, 9, [4, 6]), ws('strict_press', 45, 3, 10, [4, 6])]), targets: { strict_press: { weight: 45, reps: 5, stall: 2 } }, rules, plan, settings });
+check('v1.18.1 R4 rule 4: a reset stops at the empty bar (45 lb) and the reps go to the bottom of the range', r.targets.strict_press.weight === 45 && r.targets.strict_press.reps === 4 && r.targets.strict_press.stall === 0, r.targets.strict_press);
+r = applyProgression({ session: mkSession(4, [ws('back_squat', 185, 5, 9, [4, 6]), ws('back_squat', 185, 5, 9, [4, 6]), ws('back_squat', 185, 5, 9, [4, 6])]), targets: { back_squat: { weight: 185, reps: 5, stall: 0 } }, rules, plan, settings });
+check('v1.18.1 R4: target reps made but a set rated Hard (RPE 9) to make them is flat too', r.targets.back_squat.weight === 185 && r.targets.back_squat.stall === 1, r.targets.back_squat);
+check('v1.18.1 flat words read from the rules', /Three flat sessions in a row/.test(flatWords(rules)) && /5%/.test(flatWords(rules)), flatWords(rules));
 // v1.18 (rules R4, rule 1): a set the timer logged before an effort was picked does not move the target or the count
 {
   const un = { unconfirmed: true };
@@ -175,7 +184,24 @@ r = applyProgression({ session: mkSession(6, [ws('back_squat', 190, 6, 8, [4, 6]
 check('week 6 pass -> 195 (no heavy switch yet, week 7 is light)', r.targets.back_squat.weight === 195, r.targets.back_squat);
 // power clean excluded
 r = applyProgression({ session: mkSession(3, [ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2])]), targets: { power_clean: { weight: 135, reps: 2 } }, rules, plan, settings });
-check('power clean not auto-progressed', r.targets.power_clean.weight === 135 && /Not auto-progressed/.test(r.lines[0].text), r.lines[0]);
+check('v1.18.1 R4 rule 9: the power clean follows its doubles and is never raised by the app', r.targets.power_clean.weight === 135 && /never raises the clean/.test(r.lines[0].text), r.lines[0]);
+r = applyProgression({ session: mkSession(1, [ws('power_clean', 155, 2, 8, [2, 2], { baseline: true }), ws('power_clean', 155, 2, 7, [2, 2])]), targets: {}, rules, plan, settings });
+check('v1.18.1 R4 rule 9: a clean baseline of 155 is the target itself (no 90%)', r.targets.power_clean.weight === 155 && /That is the target/.test(r.lines[0].text), [r.targets.power_clean, r.lines[0].text]);
+// v1.18.1 (R4 rule 7): the first heavy-week session of a main lift starts 5% over, at 3 reps, once
+{
+  const shown = (week, t) => buildTimeline({ plan, rules, settings, sessionId: 'lift1', week, targets: { back_squat: t } }).steps.find(s => s.exerciseId === 'back_squat' && s.kind === 'set' && !s.ramp).target;
+  const w8 = shown(8, { weight: 185, reps: 5, stall: 2 });
+  check('v1.18.1 R4 rule 7: week 8 shows the heavy start, 195 x 3 for a 185 x 5 target', w8.weight === 195 && w8.reps === 3, w8);
+  const sets8 = [1, 2, 3, 4].map(() => ws('back_squat', 195, 3, 8, [3, 5]));
+  const h = applyProgression({ session: mkSession(8, sets8), targets: { back_squat: { weight: 185, reps: 5, stall: 2 } }, rules, plan, settings });
+  check('v1.18.1 R4 rule 7: that session is read against 195 x 3: next 195 x 4, count 0, marked so it is not applied again', h.targets.back_squat.weight === 195 && h.targets.back_squat.reps === 4 && h.targets.back_squat.stall === 0 && h.targets.back_squat.heavyStart && h.targets.back_squat.heavyStart.week === 8 && h.targets.back_squat.heavyStart.from.weight === 185, h.targets.back_squat);
+  const w9 = shown(9, h.targets.back_squat);
+  check('v1.18.1 R4 rule 7: week 9 shows 195 x 4 (no second 5%)', w9.weight === 195 && w9.reps === 4, w9);
+  const eff = effectiveTarget({ rules, plan, settings, exerciseId: 'power_clean', target: { weight: 155, reps: 2 }, phaseId: 'heavy' });
+  check('v1.18.1 R4 rule 7: never on the clean', eff.weight === 155, eff);
+  check('v1.18.1 R4 rule 12: the engine hands back each lift\'s target going in (null when it had none)', h.before.back_squat.weight === 185 && h.before.back_squat.stall === 2 && !h.before.back_squat.heavyStart
+    && applyProgression({ session: mkSession(3, [ws('rdl', 155, 6, 8, [6, 8])]), targets: {}, rules, plan, settings }).before.rdl === null, h.before);
+}
 // weighted pull-up e1RM includes bodyweight
 r = applyProgression({ session: mkSession(3, [ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6])]), targets: { weighted_pullup: { weight: 25, reps: 6 } }, rules, plan, settings });
 check('pull-up e1RM uses bodyweight (165+25)x1.2 = 228; v1.5 jump is 5 lb', r.e1rms.weighted_pullup === 228 && r.targets.weighted_pullup.weight === 30, { e: r.e1rms, t: r.targets.weighted_pullup });
@@ -343,7 +369,7 @@ console.log('v1.9 muscle groups and coach check-ins');
   const l1 = owed.lifts.find(l => l.id === 'lift1');
   const item = id => l1.blocks.flatMap(b => b.items).find(i => i.exerciseId === id);
   check('v1.8 owed: skipped sets are counted per exercise, ramp-ups are not', l1.sets === 6 && item('rdl').sets === 1 && item('calf_raise').sets === 3 && item('curl').sets === 1 && item('oh_tri_ext').sets === 1 && !item('back_squat'), l1);
-  check('v1.8 owed: knows which exercises the session already logged', item('rdl').hadDone && item('rdl').undoStall && !item('calf_raise').hadDone);
+  check('v1.8 owed: knows which exercises the session already logged (v1.18.1: no undoStall)', item('rdl').hadDone && !('undoStall' in item('rdl')) && !item('calf_raise').hadDone);
   check('v1.8 owed: a lift whose day passed with nothing logged is missed; a later one is not', owed.missed.join() === 'lift2' && owed.lifts.find(l => l.id === 'lift2').day === 'Wednesday' && !owed.lifts.some(l => l.id === 'lift3'), owed.missed);
   check('v1.8 owed: other weeks owe nothing', weekOwed({ plan, sessions: [lift1], week: 4, today: new Date(2026, 11, 7, 8) }).totalSets === 0);
   check('v1.8 Slack days come from the calendar', slackDays(plan).join() === 'Thursday,Sunday' && plannedDay(plan, 'lift3').name === 'Friday', slackDays(plan));
@@ -372,7 +398,7 @@ console.log('v1.9 muscle groups and coach check-ins');
   check('v1.8 made-up sets come off the list; one skipped again stays', after.lifts.find(l => l.id === 'lift1').sets === 1 && owedSetsFor(plan, [lift1, made], 'lift1', 3) === 1, after.lifts.find(l => l.id === 'lift1'));
   const res = applyProgression({ session: made, targets: { rdl: { weight: 150, reps: 7, stall: 1 }, calf_raise: { weight: 140, reps: 10, stall: 0 }, curl: { weight: 50, reps: 11 } }, rules, plan, settings });
   const line = id => res.lines.find(l => l.exerciseId === id);
-  check('v1.8 catch-up sets for a lift already logged do not move its target, and take back the skipped-set miss', res.targets.rdl.weight === 150 && res.targets.rdl.reps === 7 && res.targets.rdl.stall === 0 && line('rdl').reason === 'catch-up sets', [res.targets.rdl, line('rdl')]);
+  check('v1.18.1 catch-up sets for a lift already logged do not move its target or its flat count (R4 rule 11)', res.targets.rdl.weight === 150 && res.targets.rdl.reps === 7 && res.targets.rdl.stall === 1 && line('rdl').reason === 'catch-up sets', [res.targets.rdl, line('rdl')]);
   check('v1.8 an exercise done only on the catch-up day progresses as usual', res.targets.calf_raise.weight > 140 && line('calf_raise').verdict === 'up', [res.targets.calf_raise, line('calf_raise')]);
   const a2 = adherence([lift1, made, { ...made, id: 'c2', sets: [S('oh_tri_ext', 'lift1:finisher')] }], plan, { ...settings, startDate: '2026-11-16' }, thu);
   const a1 = adherence([lift1, made], plan, { ...settings, startDate: '2026-11-16' }, thu);
@@ -443,6 +469,74 @@ console.log('v1.9 muscle groups and coach check-ins');
   check('v1.16 fix keeps a target set by hand after that session', !hand.retargeted && hand.target.weight === 150 && hand.target.source === 'you', hand.target);
 }
 
+// ---- v1.18.1 (rules R4, rule 12): a correction or a late rating re-runs the session from the target it had going in ----
+{
+  const W = (weight, reps, rpe, extra = {}) => ({ exerciseId: 'back_squat', name: 'Back squat', done: true, skipped: false, ramp: false, repRange: [4, 6], weight, reps, rpe, blockId: 'A', ...extra });
+  const mkRec = (id, week, sets, start, phase = 'build') => ({ id, sessionId: 'lift1', week, phase: { id: phase }, date: start.slice(0, 10), startedAt: start, endedAt: start.replace('T17', 'T18'), status: 'complete', sets });
+  // as saveSession stores it: the engine's result, and targetsBefore
+  const save = (rec, targets) => { const res = applyProgression({ session: rec, targets, rules, plan, settings }); rec.targetsBefore = res.before; rec.whatChanged = res.lines; rec.prs = res.prs; return res.targets; };
+
+  // a flat session (count 1 -> 2) saved with a typo, fixed later: the fix must not count the session again (it reset to 175)
+  const t5 = { weight: 185, reps: 5 };
+  const flat = mkRec('f1', 4, [W(185, 4, 9, { target: t5, setIndex: 1 }), W(185, 4, 9, { target: t5, setIndex: 2 }), W(18, 3, 10, { target: t5, setIndex: 3 })], '2026-12-08T17:00:00Z');
+  const after = save(flat, { back_squat: { weight: 185, reps: 5, stall: 1, source: 'engine' } });
+  check('v1.18.1 rule 12: the saved session keeps the target and flat count it had going in', flat.targetsBefore.back_squat.weight === 185 && flat.targetsBefore.back_squat.stall === 1 && after.back_squat.stall === 2, [flat.targetsBefore, after.back_squat]);
+  const fx = applyNumberFix({ sessions: [flat], targets: after, recordId: 'f1', exerciseId: 'back_squat', weights: { 2: 185 }, checked: [2], plan, rules, settings });
+  check('v1.18.1 rule 12: fixing a typo re-runs from count 1, so it stays 185 x 5 at count 2 (it used to reach 3 and take 5% off)', fx.retargeted && fx.target.weight === 185 && fx.target.reps === 5 && fx.target.stall === 2, fx.target);
+  const fx2 = applyNumberFix({ sessions: [fx.record], targets: fx.target, recordId: 'f1', exerciseId: 'back_squat', weights: { 2: 185 }, checked: [2], plan, rules, settings });
+  check('v1.18.1 rule 12: fixing it twice gives the same answer', fx2.target.weight === 185 && fx2.target.stall === 2, fx2.target);
+
+  // week 8: the screen showed the heavy start (195 x 3) for a bare 185 x 5; a typo fix must not add it again (plan thread)
+  const t8 = { weight: 195, reps: 3 };
+  const heavy = mkRec('h8', 8, [W(195, 3, 8, { repRange: [3, 5], target: t8, setIndex: 1 }), W(195, 3, 8, { repRange: [3, 5], target: t8, setIndex: 2 }), W(195, 3, 8, { repRange: [3, 5], target: t8, setIndex: 3 }), W(19, 3, 8, { repRange: [3, 5], target: t8, setIndex: 4 })], '2027-01-05T17:00:00Z', 'heavy');
+  const a8 = save(heavy, { back_squat: { weight: 185, reps: 5, stall: 0, source: 'engine' } });
+  const f8 = applyNumberFix({ sessions: [heavy], targets: a8, recordId: 'h8', exerciseId: 'back_squat', weights: { 3: 195 }, checked: [3], plan, rules, settings });
+  check('v1.18.1 rule 12, week 8: re-run from the bare 185 x 5 applies the heavy start once: 195 x 4, marked', f8.target.weight === 195 && f8.target.reps === 4 && f8.target.stall === 0 && f8.target.heavyStart && f8.target.heavyStart.week === 8, f8.target);
+  const t9 = { weight: 195, reps: 4 };
+  const w9 = mkRec('h9', 9, [W(195, 4, 8, { repRange: [3, 5], target: t9, setIndex: 1 }), W(195, 4, 8, { repRange: [3, 5], target: t9, setIndex: 2 }), W(195, 4, 8, { repRange: [3, 5], target: t9, setIndex: 3 }), W(19, 4, 8, { repRange: [3, 5], target: t9, setIndex: 4 })], '2027-01-12T17:00:00Z', 'heavy');
+  const a9 = save(w9, { back_squat: f8.target });
+  const f9 = applyNumberFix({ sessions: [heavy, w9], targets: a9, recordId: 'h9', exerciseId: 'back_squat', weights: { 3: 195 }, checked: [3], plan, rules, settings });
+  check('v1.18.1 rule 12, week 9: a marked target keeps its mark, no second 5% (195 x 5)', f9.target.weight === 195 && f9.target.reps === 5 && f9.target.heavyStart && f9.target.heavyStart.week === 8, f9.target);
+  const old8 = { ...heavy, id: 'o8', targetsBefore: undefined };
+  const r8 = rerunLift({ record: old8, exerciseId: 'back_squat', plan, rules, settings });
+  check('v1.18.1 rule 12: a session saved before v1.18.1 starts from the target it showed, at count 0, with no second heavy start', r8.going.weight === 195 && r8.going.stall === 0 && r8.target.weight === 195 && r8.target.reps === 3, [r8.going, r8.target]);
+  // a re-run whose result has no heavy-start mark takes it off (the next heavy-week screen applies it again from the fixed target)
+  const t6 = { weight: 185, reps: 5 };
+  const w6 = mkRec('w6', 6, [W(185, 5, 8, { target: t6, setIndex: 1 }), W(185, 5, 8, { target: t6, setIndex: 2 }), W(18, 5, 8, { target: t6, setIndex: 3 })], '2026-12-22T17:00:00Z');
+  const a6 = save(w6, { back_squat: { weight: 185, reps: 5, stall: 0 } });
+  const marked = { ...a6.back_squat, weight: 195, reps: 3, heavyStart: { week: 8, from: { weight: a6.back_squat.weight, reps: a6.back_squat.reps } } };
+  const f6 = applyNumberFix({ sessions: [w6], targets: { back_squat: marked }, recordId: 'w6', exerciseId: 'back_squat', weights: { 2: 185 }, checked: [2], plan, rules, settings });
+  check('v1.18.1 rule 12: a fix to the week-6 session drops the heavy-start mark Home had put on (it comes back from the fixed target)', !f6.target.heavyStart && f6.target.weight === 185 && f6.target.reps === 6, f6.target);
+
+  // rating a set after Save
+  const t6b = { weight: 185, reps: 6 };
+  const un = mkRec('u1', 3, [W(185, 6, 8, { target: t6b, setIndex: 1 }), W(185, 6, 8, { target: t6b, setIndex: 2 }), W(185, 6, 8, { target: t6b, setIndex: 3, unconfirmed: true })], '2026-12-01T17:00:00Z');
+  const au = save(un, { back_squat: { weight: 185, reps: 6, stall: 1, source: 'engine' } });
+  check('v1.18.1 rate after Save: saved unrated, the squat holds at 185 x 6, count 1', au.back_squat.weight === 185 && au.back_squat.stall === 1 && /no effort picked/.test(un.whatChanged[0].text), [au.back_squat, un.whatChanged[0].text]);
+  const rated = rateSavedSet({ sessions: [un], targets: au, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
+  check('v1.18.1 rate after Save: rated Solid, the session counts: 190 x 4, count 0, the line says it was rated later', rated.why === 'latest' && rated.retargeted && rated.target.weight === 190 && rated.target.reps === 4 && rated.target.stall === 0 && !rated.record.sets[2].unconfirmed && rated.record.sets[2].rpe === 8 && /rated after saving/.test(rated.record.whatChanged[0].text) && un.sets[2].unconfirmed === true, [rated.target, rated.record.whatChanged[0]]);
+  const two = mkRec('u2', 3, [W(185, 6, 8, { target: t6b, setIndex: 1 }), W(185, 6, 8, { target: t6b, setIndex: 2, unconfirmed: true }), W(185, 6, 8, { target: t6b, setIndex: 3, unconfirmed: true })], '2026-12-01T17:00:00Z');
+  const a2 = save(two, { back_squat: { weight: 185, reps: 6, stall: 1 } });
+  const one = rateSavedSet({ sessions: [two], targets: a2, recordId: 'u2', index: 1, rpe: 8, plan, rules, settings });
+  check('v1.18.1 rate after Save: one of two rated, the other still holds it (185 x 6, count 1)', one.stillUnrated === 1 && one.target.weight === 185 && one.target.stall === 1 && !/rated after saving/.test(one.record.whatChanged[0].text), [one.target, one.record.whatChanged[0].text]);
+  const both = rateSavedSet({ sessions: [one.record], targets: { back_squat: one.target }, recordId: 'u2', index: 2, rpe: 9, plan, rules, settings });
+  check('v1.18.1 rate after Save: the second rated Hard: every set made 6, but Hard at the top is flat (185 x 6, count 2)', both.stillUnrated === 0 && both.target.weight === 185 && both.target.stall === 2, both.target);
+  const newer = mkRec('u3', 4, [W(190, 4, 8, { target: { weight: 190, reps: 4 }, setIndex: 1 })], '2026-12-08T17:00:00Z');
+  const late = rateSavedSet({ sessions: [newer, un], targets: { back_squat: { weight: 190, reps: 5, stall: 0 } }, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
+  check('v1.18.1 rate after Save: on an older session the rating is kept and the newer target is left alone', late.why === 'later' && !late.retargeted && late.target.weight === 190 && late.target.reps === 5 && late.record.sets[2].rpe === 8, late);
+  const byHand = rateSavedSet({ sessions: [un], targets: { back_squat: { weight: 180, reps: 6, stall: 1, source: 'you', updated: un.endedAt } }, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
+  check('v1.18.1 rate after Save: a next target he typed on Review stays as he typed it', byHand.why === 'hand' && !byHand.retargeted && byHand.target.weight === 180, byHand.target);
+  const byCoach = rateSavedSet({ sessions: [un], targets: { back_squat: { weight: 180, reps: 6, stall: 0, source: 'coach', updated: '2026-12-02T05:00:00.000Z' } }, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
+  check('v1.18.1 rate after Save: a target the coach set after the session stays (the nightly review or a check-in)', byCoach.why === 'coach' && !byCoach.retargeted && byCoach.target.weight === 180 && byCoach.record.sets[2].rpe === 8, byCoach.target);
+  const coachBefore = rateSavedSet({ sessions: [un], targets: { back_squat: { weight: 185, reps: 6, stall: 1, source: 'coach', updated: '2026-11-29T05:00:00.000Z' } }, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
+  check('v1.18.1 rate after Save: a coach target from before the session moves as usual (190 x 4)', coachBefore.why === 'latest' && coachBefore.target.weight === 190 && coachBefore.target.reps === 4, coachBefore.target);
+  const fixCoach = applyNumberFix({ sessions: [w6], targets: { back_squat: { weight: 190, reps: 5, stall: 0, source: 'coach', updated: '2026-12-23T05:00:00.000Z' } }, recordId: 'w6', exerciseId: 'back_squat', weights: { 2: 185 }, checked: [2], plan, rules, settings });
+  check('v1.18.1 number fix: a target the coach set since stays; the session is still corrected', !fixCoach.retargeted && fixCoach.target.weight === 190 && fixCoach.target.reps === 5 && fixCoach.record.sets[2].weight === 185, [fixCoach.target, fixCoach.record.sets[2]]);
+  const pre = { ...un, id: 'p1', targetsBefore: undefined };
+  const preR = rateSavedSet({ sessions: [pre], targets: { back_squat: { weight: 185, reps: 6, stall: 0 } }, recordId: 'p1', index: 2, rpe: 8, plan, rules, settings });
+  check('v1.18.1 rate after Save: a session saved before v1.18.1 re-runs from the target it showed (190 x 4)', preR.target.weight === 190 && preR.target.reps === 4, preR.target);
+}
+
 // ---- v1.10: runs and Garmin ----
 {
   const st = { ...settings, startDate: '2026-11-16' };
@@ -480,7 +574,7 @@ console.log('v1.9 muscle groups and coach check-ins');
   const m = mergeGarmin([typed], file, { plan, rules, settings: st, ignored: [], appVersion: 't' });
   const by = Object.fromEntries(m.put.map(r => [r.id, r]));
   check('v1.10 merge: a run typed that day takes the watch\'s numbers and keeps its type, effort and notes', m.updated === 1 && by.run_1.garminId === '11' && by.run_1.distance === 3.17 && by.run_1.type === '5K test' && by.run_1.rpe === 9 && by.run_1.notes === 'windy' && by.run_1.source === 'garmin', by.run_1);
-  check('v1.10 merge: Saturday is the long run, a second weekend run is an easy run, and nothing from before the block', m.added === 2 && by['garmin-12'].type === 'Long run' && by['garmin-12'].planId === 'run2' && by['garmin-13'].type === 'Easy run' && by['garmin-13'].planId === null && !by['garmin-10'] && by['garmin-12'].week === 1 && by['garmin-12'].rpe === null, m.put.map(r => [r.id, r.type]));
+  check('v1.18.1 merge: weekend runs from Garmin land as easy runs that count for no planned run, nothing from before the block', m.added === 2 && by['garmin-12'].type === 'Easy run' && by['garmin-12'].planId === null && by['garmin-13'].type === 'Easy run' && by['garmin-13'].planId === null && !by['garmin-10'] && by['garmin-12'].week === 1 && by['garmin-12'].rpe === null && needsCredit(by['garmin-12']), m.put.map(r => [r.id, r.type, r.planId]));
   const after = [by.run_1, { ...by['garmin-12'], type: 'Easy run', planId: null, rpe: 4, notes: 'legs heavy', typeLocked: true, autoType: false }, by['garmin-13']]; // v1.12: a type Cameron taps is locked
   settleWeek(after, 1, { plan, rules, settings: st }); // and the sheet settles the rest of that week
   const again = mergeGarmin(after, file, { plan, rules, settings: st, ignored: [], appVersion: 't' });
@@ -501,34 +595,66 @@ console.log('v1.9 muscle groups and coach check-ins');
   const merge = (runs, acts, ignored = []) => mergeGarmin(runs, { activities: acts }, { ...ctx, ignored, appVersion: 't' });
   const byId = m => Object.fromEntries(m.put.map(r => [r.id, r]));
   // week 2: Mon Nov 23 .. Sun Nov 29. Intervals planned Tue 24, long run Sat 28 / Sun 29.
+  // v1.18.1 (Cameron, Nov 21: "dont automatically count the Garmin run as intervals ... Maybe make me log it to take
+  // credit"): a Garmin run is an easy run that counts toward miles and for no planned run until he taps Count it.
   const wed = merge([], [g(1, '2026-11-25 18:00:00', 4500, 1700)]);
-  check('v1.12 a run on Wednesday, with Tuesday missed, counts as the intervals and says why', byId(wed)['garmin-1'].type === 'Intervals' && byId(wed)['garmin-1'].planId === 'run1' && byId(wed)['garmin-1'].autoWhy === 'the week\'s intervals were still open', byId(wed)['garmin-1']);
-  const longTue = merge([], [g(2, '2026-11-24 07:00:00', 6000, 3300)]);
-  check('v1.12 a long run done on Tuesday counts as the long run, not the intervals', byId(longTue)['garmin-2'].type === 'Long run' && byId(longTue)['garmin-2'].autoWhy === 'it was long enough for the long run', byId(longTue)['garmin-2']);
-  const two = merge([], [g(3, '2026-11-26 18:00:00', 4500, 1700), g(4, '2026-11-28 08:00:00', 6400, 3500), g(5, '2026-11-29 08:00:00', 3000, 1200)]);
-  const t = byId(two);
-  check('v1.12 Thursday fills the intervals, Saturday the long run, a third run is an easy run', t['garmin-3'].type === 'Intervals' && t['garmin-4'].type === 'Long run' && t['garmin-5'].type === 'Easy run' && t['garmin-5'].autoWhy === 'both planned runs were already done', [t['garmin-3'].type, t['garmin-4'].type, t['garmin-5'].type]);
-  const signal = merge([], [g(6, '2026-11-25 18:00:00', 4000, 1500), g(7, '2026-11-27 18:00:00', 4800, 1900, { trainingEffectLabel: 'VO2MAX' })]);
-  const sg = byId(signal);
-  check('v1.12 a run that looks like intervals takes the intervals from an earlier run that only filled the slot', sg['garmin-7'].type === 'Intervals' && sg['garmin-7'].autoWhy === 'it looked like intervals' && sg['garmin-6'].type === 'Easy run', [sg['garmin-6'].type, sg['garmin-7'].type]);
+  check('v1.18.1 a Wednesday run with Tuesday missed is an easy run, not the intervals, and says why', byId(wed)['garmin-1'].type === 'Easy run' && byId(wed)['garmin-1'].planId === null && /only when you say which one/.test(byId(wed)['garmin-1'].autoWhy), byId(wed)['garmin-1']);
+  const wk2 = (runs, day = '2026-11-27') => weekRuns({ plan, settings: st, runs, week: 2, today: new Date(day + 'T08:00:00') });
+  const w2 = wk2([byId(wed)['garmin-1']]);
+  check('v1.18.1 that run leaves both planned runs open (it still counts toward the week\'s miles)', w2[0].status === 'open' && !w2[0].run && w2[1].status === 'later' && weeklyMiles([byId(wed)['garmin-1']], st, rules)[1].miles === 2.8, w2.map(r => r.status));
+  const vo2 = merge([], [g(7, '2026-11-27 18:00:00', 4800, 1900, { trainingEffectLabel: 'VO2MAX' })]);
+  check('v1.18.1 even a run Garmin marks as intervals waits for his tap (the sign is kept on the record)', byId(vo2)['garmin-7'].type === 'Easy run' && byId(vo2)['garmin-7'].planId === null && byId(vo2)['garmin-7'].intervalLike === true, byId(vo2)['garmin-7']);
   check('v1.12 interval signs: Garmin\'s label, its anaerobic effect, or max speed well above average', garminToRun(g(8, '2026-11-25 18:00:00', 4000, 1500, { anaerobicTrainingEffect: 2.6 }), { rules }).intervalLike === true
     && garminToRun(g(9, '2026-11-25 18:00:00', 4000, 1500, { trainingEffectLabel: 'AEROBIC_BASE' }), { rules }).intervalLike === false
     && garminToRun(g(10, '2026-11-25 18:00:00', 4000, 1500, { averageSpeed: 2.7, maxSpeed: 4.3 }), { rules }).intervalLike === true
     && garminToRun(g(11, '2026-11-25 18:00:00', 4000, 1500), { rules }).intervalLike === null);
-  const sat = merge([], [g(12, '2026-11-28 08:00:00', 2400, 1000)]);
-  check('v1.12 a short Saturday jog is not taken for the long run; it fills the open intervals', byId(sat)['garmin-12'].type === 'Intervals', byId(sat)['garmin-12']);
-  const short = merge([], [g(13, '2026-11-25 07:00:00', 1600, 720)]);
-  check('v1.12 a 12-minute jog fills nothing', byId(short)['garmin-13'].type === 'Easy run' && byId(short)['garmin-13'].autoWhy === 'it did not fit a planned run', byId(short)['garmin-13']);
-  // Cameron's pick sticks, and the rest of the week follows it
-  const all = [{ ...t['garmin-3'], type: 'Easy run', planId: null, typeLocked: true, autoType: false }, t['garmin-4'], t['garmin-5']];
-  const changed = settleWeek(all, 2, ctx);
-  check('v1.12 when Cameron re-types a run, the others in the week settle around it', changed.length === 1 && changed[0].id === 'garmin-5' && changed[0].type === 'Intervals' && all[0].type === 'Easy run' && all[1].type === 'Long run', changed.map(r => [r.id, r.type]));
-  check('v1.12 settling again changes nothing', settleWeek(all, 2, ctx).length === 0);
+  // Count it
+  const [run1, run2] = plan.runs;
+  const range2 = weekRange(st, 2);
+  const two = byId(merge([], [g(3, '2026-11-26 18:00:00', 4500, 1700), g(4, '2026-11-28 08:00:00', 6400, 3500)]));
+  const pool = [two['garmin-3'], two['garmin-4']];
+  check('v1.18.1 Count it offers this week\'s waiting Garmin runs under each open planned run, oldest first', countCandidates(plan, pool, run1, range2).map(r => r.id).join() === 'garmin-3,garmin-4' && countCandidates(plan, pool, run2, range2).length === 2 && countCandidates(plan, pool, run1, weekRange(st, 3)).length === 0);
+  const counted = countAs(two['garmin-3'], run1);
+  check('v1.18.1 Count it makes it that run, for good: type, planned run and locked', counted.type === 'Intervals' && counted.planId === 'run1' && counted.typeLocked && !isAuto(counted) && !needsCredit(counted) && countsFor(plan, counted, run1) && !countsFor(plan, counted, run2), counted);
+  const w2b = wk2([counted, two['garmin-4']], '2026-11-29');
+  check('v1.18.1 counted, the intervals are done; the long run still waits for its tap', w2b[0].status === 'done' && w2b[0].run.id === 'garmin-3' && w2b[1].status === 'today' && !w2b[1].run && countCandidates(plan, [counted, two['garmin-4']], run1, range2).length === 1, w2b.map(r => r.status));
+  const side = keepAsSide(two['garmin-4']);
+  check('v1.18.1 Side run: an easy run for good, in the miles, for no planned run, and no planned run asks about it again', side.type === 'Easy run' && side.planId === null && side.typeLocked === true && !needsCredit(side) && !countsFor(plan, side, run1) && !countsFor(plan, side, run2)
+    && countCandidates(plan, [counted, side], run2, range2).length === 0 && countsMiles(rules, side.type) && side.distance === two['garmin-4'].distance, side);
+  const again2 = mergeGarmin([counted, two['garmin-4']], { activities: [g(3, '2026-11-26 18:00:00', 4500, 1700), g(4, '2026-11-28 08:00:00', 6400, 3500)] }, { ...ctx, ignored: [], appVersion: 't' });
+  check('v1.18.1 a later Garmin pull keeps what he counted', again2.put.length === 0, again2.put);
   const hand = merge([{ id: 'run_9', date: '2026-11-24', type: 'Intervals', planId: 'run1', distance: 3, minutes: 30 }], [g(14, '2026-11-26 18:00:00', 4500, 1700)]);
-  check('v1.12 a run logged by hand keeps its slot; the Garmin run goes elsewhere', byId(hand)['garmin-14'].type === 'Easy run' && !byId(hand)['run_9'], hand.put.map(r => [r.id, r.type]));
+  check('v1.12 a run logged by hand keeps its slot; the Garmin run is an easy run', byId(hand)['garmin-14'].type === 'Easy run' && !byId(hand)['run_9'], hand.put.map(r => [r.id, r.type]));
   check('v1.12 old Garmin runs: Easy run is still the app\'s pick, anything else was Cameron\'s', isAuto({ id: 'garmin-1', type: 'Easy run' }) && !isAuto({ id: 'garmin-1', type: 'Intervals' }) && !isAuto({ id: 'run_1', type: 'Easy run' }) && !isAuto({ id: 'garmin-1', type: 'Easy run', typeLocked: true }));
-  const ski = merge([], [g(15, '2026-11-28 09:00:00', 30000, 14400, { activityType: { typeKey: 'resort_skiing_snowboarding_ws' } }), g(16, '2026-11-29 08:00:00', 4500, 1700), g(17, '2026-11-29 17:00:00', 6000, 3300)]);
-  check('v1.12 a ski day takes the long run; a 28-minute Sunday run fills the open intervals, an hour-long one is an easy run', byId(ski)['garmin-15'].type === 'Ski day' && byId(ski)['garmin-16'].type === 'Intervals' && byId(ski)['garmin-17'].type === 'Easy run', ski.put.map(r => [r.id, r.type]));
+  const ski = byId(merge([], [g(15, '2026-11-28 09:00:00', 30000, 14400, { activityType: { typeKey: 'resort_skiing_snowboarding_ws' } }), g(18, '2026-11-26 07:00:00', 9000, 1800, { activityType: { typeKey: 'indoor_rowing' } })]));
+  check('v1.18.1 a ski day still counts for the long run by itself, as the plan says', ski['garmin-15'].type === 'Ski day' && ski['garmin-15'].planId === 'run2' && !needsCredit(ski['garmin-15']) && wk2([ski['garmin-15']], '2026-11-29')[1].status === 'done', ski['garmin-15']);
+  check('v1.18.1 a rower session (an Engine finisher on the watch) waits for his tap; counted, it stays a bike/rower sub for the intervals', ski['garmin-18'].type === 'Bike/rower sub' && ski['garmin-18'].planId === null && needsCredit(ski['garmin-18']) && wk2([ski['garmin-18']])[0].status === 'open'
+    && creditOptions(plan, ski['garmin-18']).map(r => r.id).join() === 'run1' && countAs(ski['garmin-18'], run1).type === 'Bike/rower sub' && countsFor(plan, countAs(ski['garmin-18'], run1), run1), ski['garmin-18']);
+  // the old app picked planned runs by itself: settling the week again (v1.18.1 upgrade) makes those easy runs; his picks stay
+  const oldPick = { ...two['garmin-3'], type: 'Intervals', planId: 'run1', autoType: true, autoWhy: 'the week\'s intervals were still open' };
+  const mine = { ...two['garmin-4'], type: 'Long run', planId: 'run2', typeLocked: true, autoType: false };
+  const changed = settleWeek([oldPick, mine], 2, ctx);
+  check('v1.18.1 settling a week turns the app\'s old picks into easy runs and leaves his alone', changed.length === 1 && changed[0].id === 'garmin-3' && oldPick.type === 'Easy run' && oldPick.planId === null && mine.type === 'Long run' && mine.planId === 'run2', [oldPick, mine].map(r => [r.id, r.type, r.planId]));
+  check('v1.18.1 settling again changes nothing', settleWeek([oldPick, mine], 2, ctx).length === 0);
+  // the one-time upgrade on his phone
+  const before = {
+    targets: { back_squat: { weight: 185, reps: 5, stall: 1, source: 'engine' }, strict_press: { weight: 95, reps: 4, stall: 0 }, curl: { weight: 40, reps: 10 } },
+    runs: [
+      { ...two['garmin-3'], type: 'Intervals', planId: 'run1', autoType: true, autoWhy: 'the week\'s intervals were still open' },
+      { ...two['garmin-4'], type: 'Long run', planId: 'run2', typeLocked: true, autoType: false },
+      { ...ski['garmin-18'], planId: 'run1', autoType: false },
+      { ...ski['garmin-15'] },
+      { id: 'run_5', date: '2026-11-24', type: 'Intervals', planId: 'run1', distance: 3 }
+    ]
+  };
+  const snap = JSON.stringify(before);
+  const up = upgrade1181({ ...before, rules });
+  const upBy = Object.fromEntries(up.runs.map(r => [r.id, r]));
+  check('v1.18.1 upgrade: flat counts from the old rule start again at 0 (R4 rule 11), nothing else in the targets moves', up.zeroed === 1 && up.targets.back_squat.stall === 0 && up.targets.back_squat.weight === 185 && up.targets.strict_press.stall === 0 && up.targets.curl.weight === 40, up.targets);
+  check('v1.18.1 upgrade: the app\'s own pick becomes an easy run; a rower session loses the intervals credit the old app gave it', up.runs.length === 2 && upBy['garmin-3'].type === 'Easy run' && upBy['garmin-3'].planId === null && upBy['garmin-18'].type === 'Bike/rower sub' && upBy['garmin-18'].planId === null, up.runs.map(r => [r.id, r.type, r.planId]));
+  check('v1.18.1 upgrade: his own picks, the ski day and runs logged by hand stay; the input is not changed', !upBy['garmin-4'] && !upBy['garmin-15'] && !upBy['run_5'] && JSON.stringify(before) === snap);
+  check('v1.18.1 upgrade: run again on its own output, nothing changes', upgrade1181({ targets: up.targets, runs: before.runs.map(r => upBy[r.id] || r), rules }).runs.length === 0);
+  check('v1.18.1 versions compare part by part (1.9 is older than 1.18.1)', olderThan('1.18.0', '1.18.1') && olderThan('1.9', '1.18.1') && olderThan('0', '1.18.1') && !olderThan('1.18.1', '1.18.1') && !olderThan('1.19.0', '1.18.1'));
   const days = (iso, id) => openRunDays({ ...ctx, runId: id, week: 2, today: new Date(iso + 'T09:00:00') }).map(d => d.name + (d.today ? '*' : ''));
   check('v1.12 open intervals can move to Thursday, Saturday or Sunday; past days and lift days drop off', days('2026-11-25', 'run1').join() === 'Thursday,Saturday,Sunday' && days('2026-11-26', 'run1').join() === 'Thursday*,Saturday,Sunday' && days('2026-11-28', 'run1').join() === 'Saturday*,Sunday' && days('2026-11-29', 'run1').join() === 'Sunday*', [days('2026-11-25', 'run1'), days('2026-11-26', 'run1')]);
   const moveDays = rules.runSchedule.moveTo;
