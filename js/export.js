@@ -1,6 +1,7 @@
 // export.js - Backup JSON (share sheet or download), restore, and Excel export in the Log tab layout.
 
 import { exportAll, importAll, getSessions, getRuns } from './store.js';
+import { runUpgrades } from './upgrade.js';
 import { APP_VERSION, fmtDate } from './data.js';
 import { toast } from './ui.js';
 
@@ -48,6 +49,8 @@ export function restoreFromFile(file) {
       try {
         const data = JSON.parse(reader.result);
         const r = await importAll(data);
+        // v1.18.1: a backup from an older version gets the one-time changes it has not had
+        await runUpgrades().catch(() => null);
         resolve(r);
       } catch (e) { reject(e); }
     };

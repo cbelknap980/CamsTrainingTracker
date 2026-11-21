@@ -4,6 +4,7 @@
 import { el } from './ui.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
 import { TAGS, thread } from './coach.js';
+import { countsFor } from './runs.js';
 
 const DAYS = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['0', 'Sun']];
 const when = iso => { const d = new Date(iso); return `${fmtDate(toISODate(d))}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`; };
@@ -45,7 +46,7 @@ function thisWeekCard(plan, settings, sessions, runs, today, week) {
     const id = plan.calendar[dow];
     const lift = id ? plan.sessions.find(s => s.id === id) : null;
     const run = id ? plan.runs.find(r => r.id === id) : null;
-    const done = lift ? sessions.find(s => s.sessionId === id && s.week === week) : (run ? runs.find(r => r.date >= toISODate(start) && r.date <= weekEnd && (r.planId === id || r.type === run.type)) : null); // v1.12: a run done on another day of the week still counts
+    const done = lift ? sessions.find(s => s.sessionId === id && s.week === week) : (run ? runs.find(r => r.date >= toISODate(start) && r.date <= weekEnd && countsFor(plan, r, run)) : null); // v1.12: a run done on another day of the week still counts; v1.18.1: a Garmin run only once he counts it
     const status = done ? 'done' : (iso < todayIso && (lift || run) ? 'missed' : '');
     return el('div', { class: 'day-row' + (iso === todayIso ? ' today' : '') }, [
       el('span', { class: 'day-name' }, d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })),

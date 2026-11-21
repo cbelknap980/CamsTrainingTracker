@@ -22,7 +22,7 @@ export function slackDays(plan) {
 
 /**
  * weekOwed({ plan, sessions, week, today })
- * returns { week, lifts: [{ id, name, short, missed, day, sets, blocks: [{ blockId, items: [{ exerciseId, name, sets, hadDone, undoStall }] }] }],
+ * returns { week, lifts: [{ id, name, short, missed, day, sets, blocks: [{ blockId, items: [{ exerciseId, name, sets, hadDone }] }] }],
  *           totalSets, missed: [lift ids] }
  * `today` decides which lifts count as missed; leave it out to skip that check (past weeks).
  */
@@ -61,8 +61,9 @@ export function weekOwed({ plan, sessions, week, today }) {
         const ex = plan.exercises[item.exercise];
         items.push({
           exerciseId: item.exercise, name: ex ? ex.name : item.exercise, sets: left,
-          hadDone: recs.some(r => (r.sets || []).some(st => st.exerciseId === item.exercise && isWorkStep(st) && st.done && !st.skipped)),
-          undoStall: recs.some(r => (r.whatChanged || []).some(l => l.exerciseId === item.exercise && l.reason === 'a set was skipped'))
+          // v1.18.1 (rules R4 rule 11): no undoStall any more. A skipped set never adds to the flat count, so making
+          // it up has nothing to take back.
+          hadDone: recs.some(r => (r.sets || []).some(st => st.exerciseId === item.exercise && isWorkStep(st) && st.done && !st.skipped))
         });
       }
       if (items.length) { out.blocks.push({ blockId: block.id, items }); out.sets += items.reduce((a, i) => a + i.sets, 0); }
@@ -102,7 +103,7 @@ export function buildCatchUpSession(plan, rules, owed) {
     for (const ob of l.blocks) {
       const src = lift.blocks.find(b => b.id === ob.blockId);
       const count = Object.fromEntries(ob.items.map(i => [i.exerciseId, i.sets]));
-      ob.items.forEach(i => { const cur = info[i.exerciseId] || { hadDone: false, undoStall: false }; info[i.exerciseId] = { hadDone: cur.hadDone || i.hadDone, undoStall: cur.undoStall || i.undoStall }; });
+      ob.items.forEach(i => { const cur = info[i.exerciseId] || { hadDone: false }; info[i.exerciseId] = { hadDone: cur.hadDone || i.hadDone }; });
       const kept = src.items.filter(it => count[it.exercise]);
       const label = /^[A-Z]$/.test(src.name) ? `block ${src.name}` : src.name.toLowerCase();
       const base = { id: `${l.id}:${src.id}`, name: `${l.short} · ${label}`, minutes: src.minutes };
