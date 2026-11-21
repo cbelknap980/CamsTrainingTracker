@@ -15,6 +15,14 @@ def check(name, cond, info=''):
     print(('  ok   ' if cond else '  FAIL ') + name + ('' if cond else f'  -> {info}'))
     if not cond: fails.append(name)
 
+def tap_main(page, sel='.player-actions button.btn.primary'):
+    """v1.18: the app ignores a main-button tap within 0.6 s of the one before (a double tap), so a test that taps on
+    purpose lets the clock move that far first."""
+    gap = page.evaluate("Date.now() - (window.__lastMainTap || 0)")
+    if gap < 650: page.clock.run_for(int(650 - gap))
+    page.click(sel)
+    page.evaluate("window.__lastMainTap = Date.now()")
+
 TARGETS = {'back_squat': {'weight': 170, 'reps': 4}, 'rdl': {'weight': 150, 'reps': 6}, 'calf_raise': {'weight': 135, 'reps': 10}, 'bss': {'weight': 60, 'reps': 8},
            'leg_curl': {'weight': 80, 'reps': 8}, 'curl': {'weight': 50, 'reps': 10}, 'oh_tri_ext': {'weight': 40, 'reps': 10}}
 
@@ -22,12 +30,21 @@ def secs(page):
     m, s = page.locator('#timer').inner_text().split(':'); return int(m) * 60 + int(s)
 def kind(page): return page.locator('.step-kind').inner_text().strip().lower()
 def name(page): return page.locator('.step-name').first.inner_text().strip()
+def screen_key(page):
+    return page.evaluate("() => ['.step-kind', '.step-name', '#where', '.step-where'].map(s => { const e = document.querySelector(s); return e ? e.textContent.trim() : ''; }).join('|')")
+def run_out(page):
+    """Let the clock run until the step ends by itself. v1.18: a stretch done one side at a time has two clocks and no #timer."""
+    if page.locator('#timer').count(): page.clock.run_for((secs(page) + 1) * 1000); return
+    key = screen_key(page)
+    for _ in range(600):
+        page.clock.run_for(1000)
+        if not page.locator('.player').count() or screen_key(page) != key: return
 def step(page):
-    """Move one step forward the way Cameron would: Set-up done, Done on a set, or let a timer run out."""
+    """Move one step forward the way Cameron would: Set-up done (or Ready), Done on a set, or let a timer run out."""
     k = kind(page)
-    if page.locator('#confirm-btn').count(): page.click('#confirm-btn')
-    elif k in ('timed', 'stretch') or (k == 'set up' and not page.locator('#up-next').count()): page.clock.run_for((secs(page) + 1) * 1000)
-    else: page.click('.player-actions button.btn.primary')
+    if page.locator('#confirm-btn').count(): tap_main(page, '#confirm-btn'); page.clock.run_for(700)   # v1.18: a second tap within 0.6 s is ignored
+    elif k in ('timed', 'stretch') or (k == 'set up' and not page.locator('#up-next').count()): run_out(page)
+    else: tap_main(page, '.player-actions button.btn.primary')
     page.wait_for_timeout(60)
 def save_review(page):
     page.wait_for_selector('h1:has-text("Review and save")')
