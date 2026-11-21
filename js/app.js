@@ -3,8 +3,9 @@
 import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentFor, isPair, pairText, weightWithPair } from './data.js';
 import { buildTimeline, lastResults } from './builder.js';
 import { icon } from './icons.js';
-import { Player } from './player.js';
-import { saveSession, renderSummary, renderReview, setsTable } from './logger.js';
+import { Player, playTones } from './player.js';
+import { learnPacing, pacingLines, pacingConfig } from './pacing.js';
+import { saveSession, renderSummary, renderReview, setsTable, gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from './logger.js';
 import { epley, targetFromBenchmark, estimateStart, incrementFor } from './progression.js';
 import { getTargets, setTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
@@ -312,12 +313,14 @@ async function renderHome() {
   // v1.8 catch-up: sets skipped or not reached this week, and lifts whose day passed with nothing logged
   const allSessions = await getSessions();
   const allRuns = await getRuns();
+  // v1.18: the minutes shown here use the set and set-up times learned from his pace, like the workout itself
+  const pacing = learnPacing({ sessions: allSessions, plan: D.plan, rules: D.rules, settings });
   const owed = week >= 1 && week <= 12 ? weekOwed({ plan: D.plan, sessions: allSessions, week, today }) : { lifts: [], totalSets: 0, missed: [] };
   const catchUp = owed.totalSets ? buildCatchUpSession(D.plan, D.rules, owed) : null;
   const hasOwed = !!(catchUp || owed.missed.length);
   const catchUpBody = (card, primary) => {
     if (catchUp) {
-      const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session: catchUp, week, targets });
+      const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session: catchUp, week, targets, pacing });
       card.appendChild(el('p', { class: primary ? '' : 'muted' }, `${owed.totalSets} ${owed.totalSets === 1 ? 'set' : 'sets'} left over from this week, about ${fmtMinutes(tl.plannedSeconds)} with warm-up and stretch.`));
       card.appendChild(el('ul', { class: 'lines owed-list' }, owedLines(owed).map(l => el('li', {}, [el('b', {}, `${l.short}: `), l.text]))));
       card.appendChild(el('button', { class: 'btn ' + (primary ? 'primary' : ''), id: 'catchup-start', onclick: () => previewSession(catchUp, week) }, primary ? 'Start catch-up' : 'Do the catch-up now'));
@@ -364,7 +367,7 @@ async function renderHome() {
   const todayCard = el('div', { class: 'card accent', id: 'today-card' });
   todayCard.appendChild(el('h3', {}, `Today, ${fmtDate(toISODate(today))}${week >= 1 && week <= 12 ? ` · week ${week}` : ''}${phase.note ? ' · ' + phase.name : ''}`));
   if (session) {
-    const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets });
+    const tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, sessionId: session.id, week, targets, pacing });
     todayCard.appendChild(el('h1', {}, session.name));
     // polish: the facts as chips, a strip with one bar per block (sized by its minutes), the phase note small
     const blocks = session.blocks.filter(b => b.type !== 'iftime');
@@ -607,7 +610,10 @@ function editTarget(id, ex, t, settings) {
 async function previewSession(sessionRef, week) {
   const settings = await getSettings();
   const targets = await getTargets();
-  const lastTime = lastResults(await getSessions());
+  const sessions = await getSessions();
+  const lastTime = lastResults(sessions);
+  // v1.18: set and set-up times that follow his pace (pacing.js)
+  const pacing = learnPacing({ sessions, plan: D.plan, rules: D.rules, settings });
   // v1.8: a session id from the plan, or a session object (the catch-up session is built on the fly)
   const session = typeof sessionRef === 'string' ? sessionById(D.plan, sessionRef) : sessionRef;
   const phase = phaseForWeek(D.plan, week);
@@ -618,7 +624,7 @@ async function previewSession(sessionRef, week) {
     for (const [id, w] of Object.entries(weights)) if (w != null) t[id] = { ...(t[id] || {}), weight: w };
     return t;
   };
-  let tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets });
+  let tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, pacing });
   for (const st of tl.steps) {
     if (st.kind !== 'set' || st.ramp || !st.exerciseId || st.exerciseId in weights) continue;
     const ex = D.plan.exercises[st.exerciseId];
@@ -629,7 +635,9 @@ async function previewSession(sessionRef, week) {
   }
 
   const paint = () => {
-    tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights() });
+    tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights(), pacing });
+    // what the learned times change, against the same session built from the rules alone
+    const paceLines = Object.keys(pacing).length ? pacingLines(buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights() }), tl) : [];
     const y = window.scrollY;
     view.innerHTML = '';
     const finish = Date.now() + tl.plannedSeconds * 1000;
@@ -646,6 +654,12 @@ async function previewSession(sessionRef, week) {
     ]));
 
     view.appendChild(targetsToday(tl, weights, estimated, lastTime));
+    if (paceLines.length) {
+      view.appendChild(el('div', { class: 'card', id: 'pacing-note' }, [
+        el('h3', {}, ['Times set from your pace', infoBtn('Times set from your pace', pacingHelp())]),
+        el('ul', { class: 'lines pace-list' }, paceLines.map(l => el('li', {}, [el('b', {}, `${l.name}: `), l.text])))
+      ]));
+    }
 
     const blocks = [];
     for (const st of tl.steps) {
@@ -748,14 +762,24 @@ function targetsToday(tl, weights, estimated, lastTime) {
   ]);
 }
 
+/** v1.18: how the learned times work, in words. The counts come from rules.json > pacing. */
+function pacingHelp() {
+  const c = pacingConfig(D.rules);
+  const word = n => ['zero', 'one', 'two', 'three', 'four', 'five', 'six'][n] || String(n);
+  return [`When you end a set early with Done ${word(c.inARow)} sets in a row, the app gives that lift less time. When you have to add time or pause ${word(c.inARow)} sets in a row, it gives it more.`, `Set-up time before a lift changes the same way after ${word(c.setup.inARow)} sessions in a row.`, 'Rest times never change by themselves: they are part of the training plan. Lifts with a set tempo (the calf raise) are never shortened.', 'Settings has the switch, and a button to forget what was learned.'];
+}
+
 // ---- Session flow ----
 async function startSession(session, week, targetsForToday) {
   const settings = await getSettings();
   const targets = targetsForToday || await getTargets();
-  const history = lastResults(await getSessions());
-  const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, history });
+  const sessions = await getSessions();
+  const history = lastResults(sessions);
+  // v1.18: set and set-up times learned from how the last sessions went (pacing.js)
+  const pacing = learnPacing({ sessions, plan: D.plan, rules: D.rules, settings });
+  const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, history, pacing });
   await askNotificationPermission(settings);
-  player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
+  player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished, sessions, pacing });
   transition(() => { window.scrollTo(0, 0); player.start(); }, 'fwd');
 }
 
@@ -776,7 +800,9 @@ function offerResume(saved) {
       el('button', { class: 'btn primary', onclick: async () => {
         const settings = await getSettings();
         const targets = await getTargets();
-        player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
+        const sessions = await getSessions();
+        const pacing = learnPacing({ sessions, plan: D.plan, rules: D.rules, settings });
+        player = new Player({ timeline: tl, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished, sessions, pacing });
         player.resume(saved);
       } }, 'Resume'),
       el('button', { class: 'btn', onclick: async () => {
@@ -900,7 +926,7 @@ function showExercise(id, sessions, settings) {
       el('td', {}, fmtDate(r.date)),
       el('td', { class: 'num' }, r.baseline ? 'Base' : (r.round ? `R${r.round}` : `${r.setIndex || ''}`)),
       el('td', { class: 'num' }, `${r.weight != null ? fmtWeight(r.weight) + ' lb' : 'bw'} × ${r.reps}${r.holdSeconds ? ' s' : ''}`),
-      el('td', { class: 'num' }, r.rpe != null ? effortLabel(D.rules, r.rpe) : ''),
+      el('td', { class: 'num' + (isUnchecked(r) ? ' muted' : '') }, isUnchecked(r) ? 'not rated' : (r.rpe != null ? effortLabel(D.rules, r.rpe) : '')),
       el('td', { class: 'num' }, [r.weight != null && r.reps && !r.holdSeconds ? `${epley(r.weight + bw, r.reps)}` : '', r.pr && r.pr.length ? el('span', { class: 'pr-badge' }, 'PR') : null])
     ]))
   ]);
@@ -915,7 +941,7 @@ function showExercise(id, sessions, settings) {
 function showSession(s) {
   showModal(el('div', {}, [
     el('h2', {}, `${s.sessionName} · ${fmtDate(s.date)}`),
-    el('p', { class: 'muted' }, `Week ${s.week} · ${fmtMinutes(s.actualSeconds)} (plan ${fmtMinutes(s.plannedSeconds)})${s.trims && s.trims.length ? ' · ' + s.trims.join('; ') : ''}`),
+    el('p', { class: 'muted' }, `Week ${s.week} · ${fmtMinutes(s.actualSeconds)} (plan ${fmtMinutes(s.plannedSeconds)})${pausedInGym(s) > 30 ? ` · ${fmtLong(gymSecondsOf(s))} in the gym` : ''}${s.trims && s.trims.length ? ' · ' + s.trims.join('; ') : ''}`),
     s.whatChanged && s.whatChanged.length ? el('div', {}, [el('h3', {}, 'What changed'), el('ul', { class: 'lines' }, s.whatChanged.map(l => el('li', {}, l.text)))]) : null,
     el('h3', { style: 'margin-top:12px' }, 'Sets'),
     setsTable(s.sets),
@@ -954,7 +980,7 @@ async function renderProgressTab() {
   };
   const cfg = await getSync();
   renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, targets, muscles: D.muscles, today: new Date() }, {
-    header: progressHeader(), syncOn: !!(cfg && cfg.repo), onExercise: id => showExercise(id, sessions, settings), ...(onComputer() ? { onLoadBackup } : {})
+    header: progressHeader(), syncOn: !!(cfg && cfg.repo), onExercise: id => showExercise(id, sessions, settings), onRuns: () => showTab('runs'), ...(onComputer() ? { onLoadBackup } : {})
   });
 }
 
@@ -1051,9 +1077,51 @@ async function renderSyncSheet(note) {
 }
 
 // ---- Settings ----
+/** v1.18: play the set-end beep once, the way the workout would (Settings > Play the beep). */
+let testCtx = null;
+async function testBeep() {
+  const st = await getSettings();
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    testCtx = testCtx || new Ctx();
+    if (testCtx.state === 'suspended') await testCtx.resume();
+    const cfg = D.rules.cues || {};
+    const voice = cfg[st.cues && st.cues.loud === false ? 'normal' : 'loud'];
+    playTones(testCtx, testCtx.destination, (cfg.tones && cfg.tones.setEnd) || [[1175, 0, 0.2], [784, 0.24, 0.42]], voice);
+  } catch (e) { toast('This browser cannot play the beep'); }
+}
+
+/** v1.18: what the app has learned about his pace, and a way to forget it. */
+function pacingSettings(s, learned) {
+  const rows = Object.entries(learned).filter(([, e]) => e.repSeconds != null || e.setupSeconds != null).map(([id, e]) => {
+    const ex = D.plan.exercises[id] || { name: id };
+    const bits = [];
+    if (e.repSeconds != null) bits.push(`${e.repSeconds} s a rep (the plan's tempo is ${Math.round(e.tempoSeconds * 10) / 10} s)`);
+    if (e.setupSeconds != null) bits.push(`${e.setupSeconds} s to set up (was ${e.defaultSetup} s)`);
+    return el('li', {}, [el('b', {}, `${ex.name}: `), bits.join(', ')]);
+  });
+  return el('div', { class: 'set-note', id: 'pacing-settings' }, [
+    `After ${pacingConfig(D.rules).inARow} sets in a row ended early, extended or paused, that lift gets less or more time. Rest times never change by themselves. `,
+    rows.length ? el('ul', { class: 'lines pace-list', style: 'margin-top:8px' }, rows) : (s.adaptTiming === false ? '' : 'Nothing has changed yet.'),
+    rows.length ? el('button', { type: 'button', class: 'link-btn', id: 'pacing-reset', onclick: async () => {
+      if (!(await confirmDialog('Forget the learned times?', 'Set and set-up times go back to the plan and start learning again from your next workout.', 'Forget them'))) { renderSettings(); return; }
+      await saveSettings({ pacingSince: new Date().toISOString() });
+      toast('Times are back to the plan'); renderSettings();
+    } }, 'Forget the learned times') : null
+  ]);
+}
+
+/** The switch was flipped: the list under it follows at once (off: nothing is applied; on: what was learned). */
+async function refreshPacingSettings() {
+  const node = document.getElementById('pacing-settings'); if (!node) return;
+  const st = await getSettings();
+  node.replaceWith(pacingSettings(st, learnPacing({ sessions: await getSessions(), plan: D.plan, rules: D.rules, settings: st })));
+}
+
 async function renderSettings() {
   const s = await getSettings();
-  const toggle = (label, path, val) => el('div', { class: 'toggle' }, [el('span', {}, label), el('input', { type: 'checkbox', checked: val, onchange: async e => { const patch = {}; let o = patch; const keys = path.split('.'); keys.forEach((k, i) => { if (i === keys.length - 1) o[k] = e.target.checked; else { o[k] = {}; o = o[k]; } }); await saveSettings(patch); if (path === 'cues.vibrate') setHaptics(e.target.checked); } })]);
+  const learned = learnPacing({ sessions: await getSessions(), plan: D.plan, rules: D.rules, settings: s });
+  const toggle = (label, path, val) => el('div', { class: 'toggle' }, [el('span', {}, label), el('input', { type: 'checkbox', checked: val, onchange: async e => { const patch = {}; let o = patch; const keys = path.split('.'); keys.forEach((k, i) => { if (i === keys.length - 1) o[k] = e.target.checked; else { o[k] = {}; o = o[k]; } }); await saveSettings(patch); if (path === 'cues.vibrate') setHaptics(e.target.checked); if (path === 'adaptTiming') refreshPacingSettings(); } })]);
   const numField = (label, key, step) => el('div', { class: 'field' }, [el('label', {}, label), el('input', { type: 'number', step: String(step), value: s[key], inputmode: 'decimal', onchange: async e => { const v = Number(e.target.value); if (e.target.value === '' || !(v > 0)) { e.target.value = s[key]; toast('Enter a number above 0'); return; } await saveSettings({ [key]: v }); s[key] = v; toast('Saved'); } })]);
   const fileInput = el('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onchange: async e => {
     const f = e.target.files[0]; if (!f) return;
@@ -1064,10 +1132,14 @@ async function renderSettings() {
     el('h2', {}, 'Settings'),
     toggle('Vibrate when a set or rest ends', 'cues.vibrate', s.cues.vibrate),
     toggle('Beep when a set or rest ends', 'cues.beep', s.cues.beep),
+    toggle('Loud beeps', 'cues.loud', s.cues.loud !== false),
+    el('div', { class: 'set-note' }, ['The beeps follow the phone\'s media volume. ', el('button', { type: 'button', class: 'link-btn', id: 'beep-test', onclick: testBeep }, 'Play the beep')]),
     toggle('Countdown ticks before a set starts', 'cues.warningTick', s.cues.warningTick),
     toggle('Say each exercise and rest out loud', 'cues.voice', s.cues.voice !== false),
     toggle('End each set on its own timer', 'autoAdvance', s.autoAdvance !== false),
-    toggle('Wait for a Set-up done tap before each new block', 'confirmSetup', s.confirmSetup !== false),
+    toggle('Wait for my tap before each exercise, each bar change and the stretches', 'confirmSetup', s.confirmSetup !== false),
+    toggle('Set times follow my pace', 'adaptTiming', s.adaptTiming !== false),
+    pacingSettings(s, learned),
     toggle('Notify when a rest ends while in another app', 'cues.notify', s.cues.notify !== false),
     ('Notification' in window && Notification.permission === 'denied') ? el('p', { class: 'muted', style: 'margin:4px 0 0' }, 'Notifications are blocked for this site in Android settings; allow them there to get the rest-end alert.') : null,
     toggle('Keep the screen on during a session', 'keepScreenOn', s.keepScreenOn !== false),

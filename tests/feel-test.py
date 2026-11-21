@@ -27,10 +27,19 @@ def secs(page):
 def kind(page): return page.locator('.step-kind').inner_text().strip().lower()
 def name(page): return page.locator('.step-name').first.inner_text().strip()
 def where(page): return page.locator('.step-where').first.inner_text().strip() if page.locator('.step-where').count() else ''
+def screen_key(page):
+    return page.evaluate("() => ['.step-kind', '.step-name', '#where', '.step-where'].map(s => { const e = document.querySelector(s); return e ? e.textContent.trim() : ''; }).join('|')")
+def run_out(page):
+    """Let the clock run until the step ends by itself. v1.18: a step done one side at a time has two clocks and no #timer."""
+    if page.locator('#timer').count(): page.clock.run_for((secs(page) + 1) * 1000); return
+    key = screen_key(page)
+    for _ in range(600):
+        page.clock.run_for(1000)
+        if not page.locator('.player').count() or screen_key(page) != key: return
 def step(page):
     k = kind(page)
-    if page.locator('#confirm-btn').count(): page.click('#confirm-btn')
-    elif k in ('timed', 'stretch') or (k == 'set up' and not page.locator('#up-next').count()): page.clock.run_for((secs(page) + 1) * 1000)
+    if page.locator('#confirm-btn').count(): page.click('#confirm-btn'); page.clock.run_for(700)   # v1.18: a second tap within 0.6 s is ignored
+    elif k in ('timed', 'stretch') or (k == 'set up' and not page.locator('#up-next').count()): run_out(page)
     else: page.click('.player-actions button.btn.primary')
     page.wait_for_timeout(60)
 def active_tab(page): return page.locator('#tabs .tab.active').get_attribute('data-view')
@@ -99,7 +108,7 @@ with sync_playwright() as p:
     print('Workout')
     page.click('#start-workout'); page.wait_for_selector('.player')
     bar = lambda: page.evaluate("document.querySelector('meta[name=theme-color]').content")
-    for _ in range(40):
+    for _ in range(80):   # v1.18: each bar change on the way up waits for Set-up done, so there are more taps
         if kind(page) == 'work' and name(page) == 'Back squat': break
         step(page)
     check('status bar takes the work color', bar() == '#12432f', bar())

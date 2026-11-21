@@ -6,6 +6,7 @@ import { epley } from './progression.js';
 import { el, infoBtn } from './ui.js';
 import { fmtWeight, fmtDate, weekNumber, phaseForWeek, parseISODate } from './data.js';
 import { owedSetsFor, CATCHUP_ID } from './catchup.js';
+import { weekRuns, weeklyMiles, countsMiles, fmtDuration, paceOf } from './runs.js';
 
 const WEEKS = 12;
 const isWork = st => !st.ramp && st.done && !st.skipped;
@@ -61,6 +62,41 @@ export function adherence(sessions, plan, settings, today) {
   });
   const all = rows.flatMap(r => r.cells);
   return { current, rows, logged: all.filter(c => c.status === 'done' || c.status === 'partial').length, missed: all.filter(c => c.status === 'missed').length };
+}
+
+/**
+ * v1.18 (Cameron: "add runs to the progress tracker"): the same grid for the plan's runs. One cell per planned run
+ * per week: 'done' (a run that counts for it is logged that week), 'missed' (a past week without one), 'open' (this
+ * week, not done yet) or 'later'. Which logged run counts for which planned run is decided by runs.js > weekRuns.
+ */
+export function runAdherence(runs, plan, settings, today) {
+  const current = weekNumber(today, settings.startDate);
+  const byWeek = [];
+  for (let w = 1; w <= WEEKS; w++) byWeek.push(weekRuns({ plan, settings, runs: runs || [], week: w, today }));
+  const rows = (plan.runs || []).map(run => {
+    const cells = byWeek.map((list, i) => {
+      const w = i + 1;
+      const hit = list.find(x => x.id === run.id);
+      const done = !!(hit && hit.status === 'done');
+      return { week: w, status: done ? 'done' : (w < current ? 'missed' : (w === current ? 'open' : 'later')), date: done && hit.run ? hit.run.date : null };
+    });
+    // the grid's name column is narrow: "Long run" (the run's type) fits where "Long easy run" is cut
+    return { id: run.id, name: run.name, short: run.type || (run.name.includes(': ') ? run.name.split(': ')[1] : run.name), cells, isRun: true };
+  });
+  const all = rows.flatMap(r => r.cells);
+  return { rows, logged: all.filter(c => c.status === 'done').length, missed: all.filter(c => c.status === 'missed').length };
+}
+
+/** v1.18: the running numbers for the Progress page: miles per week, totals, the longest run and the latest pace. */
+export function runSummary(runs, settings, rules) {
+  const list = (runs || []).filter(r => r && r.date);
+  const counted = list.filter(r => countsMiles(rules, r.type));
+  const miles = Math.round(counted.reduce((m, r) => m + (r.distance || 0), 0) * 10) / 10;
+  const minutes = Math.round(list.reduce((m, r) => m + (r.minutes || 0), 0));
+  const longest = counted.reduce((best, r) => (r.distance && (!best || r.distance > best.distance) ? r : best), null);
+  const paced = counted.filter(r => r.distance && r.minutes).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const latest = paced.length ? paced[paced.length - 1] : null;
+  return { count: list.length, miles, minutes, longest, latestPace: latest ? { date: latest.date, pace: latest.pace || paceOf(latest.distance, latest.minutes) } : null, weeks: weeklyMiles(list, settings, rules, WEEKS) };
 }
 
 /** Work sets completed in each week of the block (ramp-ups and skipped sets do not count). */
@@ -214,12 +250,21 @@ function lineChart(points, label) {
   return wrap;
 }
 
-/** Work sets per week: one thin column per week, rounded at the top, value on the latest column, tooltip on each. */
-function weekBars(rows, current) {
+/**
+ * One thin column per week, rounded at the top, value on the latest column, tooltip on each.
+ * By default it counts work sets; v1.18 passes `o` to draw miles per week with the same marks.
+ */
+function weekBars(rows, current, o = {}) {
+  const val = o.value || (r => r.sets);
+  const what = o.what || 'work sets';
+  const title = o.title || 'Work sets per week';
+  const sub = o.sub || (r => `week ${r.week} · ${r.sessions} ${r.sessions === 1 ? 'session' : 'sessions'}`);
+  const step = o.step || 10;
+  rows = rows.map(r => ({ ...r, sets: val(r) }));
   const W = 320, H = 150, L = 30, R = 8, T = 16, B = 24;
   const wrap = el('div', { class: 'viz' });
-  const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Work sets per week: ${rows.filter(r => r.sets).map(r => `week ${r.week} ${r.sets}`).join(', ')}` });
-  const ticks = yTicks([0, Math.max(10, ...rows.map(r => r.sets))], 10);
+  const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${title}: ${rows.filter(r => r.sets).map(r => `week ${r.week} ${r.sets}`).join(', ')}` });
+  const ticks = yTicks([0, Math.max(step, ...rows.map(r => r.sets))], step);
   const band = (W - L - R) / rows.length;
   const bw = Math.min(24, band - 6);
   const y = v => H - B - v * (H - T - B) / ticks[2];
@@ -235,8 +280,8 @@ function weekBars(rows, current) {
     root.appendChild(svg('text', { x: cx, y: H - 8, 'text-anchor': 'middle', class: 'viz-axis' + (r.week === current ? ' now' : '') }, `${r.week}`));
     if (!r.sets) return;
     const x0 = cx - bw / 2, top = y(r.sets), base = y(0), rad = Math.min(4, (base - top) / 2);
-    const bar = svg('path', { d: `M${x0} ${base}V${top + rad}Q${x0} ${top} ${x0 + rad} ${top}H${x0 + bw - rad}Q${x0 + bw} ${top} ${x0 + bw} ${top + rad}V${base}Z`, class: 'viz-bar', tabindex: 0, 'aria-label': `Week ${r.week}: ${r.sets} work sets` });
-    const show = () => { bar.classList.add('on'); tip.show(cx / W, `${r.sets} work sets`, [`week ${r.week} · ${r.sessions} ${r.sessions === 1 ? 'session' : 'sessions'}`]); };
+    const bar = svg('path', { d: `M${x0} ${base}V${top + rad}Q${x0} ${top} ${x0 + rad} ${top}H${x0 + bw - rad}Q${x0 + bw} ${top} ${x0 + bw} ${top + rad}V${base}Z`, class: 'viz-bar', tabindex: 0, 'aria-label': `Week ${r.week}: ${r.sets} ${what}` });
+    const show = () => { bar.classList.add('on'); tip.show(cx / W, `${r.sets} ${what}`, [sub(r)]); };
     const hide = () => { bar.classList.remove('on'); tip.hide(); };
     bar.addEventListener('pointerenter', show); bar.addEventListener('pointerdown', show); bar.addEventListener('pointerleave', hide);
     bar.addEventListener('focus', show); bar.addEventListener('blur', hide);
@@ -249,21 +294,30 @@ function weekBars(rows, current) {
 const CELL = { done: '✓', partial: '~', missed: '×', open: '', later: '' };
 const CELL_WORD = { done: 'done', partial: 'ended early', missed: 'missed', open: 'this week', later: 'to come' };
 
-function statusCard(a, plan, runs) {
+function statusCard(a, plan, runs, ra, rs) {
   const phase = phaseForWeek(plan, a.current);
   const inBlock = a.current >= 1 && a.current <= WEEKS;
-  const miles = runs.reduce((m, r) => m + (r.distance || 0), 0);
-  const grid = el('div', { class: 'adh', role: 'table', 'aria-label': 'Planned lifts by week' }, [
-    el('div', { class: 'adh-row head', role: 'row' }, [el('span', { class: 'adh-name' }, 'Week'), ...a.rows[0].cells.map(c => el('span', { class: 'adh-wk' + (c.week === a.current ? ' now' : '') }, `${c.week}`))]),
-    ...a.rows.map(r => el('div', { class: 'adh-row', role: 'row' }, [
-      el('span', { class: 'adh-name' }, r.short),
-      ...r.cells.map(c => el('span', { class: `adh-cell ${c.status}` + (c.week === a.current ? ' now' : ''), title: `${r.name}, week ${c.week}: ${CELL_WORD[c.status]}${c.date ? ' (' + fmtDate(c.date) + ')' : ''}`, 'aria-label': `${r.short} week ${c.week} ${CELL_WORD[c.status]}` }, CELL[c.status]))
-    ]))
+  const miles = rs ? rs.miles : 0;
+  const row = r => el('div', { class: 'adh-row' + (r.isRun ? ' run' : ''), role: 'row', 'data-row': r.id }, [
+    el('span', { class: 'adh-name' }, r.short),
+    ...r.cells.map(c => el('span', { class: `adh-cell ${c.status}` + (c.week === a.current ? ' now' : ''), title: `${r.name}, week ${c.week}: ${CELL_WORD[c.status]}${c.date ? ' (' + fmtDate(c.date) + ')' : ''}`, 'aria-label': `${r.short} week ${c.week} ${CELL_WORD[c.status]}` }, CELL[c.status]))
   ]);
+  // v1.18: the plan's runs sit under the lifts, in the same grid
+  const runRows = ra && ra.rows.length ? ra.rows : [];
+  const grid = el('div', { class: 'adh', role: 'table', 'aria-label': runRows.length ? 'Planned lifts and runs by week' : 'Planned lifts by week' }, [
+    el('div', { class: 'adh-row head', role: 'row' }, [el('span', { class: 'adh-name' }, 'Week'), ...a.rows[0].cells.map(c => el('span', { class: 'adh-wk' + (c.week === a.current ? ' now' : '') }, `${c.week}`))]),
+    ...a.rows.map(row),
+    runRows.length ? el('div', { class: 'adh-sep', role: 'presentation' }, 'Runs') : null,
+    ...runRows.map(row)
+  ]);
+  const missedRuns = runRows.length && ra.missed ? `${ra.missed} planned ${ra.missed === 1 ? 'run' : 'runs'} missed` : '';
+  const runText = runs.length
+    ? ` · ${runs.length} ${runs.length === 1 ? 'run' : 'runs'}${miles ? ', ' + miles + ' mi' : ''}${missedRuns ? ', ' + missedRuns : ''}`
+    : (missedRuns ? ` · ${missedRuns}` : '');
   return el('div', { class: 'card', id: 'progress-status' }, [
     el('h3', {}, 'Where you are'),
     el('h1', {}, inBlock ? `Week ${a.current} of ${WEEKS} · ${phase.name}` : phase.name),
-    el('p', { class: 'muted' }, `${a.logged} ${a.logged === 1 ? 'lift' : 'lifts'} logged${a.missed ? `, ${a.missed} missed` : ', none missed'}${runs.length ? ` · ${runs.length} ${runs.length === 1 ? 'run' : 'runs'}${miles ? ', ' + (Math.round(miles * 10) / 10) + ' mi' : ''}` : ''}.`),
+    el('p', { class: 'muted' }, `${a.logged} ${a.logged === 1 ? 'lift' : 'lifts'} logged${a.missed ? `, ${a.missed} missed` : ', none missed'}${runText}.`),
     grid,
     el('div', { class: 'adh-key' }, [
       el('span', {}, [el('span', { class: 'adh-cell done' }, '✓'), 'done']),
@@ -323,6 +377,22 @@ function muscleCard(rows, week, muscles) {
   ]);
 }
 
+/** v1.18: running on the Progress page: miles per week, and the totals behind them. */
+function runCard(rs, current, onOpen) {
+  const fact = (label, value) => el('div', { class: 'run-stat' }, [el('span', {}, label), el('b', {}, value)]);
+  return el('div', { class: 'card', id: 'run-progress' }, [
+    el('h3', {}, ['Running: miles per week', infoBtn('Running', 'Miles you logged or imported from Garmin, by plan week. Bike and ski days count as a run done but not as miles. Every run is on the Runs tab.')]),
+    weekBars(rs.weeks, current, { value: r => r.miles, what: 'mi', title: 'Miles per week', step: 5, sub: r => `week ${r.week} · ${r.runs} ${r.runs === 1 ? 'run' : 'runs'}` }),
+    el('div', { class: 'run-stats', style: 'margin-top:10px' }, [
+      fact('Runs', `${rs.count}`),
+      fact('Miles', `${rs.miles}`),
+      rs.longest ? fact('Longest', `${Math.round(rs.longest.distance * 10) / 10} mi`) : null,
+      rs.latestPace && rs.latestPace.pace ? fact('Latest pace', `${fmtDuration(rs.latestPace.pace)}/mi`) : null
+    ]),
+    onOpen ? el('button', { type: 'button', class: 'link-btn', id: 'run-progress-open', onclick: onOpen }, 'Open the Runs tab') : null
+  ]);
+}
+
 /**
  * Draw the Progress page. `data` = { plan, rules, settings, sessions, runs, today }; `opts.onLoadBackup(file)` is
  * offered when the app is not installed (a computer browser), so the phone's backup can be opened there.
@@ -343,14 +413,17 @@ export function renderProgress(view, data, opts = {}) {
     fileInput
   ]);
 
+  const rs = runs && runs.length ? runSummary(runs, settings, data.rules) : null;
+  const week = weekNumber(today, settings.startDate);
   if (!sessions.length) {
     view.appendChild(el('div', { class: 'card' }, [el('h2', {}, 'No workouts logged yet'), el('p', { class: 'muted', style: 'margin:0' }, 'After the first saved session this page shows your 12-week status, strength trend per lift and personal records.')]));
+    if (rs) view.appendChild(runCard(rs, week, opts.onRuns));
     if (loadCard) view.appendChild(loadCard);
     return;
   }
 
   const a = adherence(sessions, plan, settings, today);
-  view.appendChild(statusCard(a, plan, runs || []));
+  view.appendChild(statusCard(a, plan, runs || [], runAdherence(runs || [], plan, settings, today), rs));
 
   const series = strengthSeries(sessions, plan, settings);
   if (series.length) {
@@ -367,6 +440,7 @@ export function renderProgress(view, data, opts = {}) {
     el('h3', {}, ['Work sets per week', infoBtn('Work sets per week', 'Sets you finished, not counting ramp-ups. Week number along the bottom.')]),
     weekBars(weeklySets(sessions), a.current)
   ]));
+  if (rs) lower.appendChild(runCard(rs, a.current, opts.onRuns));
   lower.appendChild(el('div', { class: 'card', id: 'pr-list' }, [
     el('h3', {}, 'Personal records'),
     prs.length ? el('table', {}, prs.slice(0, 12).map(p => el('tr', {}, [

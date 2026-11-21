@@ -1,5 +1,5 @@
 {
-  "planVersion": "1.4",
+  "planVersion": "1.5",
   "planName": "12-Week Strength Block",
   "source": "2026-11-15 General 12-Week Training Plan.md",
   "startDate": "2026-11-16",
@@ -104,17 +104,18 @@
       "name": "Standing calf raise",
       "equipment": "machine",
       "mainLift": false,
+      "keepTempo": "Pause 2 seconds at the bottom of every rep.",
       "cue": "Pause at the bottom.",
       "short": "Calf",
       "tempo": [
         2,
         2,
         1,
-        1
+        0
       ],
       "tips": [
         "Full stretch and a 2-second pause at the bottom.",
-        "Squeeze at the top; no bouncing."
+        "No bouncing."
       ]
     },
     "bss": {
@@ -397,6 +398,7 @@
       "name": "Dumbbell row",
       "equipment": "dumbbell",
       "mainLift": false,
+      "perSide": true,
       "cue": "Or chest-supported row.",
       "short": "DB row",
       "tempo": [
@@ -481,6 +483,7 @@
         "name": "Calf stretch on a step",
         "seconds": 45,
         "perSide": false,
+        "where": "Both legs at once",
         "cue": "Knee straight."
       }
     ]
@@ -968,7 +971,7 @@
                 "min": 7,
                 "max": 8
               },
-              "restSeconds": 60
+              "restSeconds": 30
             },
             {
               "exercise": "lateral_raise",
@@ -1004,7 +1007,7 @@
                 "min": 7,
                 "max": 8
               },
-              "restSeconds": 60
+              "restSeconds": 30
             },
             {
               "exercise": "db_row",

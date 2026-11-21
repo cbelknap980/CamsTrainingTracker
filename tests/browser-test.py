@@ -43,14 +43,31 @@ def start_from_preview(page, start_selector, shot=None):
     page.wait_for_selector('.player')
 
 IS_SET = ('work', 'ramp', 'hold')
-IS_LEAD = ('rest', 'set up', 'switch', 'get ready', 'confirm')
+# v1.18: every countdown before something to do: a rest, a set-up, a switch, the change-over between two stretches
+IS_LEAD = ('rest', 'set up', 'switch', 'change over', 'get ready', 'confirm', 'ready?')
 seen = {}
 
+def screen_key(page):
+    return page.evaluate("() => ['.step-kind', '.step-name', '#where', '.step-where'].map(s => { const e = document.querySelector(s); return e ? e.textContent.trim() : ''; }).join('|')")
+
+def run_out(page):
+    """Let the clock run until this step ends by itself. v1.18: a hold or a stretch done one side at a time has two
+    clocks (Left, Right) and no single timer, so the clock runs until the screen moves on."""
+    if page.locator('#timer').count():
+        page.clock.run_for((timer_secs(page) + 1) * 1000); return
+    key = screen_key(page)
+    for _ in range(600):
+        page.clock.run_for(1000)
+        if not page.locator('.player').count() or screen_key(page) != key: return
+
 def lead_step(page, skip_rests=True):
-    """v1.5: a countdown before a new block waits for Set-up done; other countdowns run or get skipped."""
+    """v1.5: a countdown before a new block waits for Set-up done. v1.18: so does the one before each exercise's first
+    set, before a set whose bar weight changed, and before the stretch block (Ready). Other countdowns run or get skipped."""
     if page.locator('#confirm-btn').count():
         seen['confirms'] = seen.get('confirms', 0) + 1
+        seen.setdefault('confirm_for', []).append(f"{page.locator('#confirm-btn').inner_text().strip()}: {page.locator('#up-next .step-name').inner_text().strip()}")
         page.click('#confirm-btn')
+        page.clock.run_for(700)   # a second tap within 0.6 s is ignored, so a double tap cannot skip the rest it just kept
     elif skip_rests: page.click('.player-actions button.btn.primary')
     else: page.clock.run_for((timer_secs(page) + 1) * 1000)
 
@@ -100,7 +117,8 @@ def run_session(page, start_selector, baseline_weights, shots_prefix, skip_rests
         elif kind.startswith(IS_LEAD) and page.locator('#up-next').count():
             lead_step(page, skip_rests)
         elif kind in ('timed', 'stretch', 'set up'):
-            page.clock.run_for((timer_secs(page) + 1) * 1000)  # let it auto-advance
+            if page.locator('#sides').count(): seen['sided'] = seen.get('sided', 0) + 1
+            run_out(page)  # let it auto-advance
         elif kind == 'your call':
             page.click('button.btn.primary:has-text("Do it")')
         else:
@@ -117,6 +135,15 @@ with sync_playwright() as p:
     ctx = browser.new_context(viewport={'width': 393, 'height': 851}, reduced_motion='reduce', device_scale_factor=2, is_mobile=True, has_touch=True, accept_downloads=True)
     ctx.grant_permissions(['notifications'], origin='http://localhost:8080')
     page = ctx.new_page()
+    # A full-page screenshot switches touch emulation off in headless Chrome until the next page load (the app then
+    # takes the phone for a computer: hover and a fine pointer). Switch it back on after each one.
+    cdp = ctx.new_cdp_session(page)
+    take_shot = page.screenshot
+    def shot(**kw):
+        out = take_shot(**kw)
+        if kw.get('full_page'): cdp.send('Emulation.setTouchEmulationEnabled', {'enabled': True, 'maxTouchPoints': 1})
+        return out
+    page.screenshot = shot
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
@@ -141,7 +168,13 @@ with sync_playwright() as p:
     page.click('.modal button:has-text("Close")')
     steps, kinds = run_session(page, '.card.accent .btn.primary', {'Back squat': 185}, 'lift1', skip_rests=True, go_behind_at=14)
     check('v1.5 Pause is in the header on every step of the session', seen.get('pause') is True)
-    check('v1.5 each new block waited for Set-up done (4 on Lift 1)', seen.get('confirms') == 4, seen.get('confirms'))
+    print('    waited for a tap before:', seen.get('confirm_for'))
+    # v1.18 (Cameron: "for things setting up bar, ensure im good to go", "for stretch section, do a check also"): the first
+    # set of every exercise, the bar change after the squat baseline, and the stretch block each wait for a tap
+    check('v1.18 Lift 1 waited for a tap before each exercise, the bar change after the baseline, and the stretches (10)',
+          seen.get('confirm_for') == ['Set-up done: Back squat', 'Set-up done: Back squat', 'Set-up done: Romanian deadlift', 'Set-up done: Standing calf raise',
+                                      'Set-up done: Bulgarian split squat', 'Set-up done: Seated leg curl', 'Set-up done: Standing dumbbell curl',
+                                      'Set-up done: Overhead triceps extension', 'Set-up done: Ab wheel', 'Ready: Couch stretch'], seen.get('confirm_for'))
     check('v1.5 finisher row lists its exercises', all(x in seen.get('fin', '') for x in ('Standing curl', 'Tri ext', 'Ab wheel')), seen.get('fin'))
     page.click('#settings-btn'); page.wait_for_selector('.modal')
     page.locator('.toggle', has_text='End each set on its own timer').locator('input').check(); page.wait_for_timeout(150)
@@ -183,7 +216,7 @@ with sync_playwright() as p:
     for _ in range(3):
         k = page.locator('.step-kind').inner_text().lower()
         if k == 'timed':
-            t = page.locator('#timer').inner_text(); m, s = t.split(':'); page.clock.run_for((int(m) * 60 + int(s) + 1) * 1000)
+            run_out(page)
         else:
             page.click('button.btn.primary')
         page.wait_for_timeout(80)
@@ -211,7 +244,7 @@ with sync_playwright() as p:
             page.click('button.btn.primary')
         elif kind.startswith(IS_LEAD) and page.locator('#up-next').count(): lead_step(page)
         elif kind in ('timed', 'stretch', 'set up'):
-            page.clock.run_for((timer_secs(page) + 1) * 1000)
+            run_out(page)
         else: page.click('button.btn.primary')
         page.wait_for_timeout(60); steps2 += 1
     pass_review(page, 'lift2')
@@ -275,7 +308,10 @@ with sync_playwright() as p:
 
     # ---- v1.6 Progress tab ----
     page.click('#tabs button[data-view="progress"]'); page.wait_for_selector('#progress-status')
-    check('v1.6 progress: week 1 status with three lifts done', 'Week 1 of 12' in page.locator('#progress-status h1').inner_text() and page.locator('#progress-status .adh-cell.done').count() == 4, [page.locator('#progress-status h1').inner_text(), page.locator('#progress-status .adh-cell.done').count()])
+    check('v1.6 progress: week 1 status with three lifts done', 'Week 1 of 12' in page.locator('#progress-status h1').inner_text() and page.locator('#progress-status .adh-row:not(.run) .adh-cell.done').count() == 3, [page.locator('#progress-status h1').inner_text(), page.locator('#progress-status .adh-row:not(.run) .adh-cell.done').count()])
+    # v1.18 (Cameron: "add runs to progress tracker")
+    check('v1.18 progress: the planned runs sit under the lifts and the logged run ticks its week', page.locator('#progress-status .adh-row.run').count() == 2 and page.locator('#progress-status .adh-row.run .adh-cell.done').count() == 1 and '1 run, 3.1 mi' in page.locator('#progress-status p.muted').inner_text(), page.locator('#progress-status').inner_text()[:300])
+    check('v1.18 progress: a Running card with miles per week, longest run and latest pace', page.locator('#run-progress').count() == 1 and '3.1' in page.locator('#run-progress').inner_text() and '8:52/mi' in page.locator('#run-progress').inner_text(), page.locator('#run-progress').inner_text()[:300] if page.locator('#run-progress').count() else 'no card')
     check('v1.6 progress: a strength card for each of the 7 benchmark lifts', page.locator('.strength-card').count() == 7, page.locator('.strength-card').count())
     sq_card = page.locator('.strength-card[data-ex="back_squat"]')
     check('v1.9 progress: one session shows the best set and next target, not a lone dot', sq_card.locator('.e1rm-now').inner_text().strip().endswith('lb') and sq_card.locator('.baseline-box').count() == 1 and sq_card.locator('.viz-dot').count() == 0 and '×' in sq_card.locator('.baseline-num').first.inner_text(), sq_card.inner_text())
@@ -315,7 +351,7 @@ with sync_playwright() as p:
     # polish: on a phone the Architecture page moved from the tab bar into Settings
     check('polish: phone tab bar has four tabs', page.locator('#tabs .tab:visible').count() == 4, page.locator('#tabs .tab:visible').count())
     page.click('#settings-btn'); page.wait_for_selector('#arch-open'); page.click('#arch-open'); page.wait_for_selector('.arch-svg')
-    check('architecture draws 18 boxes', page.locator('.arch-svg g[data-part]').count() == 18, page.locator('.arch-svg g[data-part]').count())
+    check('architecture draws 19 boxes (v1.18 adds Pacing)', page.locator('.arch-svg g[data-part]').count() == 19 and page.locator('.arch-svg g[data-part="pacing"]').count() == 1, page.locator('.arch-svg g[data-part]').count())
     page.fill('input[type="search"]', 'trim'); page.wait_for_timeout(100)
     check('search "trim" highlights Player and Rules', page.locator('.arch-svg .box.hit').count() >= 2, page.locator('.arch-svg .box.hit').count())
     check('search filters the part list', page.locator('.arch-part').count() <= 4, page.locator('.arch-part').count())
@@ -343,12 +379,20 @@ with sync_playwright() as p:
     said_from = page.evaluate('window.__said.length')
     # v1.5: Pause in the header during the warm-up
     check('v1.5 warm-up step shows Pause in the header', page.locator('.player-head #pause-btn').is_visible() and 'Pause' in page.locator('#pause-btn').inner_text())
+    # v1.18: a step's clock is #timer, or Left and Right on a step done one side at a time
+    step_clock = lambda: page.evaluate("() => ['#timer', '#side-left-time', '#side-right-time'].map(s => { const e = document.querySelector(s); return e ? e.textContent : ''; }).join('|')")
+    gym_secs = lambda: (lambda parts: parts[-1] + 60 * parts[-2] + (3600 * parts[0] if len(parts) == 3 else 0))([int(x) for x in page.locator('#gym-clock').inner_text().split(':')])
+    page.clock.run_for(3000)
     page.click('#pause-btn'); page.wait_for_timeout(100)
-    t0 = page.locator('#timer').inner_text(); page.clock.run_for(20000); page.wait_for_timeout(100)
-    check('v1.5 paused: banner shows, button says Resume, clock stands still', page.locator('#paused-banner').count() == 1 and 'Resume' in page.locator('#pause-btn').inner_text() and page.locator('#timer').inner_text() == t0, page.locator('#timer').inner_text())
+    t0 = step_clock(); g0 = gym_secs(); page.clock.run_for(20000); page.wait_for_timeout(100)
+    check('v1.5 paused: banner shows, button says Resume, clock stands still', page.locator('#paused-banner').count() == 1 and 'Resume' in page.locator('#pause-btn').inner_text() and step_clock() == t0, (t0, step_clock()))
+    red = page.evaluate("() => getComputedStyle(document.querySelector('#pause-btn')).backgroundColor.match(/\\d+/g).map(Number)")
+    check('v1.18 paused: the screen and the Pause button turn red', page.evaluate("document.body.getAttribute('data-kind')") == 'paused' and 'on' in page.locator('#pause-btn').get_attribute('class').split() and red[0] > 180 and red[1] < 90 and red[2] < 90, (page.evaluate("document.body.getAttribute('data-kind')"), red))
+    # the clocks on screen move on the app's 250 ms tick, so a second either way
+    check('v1.18 paused: the time in the gym keeps running and the banner counts the pause', gym_secs() - g0 in (19, 20, 21) and page.locator('#paused-for').inner_text() in ('0:19', '0:20', '0:21'), (g0, gym_secs(), page.locator('#paused-for').inner_text()))
     page.screenshot(path=f'{SHOTS}/v15-paused.png')
     page.click('#paused-banner'); page.wait_for_timeout(100)
-    check('v1.5 tapping the banner resumes', page.locator('#paused-banner').count() == 0)
+    check('v1.5 tapping the banner resumes', page.locator('#paused-banner').count() == 0 and page.evaluate("document.body.getAttribute('data-kind')") != 'paused' and 'Pause' in page.locator('#pause-btn').inner_text())
     # skip warmup to reach the first squat step
     for _ in range(12):
         k = page.locator('.step-kind').inner_text().lower()
@@ -363,10 +407,13 @@ with sync_playwright() as p:
             check('v1.5 swap sheet lists the later blocks (B, C, Finisher)', page.locator('.swap-choice').count() == 3, page.locator('.swap-choice').all_inner_texts())
             page.screenshot(path=f'{SHOTS}/v15-swap.png')
             page.locator('.swap-choice').first.click(); page.wait_for_timeout(150)
-            check('v1.5 after the swap, Romanian deadlift is up next and squat comes after', 'romanian deadlift' in page.locator('#up-next').inner_text().lower() and page.locator('.seg-label').all_inner_texts()[1].startswith('RDL'), page.locator('.seg-label').all_inner_texts())
+            check('v1.5 after the swap, Romanian deadlift is up next and squat comes after', 'romanian deadlift' in page.locator('#up-next').inner_text().lower() and page.locator('.seg-label').all_inner_texts()[1:3] == ['B', 'A'] and 'Block B' in page.locator('#where').inner_text(), (page.locator('.seg-label').all_inner_texts(), page.locator('#where').inner_text()))
             page.click('#swap-btn'); page.wait_for_selector('.swap-choice')
             page.locator('.swap-choice', has_text='Back squat').click(); page.wait_for_timeout(150)
-            check('v1.5 swapping back puts Back squat next again', 'back squat' in page.locator('#up-next').inner_text().lower() and page.locator('.seg-label').all_inner_texts()[1] == 'Squat', page.locator('.seg-label').all_inner_texts())
+            check('v1.5 swapping back puts Back squat next again', 'back squat' in page.locator('#up-next').inner_text().lower() and page.locator('.seg-label').all_inner_texts()[1:3] == ['A', 'B'] and page.locator('#where').inner_text().strip() == 'Block A · Back squat', (page.locator('.seg-label').all_inner_texts(), page.locator('#where').inner_text()))
+            # v1.18 (Cameron: "for upcoming sets, show reps and weight"): the set-up screen says what to load and what follows on that bar
+            up = page.locator('#up-next').inner_text()
+            check('v1.18 set-up screen: the next set with its weight and reps, then the ramp-ups and work sets to come', '45' in page.locator('#up-next .tile-weight').inner_text() and page.locator('#up-next .un-reps b').inner_text().strip() == '5' and 'Then ramp-up' in up and 'Then 3 work sets' in up and '170 lb × 4' in up, up)
             check('v1.5 a new block waits: the main button is Set-up done', page.locator('#confirm-btn').count() == 1)
             page.clock.run_for((timer_secs(page) + 20) * 1000); page.wait_for_timeout(120)
             check('v1.5 set-up clock runs out and holds for the tap', 'confirm' in page.locator('.step-kind').inner_text().lower() and timer_secs(page) == 0 and page.evaluate('window.__said.slice(-1)[0]') == 'Tap set-up done when you are ready.', (page.locator('.step-kind').inner_text(), page.evaluate('window.__said.slice(-1)[0]')))
@@ -378,38 +425,50 @@ with sync_playwright() as p:
             continue
         page.click('.player-actions button.btn.primary')
         page.wait_for_timeout(50)
-    check('week 3 squat starts with a ramp-up set at 45 lb', page.locator('.step-kind').inner_text().lower().startswith('ramp') and '45 lb' in page.locator('.step-target').inner_text(), page.locator('.step-target').inner_text())
+    check('week 3 squat starts with a ramp-up set at 45 lb', page.locator('.step-kind').inner_text().lower().startswith('ramp') and page.locator('.step-target .hw-num').inner_text().strip() == '45' and page.locator('.step-target .hw-unit').inner_text().strip() == 'lb', page.locator('.step-target').inner_text())
     page.screenshot(path=f'{SHOTS}/week3-ramp.png')
     said = page.evaluate('window.__said.slice(%d)' % said_from)
-    check('v1.4 voice: set-up, the coming set with weight and reps, then Go', any(x.startswith('Set up for Back squat') for x in said) and any('Back squat, ramp-up, 45 pounds, 5 reps' in x for x in said) and said[-1] == 'Go.', said[-6:])
+    check('v1.4 voice: set-up, the coming set with weight and reps, then Go', any(x == 'Set up for Back squat, ramp-up, 5 reps at 45 pounds. 1 minute.' for x in said) and said[-1] == 'Go.', said[-6:])
+    check('v1.18 voice: the get-ready count says the name and the reps again (Cameron: say reps)', said[-2] == 'Back squat, 5 reps.', said[-3:])
     check('v1.4 work screen: green, pace bar, where-you-are line', page.evaluate("document.body.getAttribute('data-kind')") == 'work' and page.locator('#pace-fill').count() == 1 and 'Barbell' in page.locator('.step-where').inner_text(), page.locator('.step-where').inner_text())
     page.clock.run_for(8000); page.wait_for_timeout(120)
     check('v1.4 pace bar counts reps', 'rep 1 of 5' in page.locator('#pace-text').inner_text().lower(), page.locator('#pace-text').inner_text())
     # let this ramp-up set end on its own timer
     page.clock.run_for((timer_secs(page) + 1) * 1000); page.wait_for_timeout(150)
     check('v1.4 set ended by itself and rest started', page.locator('.step-kind').inner_text().lower().startswith('rest') and page.evaluate("document.body.getAttribute('data-kind')") == 'rest', page.locator('.step-kind').inner_text())
-    check('v1.4 voice says rest and its length', page.evaluate('window.__said.slice(-1)[0]') == 'Rest. 1 minute.', page.evaluate('window.__said.slice(-1)[0]'))
-    check('v1.4 back button returns to the set', page.locator('#back-btn').count() == 1)
-    page.click('#back-btn'); page.wait_for_timeout(100)
+    import re
+    check('v1.4 voice says rest and its length, v1.18 then the next set with reps and weight', re.match(r'^Rest, 1 minute\. Then Back squat, ramp-up, \d+ reps? at \d+ pounds\.$', page.evaluate('window.__said.slice(-1)[0]')) is not None, page.evaluate('window.__said.slice(-1)[0]'))
+    check('v1.18 the rest before a heavier ramp-up says what to change on the bar and waits for the tap', page.locator('#confirm-btn').count() == 1 and 'Change the weight: 45 →' in page.locator('#change-weight').inner_text() and 'a side' in page.locator('#change-weight').inner_text(), page.locator('#up-next').inner_text())
+    # v1.18: Back moved from the header into the menu (the header holds Plan, the gym clock, Pause and the menu)
+    check('v1.18 header: Plan, time in the gym, Pause, menu', page.locator('.player-head #plan-btn').count() == 1 and page.locator('.player-head #gym-clock').count() == 1 and page.locator('#back-btn').count() == 0)
+    page.click('#more-btn'); page.wait_for_selector('.menu'); page.click('.menu-item:has-text("Back one step")'); page.wait_for_timeout(100)
     check('v1.4 back reopened the ramp-up set', page.locator('.step-kind').inner_text().lower().startswith('ramp'))
     # v1.1 checks: last-time line, PR on a heavier set, menu sheet, tint attribute
     check('week 3 body has work tint attr', page.evaluate("document.body.getAttribute('data-kind')") in ('work', 'calm'), page.evaluate("document.body.getAttribute('data-kind')"))
     # advance through the ramp-ups to the first work set
-    for _ in range(14):
+    bar_changes = 0
+    for _ in range(40):
         k = page.locator('.step-kind').inner_text().lower()
         if k == 'work': break
-        page.click('.player-actions button.btn.primary'); page.wait_for_timeout(60)
+        if page.locator('#confirm-btn').count():
+            bar_changes += 1
+            page.click('#confirm-btn'); page.clock.run_for(700)
+        else: page.click('.player-actions button.btn.primary')
+        page.wait_for_timeout(60)
+    check('v1.18 every bar change on the way up waited for Set-up done', bar_changes >= 3, bar_changes)
     check('v1.4 work set: large name, set n of N, focus cues, plain effort', 'Set 1 of 3' in page.locator('.step-where').inner_text() and page.locator('.tips .tip').count() >= 2 and 'Leave 2-3 in the tank' in page.locator('.hl-effort').inner_text(), page.locator('.step-main').inner_text()[:200])
     check('v1.14 cues are open on the first work set of a lift', page.locator('details.cues[open]').count() == 1)
     page.screenshot(path=f'{SHOTS}/v14-work-set.png')
     check('week 3 first work set shows Last time', page.locator('.last-time').count() == 1 and '165' in page.locator('.last-time').inner_text(), page.locator('.last-time').inner_text() if page.locator('.last-time').count() else 'none')
     page.screenshot(path=f'{SHOTS}/week3-workset.png')
     check('v1.2 strip has one segment per block (6 on Lift 1)', page.locator('.strip-bar .seg').count() == 6, page.locator('.seg-label').all_inner_texts())
-    check('v1.2 segment labels use exercise names', 'Squat' in page.locator('.seg-label').all_inner_texts() and any('RDL' in t for t in page.locator('.seg-label').all_inner_texts()), page.locator('.seg-label').all_inner_texts())
-    check('v1.2 status line shows block and steps', 'Block 2 of 6' in page.locator('#clock').inner_text() and 'steps' in page.locator('#clock').inner_text(), page.locator('#clock').inner_text())
+    check('v1.18 strip: one letter per block, the names are on the line above it in full', page.locator('.seg-label').all_inner_texts() == ['W', 'A', 'B', 'C', 'F', 'S'] and page.locator('#where').inner_text().strip() == 'Block A · Back squat' and page.evaluate("(() => { const b = document.querySelector('#where .block'); return b.scrollWidth <= b.clientWidth + 1; })()"), (page.locator('.seg-label').all_inner_texts(), page.locator('#where').inner_text()))
+    check('v1.18 status line: minutes left and when it ends', 'min left' in page.locator('#clock').inner_text() and 'ends' in page.locator('#clock').inner_text(), page.locator('#clock').inner_text())
     check('v1.14 the weight is the one big number, reps and effort on a line under it', page.locator('#hero-readout .hw-num').inner_text().strip() == '170' and page.locator('.hl-reps b').inner_text().strip() == '4' and page.locator('.readout .tile').count() == 0, page.locator('.readout').inner_text())
     page.click('.strip'); page.wait_for_selector('.overview')
     check('v1.2 overview lists blocks with set ticks', page.locator('.ov-block').count() == 6 and page.locator('.tick.current').count() == 1, page.locator('.ov-block').count())
+    sheet = page.locator('#plan-sheet').inner_text()
+    check('v1.18 whole workout: every lift with its sets, reps and weight, and the time in the gym', '3 sets · 170 lb × 4' in sheet and 'Romanian deadlift' in sheet and sheet.count(' lb × ') >= 4 and 'in the gym' in page.locator('#plan-sheet .ov-sub').inner_text(), sheet[:600])
     page.screenshot(path=f'{SHOTS}/overview.png', full_page=True)
     page.click('.overview button:has-text("Close")')
     page.click('button:has-text("Edit")'); page.fill('#in-weight', '195'); page.fill('#in-reps', '5')

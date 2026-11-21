@@ -55,7 +55,7 @@ export function haptic(kind = 'tap') {
   if (!hapticsOn || !navigator.vibrate) return;
   try { navigator.vibrate(PATTERNS[kind] || kind); } catch (e) { /* ignore */ }
 }
-const TAPPABLE = '.btn, .tab, .effort-chip, .jd-pm, .jd-val, .menu-item, .icon-btn, .pause-pill, .segmented button, .tag-btn, .stepper button, .chip-btn, .toggle input, .sess-btn, .ring-btn, .info-btn, .paused-banner, tr.tappable, .list-item';
+const TAPPABLE = '.btn, .tab, .effort-chip, .jd-pm, .jd-val, .menu-item, .icon-btn, .pause-pill, .segmented button, .tag-btn, .stepper button, .chip-btn, .toggle input, .sess-btn, .ring-btn, .info-btn, .paused-banner, tr.tappable, .list-item, .plan-pill, .strip, button.side, .jd-undo, .jd-title';
 export function installHaptics() {
   // on press, not release, so it lands with the finger; the main button gets a firmer one
   document.addEventListener('pointerdown', e => {
@@ -208,7 +208,7 @@ export function swipeToDelete(row, onDelete) {
 }
 
 // ---- v1.14: on Android the status bar takes the page color; during a workout it follows the phase ----
-const PHASE_BAR = { work: '#12432f', rest: '#1a3c73', ready: '#5c3c00', calm: '#1b202c' };
+const PHASE_BAR = { work: '#12432f', rest: '#1a3c73', ready: '#5c3c00', calm: '#1b202c', paused: '#7d1b21' };
 export function syncStatusBar() {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (!meta) return;

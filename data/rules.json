@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.7",
+  "rulesVersion": "1.8",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -115,6 +115,7 @@
   "timing": {
     "transitionSeconds": 30,
     "resumeWindowHours": 3,
+    "gymAwayMinutes": 30,
     "restWarningSeconds": 3,
     "description": "Set time = start-of-set seconds + reps x tempo (seconds per rep, from the exercise in plan.json), plus a margin. Setup seconds are added to the rest or transition before the first set of each exercise.",
     "defaultTempo": [
@@ -133,6 +134,8 @@
       "bodyweight": 2
     },
     "sideSwitchSeconds": 8,
+    "holdSwitchSeconds": 6,
+    "stretchSwitchSeconds": 8,
     "firstSetSetupSeconds": {
       "barbell": 60,
       "dumbbell": 30,
@@ -145,8 +148,62 @@
     "getReadySeconds": 5,
     "extendSeconds": 15,
     "rampSetSeconds": 30,
-    "confirmSetup": "block",
-    "confirmSetupDescription": "Before the first set of each new block the set-up countdown waits for a 'Set-up done' tap instead of starting the set by itself. Values: block, exercise, off. The Settings toggle switches it off on the phone."
+    "confirmSetup": "exercise",
+    "confirmSetupDescription": "v1.18: the countdown before the first set of each exercise waits for a 'Set-up done' tap instead of starting the set by itself (values: exercise, block, off). confirmWeightChange lists the equipment where a set whose weight differs from the set before it waits too (the bar has to be reloaded). confirmBeforeBlocks lists block types that wait for a 'Ready' tap before they start. A tap during a rest keeps the rest and only drops the set-up time added to it. The Settings toggle switches all of it off on the phone.",
+    "confirmWeightChange": [
+      "barbell"
+    ],
+    "confirmBeforeBlocks": [
+      "stretch",
+      "emom"
+    ],
+    "gymClockDescription": "v1.18: the clock in the workout header counts from Start to now and keeps running through a pause (time in the gym). Working time (what is compared with the plan) still leaves pauses out. If the app was closed for more than gymAwayMinutes and the session is then resumed, that gap is not gym time.",
+    "sidesDescription": "v1.18: holdSwitchSeconds is the change-over between the left and the right side of a hold or a stretch; stretchSwitchSeconds is the change-over into the next stretch; sideSwitchSeconds (above) is the change-over inside a set done one side at a time."
+  },
+  "cues": {
+    "note": "v1.18 beeps. Each tone is [frequency Hz, start s, length s]. loud is the default voice: a square wave held at its level for the whole beep, through a low-pass filter so it stays a beep and not a buzz. Rendered side by side it is 12 to 18 dB louder than the old beeps, which were a sine wave that faded from the first instant. gain 0.8 is as high as it goes without clipping (the filtered square overshoots by about a fifth). normal is the old, softer voice; Settings > Loud beeps picks between them.",
+    "loud": {
+      "wave": "square",
+      "gain": 0.8,
+      "lowpassHz": 5200,
+      "sustain": true
+    },
+    "normal": {
+      "wave": "sine",
+      "gain": 0.4,
+      "lowpassHz": 0,
+      "sustain": false
+    },
+    "tones": {
+      "warn": [[1175, 0, 0.12]],
+      "tick": [[1175, 0, 0.14]],
+      "go": [[1568, 0, 0.6]],
+      "setEnd": [[1175, 0, 0.2], [784, 0.24, 0.42]],
+      "end": [[1175, 0, 0.2], [1568, 0.24, 0.36]],
+      "side": [[1047, 0, 0.16], [1047, 0.26, 0.16]],
+      "pr": [[784, 0, 0.14], [1047, 0.16, 0.14], [1568, 0.32, 0.42]]
+    }
+  },
+  "pacing": {
+    "note": "v1.18, Cameron Nov 20: adjust the time a set gets when he keeps ending it early or keeps needing more. A set counts as early when Done is tapped with at least max(earlySeconds, earlyFraction x the set's time) left for the reps he did; late when it was extended (+15 s) or paused for pausedLateSeconds or more. After inARow sets of an exercise in a row the same way, the seconds per rep become the slowest of those sets (plus cushion when shortening), kept between minFactor and maxFactor of the plan's tempo; within deadband of the tempo it goes back to the tempo. A lift with keepTempo in plan.json is never shortened. Ramp-up, baseline, retest, hold and all-out sets, sets typed in by hand and taps under minRepSeconds a rep are left out. Set-up time before an exercise's first set follows the time he takes until the Set-up done tap: after setup.inARow sessions in a row off by max(moreSeconds or lessSeconds, fraction x the allowed time) it becomes their average, between minSeconds and maxSeconds. Rest times are never changed here: they are part of the plan.",
+    "inARow": 3,
+    "earlySeconds": 5,
+    "earlyFraction": 0.15,
+    "pausedLateSeconds": 5,
+    "pauseCapSeconds": 30,
+    "minRepSeconds": 0.8,
+    "cushion": 0.08,
+    "minFactor": 0.5,
+    "maxFactor": 1.75,
+    "deadband": 0.07,
+    "setup": {
+      "inARow": 2,
+      "moreSeconds": 15,
+      "lessSeconds": 10,
+      "fraction": 0.25,
+      "minSeconds": 10,
+      "maxSeconds": 300
+    }
   },
   "e1rm": {
     "formula": "epley"

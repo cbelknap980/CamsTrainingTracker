@@ -37,9 +37,13 @@ export function applyRestAdjust(session, restAdjust) {
  *   ramp, baseline, retest, fillFromBaseline, iftime,
  *   trimKind: 'rest' | 'finisherRound' | 'iftime' | null, protectedBlock,
  *   v1.4: auto (the set ends on its own timer), startSeconds, repSeconds, tips, equipment,
- *         setupSeconds / setupFor (on the rest or transition before an exercise's first set), lead (inserted set-up step) }
+ *         setupSeconds / setupFor (on the rest or transition before an exercise's first set), lead (inserted set-up step)
+ *   v1.18: sideSeconds (a stretch done one side at a time: one step, left then right), change (the short change-over
+ *         before the next stretch), where (a line under the name, "Both legs at once"), setupExercise, learned
+ *         (the set's time follows Cameron's pace, see pacing.js) }
+ * `pacing` (v1.18) = { exerciseId: { repSeconds, setupSeconds } } from pacing.js; left out, every time comes from the rules.
  */
-export function buildTimeline({ plan, rules, settings, sessionId, session: custom, week, targets, history }) {
+export function buildTimeline({ plan, rules, settings, sessionId, session: custom, week, targets, history, pacing }) {
   // v1.8: `session` can be passed in directly (the catch-up session is built on the fly, it is not in plan.json)
   const raw = custom || plan.sessions.find(s => s.id === sessionId);
   if (!raw) throw new Error(`Unknown session ${sessionId}`);
@@ -49,7 +53,7 @@ export function buildTimeline({ plan, rules, settings, sessionId, session: custo
   const t = rules.timing;
   const transitionSeconds = (settings && settings.transitionSeconds) || t.transitionSeconds;
   const steps = [];
-  const ctx = { plan, rules, settings, week, phase, targets: targets || {}, history: history || {}, steps, transitionSeconds, exactSets: !!session.catchUp };
+  const ctx = { plan, rules, settings, week, phase, targets: targets || {}, history: history || {}, steps, transitionSeconds, exactSets: !!session.catchUp, pacing: pacing || null };
 
   const blocks = session.blocks;
   blocks.forEach((block, bi) => {
@@ -77,7 +81,7 @@ export function buildTimeline({ plan, rules, settings, sessionId, session: custo
     }
   });
 
-  const withLeads = addLeadIns(ctx, steps);
+  const withLeads = leadIns(ctx, steps);
   steps.length = 0; steps.push(...withLeads);
   steps.forEach((s, i) => { s.idx = i; });
   const plannedSeconds = steps.reduce((a, s) => a + (s.seconds || 0), 0);
@@ -89,16 +93,16 @@ export function phaseFor(plan, week) {
   return plan.phases.find(p => p.weeks.includes(week)) || { id: week > 12 ? 'after' : 'before', name: week > 12 ? 'After the block' : 'Before the block' };
 }
 
-function blankStep() {
+export function blankStep() {
   return { target: null, repRange: null, effort: null, effortText: '', rpeDefault: null, cue: '', exerciseId: null, last: null,
-    setIndex: null, setCount: null, round: null, roundCount: null, perSide: false, holdSeconds: null,
+    setIndex: null, setCount: null, round: null, roundCount: null, perSide: false, holdSeconds: null, sideSeconds: null,
     ramp: false, baseline: false, retest: false, fillFromBaseline: false, iftime: false, trimKind: null, protectedBlock: false,
     countdown: false, seconds: 0 };
 }
 
 function push(ctx, step) {
   const s = { target: null, repRange: null, effort: null, effortText: '', rpeDefault: null, cue: '', exerciseId: null, last: null,
-    setIndex: null, setCount: null, round: null, roundCount: null, perSide: false, holdSeconds: null,
+    setIndex: null, setCount: null, round: null, roundCount: null, perSide: false, holdSeconds: null, sideSeconds: null,
     ramp: false, baseline: false, retest: false, fillFromBaseline: false, iftime: false, trimKind: null, protectedBlock: false,
     countdown: false, seconds: 0, ...step };
   ctx.steps.push(s);
@@ -140,20 +144,30 @@ export function repSecondsFor(rules, ex) {
   return tempo.reduce((a, b) => a + b, 0);
 }
 
-export function setTiming(rules, ex, reps, perSide) {
+/** v1.18: `learned` = { repSeconds } from pacing.js replaces the tempo's seconds per rep when Cameron's pace differs. */
+export function setTiming(rules, ex, reps, perSide, learned) {
   const t = rules.timing;
-  const repSeconds = repSecondsFor(rules, ex);
+  const tempoSeconds = repSecondsFor(rules, ex);
+  const isLearned = !!(learned && learned.repSeconds > 0);
+  const repSeconds = isLearned ? learned.repSeconds : tempoSeconds;
   const startSeconds = (t.setStartSeconds && t.setStartSeconds[ex && ex.equipment]) || 3;
   const sides = perSide ? 2 : 1;
   const work = (reps || 8) * repSeconds * sides + (perSide ? t.sideSwitchSeconds : 0);
   const seconds = Math.round(startSeconds + work * (1 + t.setMarginFraction));
-  return { seconds, repSeconds, startSeconds };
+  return { seconds, repSeconds, startSeconds, tempoSeconds, learned: isLearned };
 }
 
-function timedSet(ctx, ex, reps, perSide) {
-  const tm = setTiming(ctx.rules, ex, reps, perSide);
+function timedSet(ctx, ex, reps, perSide, exerciseId) {
+  const tm = setTiming(ctx.rules, ex, reps, perSide, ctx.pacing && exerciseId ? ctx.pacing[exerciseId] : null);
   return { seconds: tm.seconds, repSeconds: tm.repSeconds, startSeconds: tm.startSeconds, auto: true,
-    tips: (ex && ex.tips) || [], equipment: equipmentFor(ex) };
+    ...(tm.learned ? { learned: true } : {}), tips: (ex && ex.tips) || [], equipment: equipmentFor(ex) };
+}
+
+/** v1.18: set-up seconds before an exercise's first set: by equipment, or what pacing.js learned for that exercise. */
+export function setupSecondsFor(rules, ex, learned) {
+  const t = rules.timing;
+  if (learned && learned.setupSeconds > 0) return learned.setupSeconds;
+  return (t.firstSetSetupSeconds && t.firstSetSetupSeconds[ex && ex.equipment]) || t.switchSeconds;
 }
 
 /**
@@ -161,29 +175,41 @@ function timedSet(ctx, ex, reps, perSide) {
  * The first set of each exercise gets set-up time by equipment: added to the rest before it, or used as the
  * length of the transition before it. A set that follows another set directly (finisher rounds) gets a short
  * switch step.
+ * v1.18: exported and safe to run again on part of a timeline (the Equipment taken swaps reorder sets and then
+ * rebuild the lead-ins): inserted steps that are not done are dropped and set-up time is taken back out of rests
+ * and transitions first. `seenBefore` = exercises whose first set comes earlier in the session.
  */
-function addLeadIns(ctx, steps) {
-  const t = ctx.rules.timing;
+export function leadIns(env, steps, seenBefore) {
+  const { plan, rules, pacing } = env;
+  const t = rules.timing;
   const out = [];
-  const seen = new Set();
+  const seen = new Set(seenBefore || []);
   for (const s of steps) {
+    if (s.lead && !s.done && !s.skipped) continue;
+    if ((s.kind === 'rest' || s.kind === 'transition') && !s.lead && !s.done && !s.skipped && s.setupFor != null) {
+      if (s.kind === 'transition') { if (s.baseSeconds != null) s.seconds = s.baseSeconds; }
+      else s.seconds = Math.max(10, s.seconds - (s.setupSeconds || 0));
+      s.setupFor = null; s.setupSeconds = 0; s.setupExercise = null;
+    }
     if (s.kind === 'set' && s.exerciseId) {
-      const ex = ctx.plan.exercises[s.exerciseId];
+      const ex = plan.exercises[s.exerciseId];
       const first = !seen.has(s.exerciseId);
       seen.add(s.exerciseId);
-      const setup = first ? ((t.firstSetSetupSeconds && t.firstSetSetupSeconds[ex && ex.equipment]) || t.switchSeconds) : 0;
+      const setup = first ? setupSecondsFor(rules, ex, pacing && pacing[s.exerciseId]) : 0;
       const prev = out[out.length - 1];
       const label = `${s.name}${ex && equipmentFor(ex) ? ' (' + equipmentFor(ex).toLowerCase() + ')' : ''}`;
-      if (prev && (prev.kind === 'rest' || prev.kind === 'transition') && !prev.lead) {
+      if (prev && (prev.kind === 'rest' || prev.kind === 'transition') && !prev.lead && !prev.change && !prev.done && !prev.skipped) {
         if (first) {
-          if (prev.kind === 'transition') prev.seconds = Math.max(prev.seconds, setup);
+          if (prev.kind === 'transition') { prev.baseSeconds = prev.baseSeconds != null ? prev.baseSeconds : prev.seconds; prev.seconds = Math.max(prev.seconds, setup); prev.setupSeconds = prev.seconds; }
           else { prev.seconds += setup; prev.setupSeconds = setup; }
-          prev.setupFor = label;
+          prev.setupFor = label; prev.setupExercise = s.exerciseId;
         }
       } else {
+        const seconds = first ? Math.max(setup, t.switchSeconds) : t.switchSeconds;
         out.push({ ...blankStep(), kind: 'transition', blockId: s.blockId, blockName: s.blockName, blockType: s.blockType,
-          name: first ? `Set up: ${label}` : `Switch to ${s.name}`, seconds: first ? Math.max(setup, t.switchSeconds) : t.switchSeconds,
-          countdown: true, lead: true, setupFor: first ? label : null, round: s.round, roundCount: s.roundCount,
+          name: first ? `Set up: ${label}` : `Switch to ${s.name}`, seconds,
+          countdown: true, lead: true, setupFor: first ? label : null, setupSeconds: first ? seconds : 0, setupExercise: first ? s.exerciseId : null,
+          round: s.round, roundCount: s.roundCount,
           iftime: s.iftime, trimKind: s.iftime ? 'iftime' : null, protectedBlock: s.protectedBlock });
       }
     }
@@ -245,7 +271,7 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
         exerciseId: item.exercise, setIndex: null, setCount: null, ramp: true,
         target: { weight: w, reps: rs.reps }, repRange: [rs.reps, rs.reps], effort: null,
         effortText: rs.label ? `Ramp-up: ${rs.label.toLowerCase()}` : `Ramp-up ${i} of ${r.rampUp.steps.length - 1}`, rpeDefault: null,
-        cue: '', ...timedSet(ctx, ex, rs.reps, false), tips: [] });
+        cue: '', ...timedSet(ctx, ex, rs.reps, false, null), tips: [] });
       push(ctx, { kind: 'rest', blockId: block.id, blockName: block.name, blockType: block.type, name: 'Rest',
         seconds: r.rampUp.restSeconds, countdown: true, trimKind: 'rest' });
     });
@@ -261,7 +287,7 @@ function workSet(ctx, block, item, ex, k, sets, target, repRange, derived, extra
     exerciseId: item.exercise, setIndex: k + 1, setCount: sets,
     target: { weight: derived ? null : target.weight, reps: target.reps }, repRange,
     effort: item.effort, effortText: effortText(item.effort), rpeDefault: effortToRpe(item.effort),
-    ...timedSet(ctx, ex, target.reps, !!ex.perSide), perSide: !!ex.perSide, fillFromBaseline: derived,
+    ...timedSet(ctx, ex, target.reps, !!ex.perSide, item.exercise), perSide: !!ex.perSide, fillFromBaseline: derived,
     cue: ex.cue || '', protectedBlock: !!block.protected, ...(extra || {})
   });
 }
@@ -331,15 +357,18 @@ function addFinisher(ctx, block) {
       const ex = ctx.plan.exercises[item.exercise];
       const repRange = item.reps ? [...item.reps] : null;
       const target = item.seconds ? { weight: null, reps: item.seconds } : targetFor(ctx, item.exercise, repRange);
+      const perSide = !!(item.perSide || (ex && ex.perSide));
+      // v1.18: a hold done one side at a time is left, a short change-over, then right (the player splits the clock)
+      const holdPlan = perSide ? item.seconds * 2 + (ctx.rules.timing.holdSwitchSeconds || 0) + 4 : item.seconds + 10;
       push(ctx, {
         kind: 'set', blockId: block.id, blockName: block.name, blockType: 'finisher', name: ex.name,
         exerciseId: item.exercise, setIndex: r, setCount: rounds, round: r, roundCount: rounds,
         target, repRange: item.seconds ? [item.seconds, item.seconds] : repRange,
         effort: item.effort, effortText: effortText(item.effort), rpeDefault: effortToRpe(item.effort),
-        holdSeconds: item.seconds || null, perSide: !!(item.perSide || (ex && ex.perSide)),
+        holdSeconds: item.seconds || null, perSide,
         ...(item.seconds
-          ? { seconds: item.seconds * ((item.perSide || (ex && ex.perSide)) ? 2 : 1) + 10, tips: (ex && ex.tips) || [], equipment: equipmentFor(ex) }
-          : timedSet(ctx, ex, target.reps, !!(item.perSide || (ex && ex.perSide)))),
+          ? { seconds: holdPlan, tips: (ex && ex.tips) || [], equipment: equipmentFor(ex) }
+          : timedSet(ctx, ex, target.reps, perSide, item.exercise)),
         countdown: !!item.seconds, cue: ex.cue || '', protectedBlock: !!block.protected
       });
     });
@@ -375,14 +404,20 @@ function addEmom(ctx, block) {
   }
 }
 
+// v1.18: a stretch done one side at a time is one step (left, a short change-over, right) so the screen can show
+// both sides; a short change-over step sits between two stretches so each hold gets its full time.
 function addStretch(ctx, block) {
   const sb = ctx.plan.stretchBlock;
-  sb.items.forEach(item => {
-    const sides = item.perSide ? ['Left', 'Right'] : [null];
-    sides.forEach(side => {
-      push(ctx, { kind: 'stretch', blockId: block.id, blockName: block.name, blockType: 'stretch',
-        name: side ? `${item.name}, ${side.toLowerCase()}` : item.name, seconds: item.seconds, countdown: true, cue: item.cue || '' });
-    });
+  const t = ctx.rules.timing;
+  sb.items.forEach((item, i) => {
+    const base = { blockId: block.id, blockName: block.name, blockType: 'stretch' };
+    if (i > 0 && t.stretchSwitchSeconds) {
+      push(ctx, { ...base, kind: 'transition', name: `Next: ${item.name}`, seconds: t.stretchSwitchSeconds, countdown: true, change: true });
+    }
+    push(ctx, { ...base, kind: 'stretch', name: item.name, countdown: true, cue: item.cue || '', where: item.where || '',
+      ...(item.perSide
+        ? { perSide: true, sideSeconds: item.seconds, seconds: item.seconds * 2 + (t.holdSwitchSeconds || 0) }
+        : { seconds: item.seconds }) });
   });
 }
 
