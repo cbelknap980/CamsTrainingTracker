@@ -17,7 +17,7 @@ import { pacingConfig, setObservation, setupObservation, learnRep, learnSetup, l
 import { runAdherence, runSummary } from '../js/progress.js';
 import { gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from '../js/logger.js';
 import { Player, fmtGym, speakable } from '../js/player.js';
-import { markAmrap, amrapCheck, amrapRepsText, isAmrapWeek } from '../js/amrap.js';
+import { markAmrap, amrapCheck, amrapRepsText, isAmrapWeek, allOutOutcome } from '../js/amrap.js';
 import { undoKneeSwap } from '../js/knee.js';
 import { swapScore, latestScore, applyKneeSwap, swappable, askIdx, morningDue, kneeHeld, kneeTrend, kneeEntry } from '../js/knee.js';
 
@@ -908,6 +908,20 @@ console.log('v1.19 all-out set');
   // (165 + 25) x (1 + 12/30) = 266; 266 / (1 + 8/30) - 165 = 45 -> capped at 25 + 15 = 40
   check('weighted pull-up: bodyweight counts in the all-out e1RM, capped at +15', pu.targets.weighted_pullup.weight === 40, pu.targets.weighted_pullup);
   check('amrapCheck: reserve is reps + 1 - top', amrapCheck({ rules, set: { weight: 100, reps: 8 }, top: 6, bottom: 4, baseWeight: 100, inc: 5, up: true }).reserve === 3);
+  // R4 rule 13 helper (for the v1.18.1 engine): the same rule on an outcome object
+  const sqs = (n4, extra) => [{ weight: 185, reps: 6, rpe: 8, done: true, target: { weight: 185, reps: 6 } }, { weight: 185, reps: 6, rpe: 8, done: true, target: { weight: 185, reps: 6 } }, { weight: 185, reps: n4, rpe: 10, done: true, amrap: true, target: { weight: 185, reps: 6 }, ...(extra || {}) }];
+  const tgt = { weight: 185, reps: 6, stall: 1 };
+  const topUp = { weight: 190, reps: 4, stall: 0, verdict: 'up', key: 'top' };
+  let ao = allOutOutcome({ rules, outcome: topUp, target: tgt, done: sqs(6), range: [4, 6], inc: 5 });
+  check('R4 rule 13: an up with the all-out set at the top becomes a hold, flat count unchanged', ao.outcome.verdict === 'hold' && ao.outcome.weight === 185 && ao.outcome.reps === 6 && ao.outcome.stall === 1 && ao.outcome.key === 'allOutHold', ao);
+  ao = allOutOutcome({ rules, outcome: topUp, target: tgt, done: sqs(12), range: [4, 6], inc: 5 });
+  check('R4 rule 13: reserve 7 jumps to 200 (3 steps)', ao.outcome.weight === 200 && ao.outcome.reps === 4 && ao.outcome.stall === 0 && ao.outcome.key === 'allOutJump' && /Next time 200 lb x 4/.test(ao.text), ao);
+  ao = allOutOutcome({ rules, outcome: topUp, target: tgt, done: sqs(8), range: [4, 6], inc: 5 });
+  check('R4 rule 13: reserve 3 changes nothing, the line gets a note', !ao.outcome && /All-out set: 8 reps/.test(ao.note), ao);
+  const short = sqs(12); short[0].reps = 5;
+  ao = allOutOutcome({ rules, outcome: { weight: 185, reps: 6, stall: 2, verdict: 'hold', key: 'miss' }, target: tgt, done: short, range: [4, 6], inc: 5 });
+  check('R4 rule 13: no jump when another set fell short of its target', !ao.outcome && /only on a day every other set/.test(ao.note), ao);
+  check('R4 rule 13: nothing on a light week, an unrated session, or without an all-out set', allOutOutcome({ rules, outcome: { ...topUp, key: 'light' }, target: tgt, done: sqs(12), range: [4, 6], inc: 5 }) === null && allOutOutcome({ rules, outcome: topUp, target: tgt, done: sqs(12).map(s => ({ ...s, amrap: false })), range: [4, 6], inc: 5 }) === null);
   check('the all-out set still counts for PRs', r4.prs.length >= 0 && run([sq(185, 6, 8), sq(185, 6, 8), sq(185, 12, 9.5, { amrap: true })]).prs.some(p => p.kind === 'e1rm'));
 }
 

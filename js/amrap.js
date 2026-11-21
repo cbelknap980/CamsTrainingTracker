@@ -74,3 +74,37 @@ export function amrapCheck({ rules, set, top, bottom, baseWeight, inc, bwAdd = 0
   }
   return { kind: 'note', reserve, text: `All-out set: ${reps} reps, about ${reserve} left at ${top}, in line with your effort taps.` };
 }
+
+/**
+ * R4 rule 13 (v1.18.1 engine): the all-out check on a main lift's outcome, after mainLiftNext and before the target
+ * is written. outcome = { weight, reps, stall, verdict, key, ... }; target = { weight, reps, stall } going in;
+ * done = the done work sets; range = [lo, hi]. Returns null when there is no all-out set or it changes nothing,
+ * else { outcome, text, reason } (text without the "Name: detail." start), or { note } to add to the usual line.
+ * - reserve <= holdBelowReserve turns an 'up' into a hold at the same weight, flat count unchanged;
+ * - reserve >= bigReserve, with every other set at its target weight and reps, raises the weight to what the
+ *   all-out set says (amrapCheck), when that is more than the outcome already gives.
+ */
+export function allOutOutcome({ rules, outcome, target, done, range, inc, bwAdd = 0 }) {
+  const set = (done || []).find(s => s.amrap && s.done !== false && !s.skipped);
+  if (!set || !outcome || ['nothing', 'light', 'unrated'].includes(outcome.key)) return null;
+  const [lo, hi] = range;
+  const up = outcome.verdict === 'up';
+  const c = amrapCheck({ rules, set, top: hi, bottom: lo, baseWeight: set.weight != null ? set.weight : target.weight, inc, bwAdd, up });
+  if (!c) return null;
+  if (c.kind === 'hold') {
+    const reps = outcome.key === 'top' ? hi : Math.min(Math.max(target.reps != null ? target.reps : lo, lo), hi);
+    return { outcome: { ...outcome, weight: target.weight, reps, stall: target.stall || 0, verdict: 'hold', key: 'allOutHold' },
+      text: `${c.text.replace(' Same weight next time.', '')} Same target next time.`, reason: c.reason };
+  }
+  if (c.kind === 'jump') {
+    const others = done.filter(s => s !== set && !s.amrap);
+    const met = others.every(s => s.done !== false && !s.skipped && (!s.target || ((s.target.reps == null || (s.reps || 0) >= s.target.reps) && (s.target.weight == null || s.weight == null || s.weight >= s.target.weight))));
+    if (!met || outcome.verdict === 'drop') return { note: `All-out set: ${set.reps} reps. That raises the weight further only on a day every other set reaches its target.` };
+    if (outcome.weight != null && c.weight <= outcome.weight) return { note: c.text };
+    return { outcome: { ...outcome, weight: c.weight, reps: lo, stall: 0, verdict: 'up', key: 'allOutJump' },
+      text: `${c.text} Next time ${fmtW(c.weight)} lb x ${lo}.`, reason: c.reason };
+  }
+  return { note: c.text };
+}
+
+function fmtW(w) { return Number.isInteger(w) ? `${w}` : w.toFixed(1); }
