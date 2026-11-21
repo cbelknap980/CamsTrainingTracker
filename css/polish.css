@@ -413,3 +413,34 @@ body:not(.in-session) .strength-grid { gap: 10px; }
 #tabs .tab { font-size: 11.5px; }
 #tabs { padding-top: 6px; }
 body.computer #tabs .tab { font-size: 0.95rem; }
+
+/* ---- v1.19: notes per exercise, the all-out set, the knee check ---- */
+.pre-left { display: block; width: 100%; min-height: 40px; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 8px; }
+.pre-left:active { background: var(--surface-2); }
+.pre-left .pre-name { display: flex; align-items: center; gap: 6px; }
+.pre-note-ico { display: inline-flex; color: var(--muted); opacity: 0.55; }
+.pre-note-ico.on { color: var(--accent); opacity: 1; }
+.pre-note-ico svg { width: 14px; height: 14px; }
+.ex-note { display: flex; align-items: flex-start; gap: 6px; color: var(--accent); font-size: var(--t-small); font-weight: 600; line-height: 1.3; }
+.ex-note .ico { flex: none; display: inline-flex; margin-top: 1px; }
+.ex-note .ico svg { width: 14px; height: 14px; }
+.pre-note { margin-top: 3px; }
+.note-sheet input[type="text"] { width: 100%; min-height: 48px; font-size: 1.05rem; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); }
+.note-count { font-size: var(--t-label); text-align: right; margin: 4px 0 10px; }
+
+.knee-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.knee-btn { min-height: 44px; min-width: 40px; border: 0; border-radius: 10px; background: var(--surface-2); color: var(--text); font: inherit; font-weight: 800; font-size: 1.05rem; font-variant-numeric: tabular-nums; cursor: pointer; box-shadow: inset 0 -3px 0 rgba(61, 204, 122, 0.55); }
+.knee-btn.high { box-shadow: inset 0 -3px 0 rgba(255, 107, 107, 0.7); }
+.knee-btn.on { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+.knee-btn:active { transform: scale(0.95); }
+.knee-sheet .knee-foot { font-size: var(--t-small); margin: 10px 0; }
+.knee-note { border-left: 3px solid var(--bad); }
+.knee-note .lines { margin: 0 0 8px; }
+.knee-hero { color: var(--text); font-weight: 600; }
+#knee-skip { min-height: 40px; }
+.knee-head b { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.knee-chart { margin-top: 6px; }
+.knee-chart .knee-line { stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.knee-chart .knee-line-swap { stroke: var(--bad); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.6; vector-effect: non-scaling-stroke; }
+.knee-chart .knee-dot { fill: var(--accent); }
+.knee-chart .knee-dot.high { fill: var(--bad); }

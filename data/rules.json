@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.7",
+  "rulesVersion": "1.8",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -319,5 +319,65 @@
     "minGapLb": 15,
     "maxLb": 500,
     "extraReps": 10
+  },
+  "amrap": {
+    "note": "v1.19 (idea 7): on these main lifts, in these weeks, the last work set is all-out: at least the target reps, then as many good reps as he can, stopping when a rep slows right down or form slips (about 1 rep short of failure). The set does not end on its timer and its effort tap is left out of the main-lift test. Reserve at the top of the range = its reps + 1 - the top. Reserve of holdBelowReserve or less: the earlier Solid taps were optimistic, so the weight holds even if every set reached the top (no miss counted). Reserve of bigReserve or more: he is leaving reps in the tank, so the next target is the weight that set says he can lift for the top of the range with solidReserve reps left (from its e1RM), at least one increment and at most maxSteps increments up.",
+    "exercises": [
+      "back_squat",
+      "front_squat",
+      "strict_press",
+      "push_press",
+      "weighted_pullup"
+    ],
+    "weeks": [
+      4,
+      6,
+      9,
+      11
+    ],
+    "label": "All-out set",
+    "stopWhen": "Stop when a rep slows right down or your form slips.",
+    "rpeDefault": 9.5,
+    "holdBelowReserve": 1,
+    "bigReserve": 5,
+    "solidReserve": 2,
+    "maxSteps": 3,
+    "extraRepsForTiming": 4
+  },
+  "knee": {
+    "note": "v1.19 (idea 1): a 0-10 knee pain score after the first work set of the first askAfter lift in a session, and on Home the day after a session with one of them. A score of swapAt or more swaps today's remaining sets (and, from a score within carryDays, the next session) to the fallbacks below, and holds those lifts' weights. Box squat and hang power clean are the plan's own knee swaps (plan.json cues); the box front squat applies the same idea to the front squat. Rating it again on the start page replaces the score.",
+    "askAfter": [
+      "back_squat",
+      "front_squat",
+      "rdl"
+    ],
+    "swapAt": 4,
+    "carryDays": 4,
+    "fallbacks": {
+      "back_squat": {
+        "name": "Box squat, 3-s lowering",
+        "cue": "Squat to a box at about parallel. Lower for 3 seconds, touch the box without relaxing, drive up. Same weight as the plan.",
+        "tips": [
+          "Shins stay close to vertical; sit back to the box.",
+          "Stop the set if the knee gets sharper."
+        ]
+      },
+      "front_squat": {
+        "name": "Box front squat, 3-s lowering",
+        "cue": "Front squat to a box at about parallel. Lower for 3 seconds, touch the box, drive up. Same weight as the plan.",
+        "tips": [
+          "Elbows high, sit back to the box.",
+          "Stop the set if the knee gets sharper."
+        ]
+      },
+      "power_clean": {
+        "name": "Hang power clean",
+        "cue": "Start from just above the knee and catch high. No deep catch today.",
+        "tips": [
+          "Hips back to load the hang, then jump.",
+          "Fast elbows; catch tall."
+        ]
+      }
+    }
   }
 }

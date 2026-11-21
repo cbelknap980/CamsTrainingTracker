@@ -8,7 +8,7 @@ const FILES = [
   './manifest.webmanifest',
   './css/app.css', './css/polish.css', './vendor/fonts/inter-var.woff2',
   './js/app.js', './js/builder.js', './js/player.js', './js/logger.js', './js/progression.js',
-  './js/store.js', './js/export.js', './js/architecture.js', './js/data.js', './js/ui.js', './js/icons.js', './js/progress.js', './js/sync.js', './js/catchup.js', './js/coach.js', './js/plan-view.js', './js/runs.js', './js/runs-view.js', './js/garmin.js', './js/rings.js', './js/share-card.js', './js/sanity.js',
+  './js/store.js', './js/export.js', './js/architecture.js', './js/data.js', './js/ui.js', './js/icons.js', './js/progress.js', './js/sync.js', './js/catchup.js', './js/coach.js', './js/plan-view.js', './js/runs.js', './js/runs-view.js', './js/garmin.js', './js/rings.js', './js/share-card.js', './js/sanity.js', './js/amrap.js', './js/knee.js', './js/knee-ui.js', './js/notes.js',
   './data/plan.json', './data/rules.json', './data/settings.json', './data/architecture.json', './data/muscles.json', './data/goals.json', './data/garmin-job.yml',
   './vendor/xlsx.mini.min.js',
   './icons/icon-192.png', './icons/icon-512.png'

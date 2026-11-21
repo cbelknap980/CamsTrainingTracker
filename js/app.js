@@ -20,6 +20,10 @@ import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp } from './ui.js';
 import { weekRings, ringsCard } from './rings.js';
 import { flaggedGroups, applyNumberFix } from './sanity.js';
+import { getExNotes, getKneeLog } from './store.js';
+import { noteText, noteLine, editNote } from './notes.js';
+import { swapScore, swappable, applyKneeSwap, morningDue } from './knee.js';
+import { askKnee, morningCard, swapNote, trendCard } from './knee-ui.js';
 
 const view = document.getElementById('view');
 let D = null; // { plan, rules, settingsDefaults, architecture }
@@ -355,6 +359,14 @@ async function renderHome() {
   const flags = flaggedGroups(allSessions, D.plan, D.rules);
   if (flags.length) view.appendChild(checkNumbersCard(flags, allSessions));
 
+  // v1.19: the day after a squat or RDL day, one tap for the knee. Skip hides it for today (this device only).
+  const kneeLog = await getKneeLog();
+  const due = morningDue(D.rules, kneeLog, allSessions, today);
+  if (due && sessionStorage.getItem('kneeSkip') !== toISODate(today)) {
+    view.appendChild(morningCard({ rules: D.rules, due, onDone: () => renderHome(), onSkip: () => { sessionStorage.setItem('kneeSkip', toISODate(today)); renderHome(); } }));
+  }
+  const kneeOn = swapScore(D.rules, kneeLog, today);
+
   // v1.14: the week at a glance, above today's card. Each ring opens the page behind it.
   if (week >= 1 && week <= 12) {
     view.appendChild(ringsCard(weekRings({ plan: D.plan, rules: D.rules, settings, sessions: allSessions, runs: allRuns, week, today }), {
@@ -374,6 +386,9 @@ async function renderHome() {
     ]));
     todayCard.appendChild(el('div', { class: 'hero-blocks', 'aria-hidden': 'true' }, blocks.map(b => el('span', { class: b.type === 'warmup' || b.type === 'stretch' ? 'soft' : '', style: `flex:${b.minutes || 1}` }))));
     if (phase.note) todayCard.appendChild(el('p', { class: 'hero-note' }, phase.note));
+    // v1.19: the knee swaps that apply today, in one line
+    const kneeLifts = kneeOn ? swappable(D.rules, D.plan, tl.steps) : [];
+    if (kneeLifts.length) todayCard.appendChild(el('p', { class: 'hero-note knee-hero', id: 'today-knee' }, `Knee ${kneeOn.score}/10: ${kneeLifts.map(l => l.to.toLowerCase()).join(' and ')} today.`));
     // v1.15.1: once today's lift is saved the card says so (it kept offering Start as if nothing was done)
     const doneToday = allSessions.find(x => x.sessionId === session.id && x.date === toISODate(today));
     if (doneToday) todayCard.appendChild(el('p', { id: 'today-done', style: `font-weight:700;color:${doneToday.status === 'complete' ? 'var(--good)' : 'inherit'}` }, doneToday.status === 'complete' ? `✓ Done at ${fmtTime(doneToday.endedAt || doneToday.startedAt)}` : `Ended early at ${fmtTime(doneToday.endedAt || doneToday.startedAt)}. Anything left is on the catch-up list.`));
@@ -608,6 +623,9 @@ async function previewSession(sessionRef, week) {
   const settings = await getSettings();
   const targets = await getTargets();
   const lastTime = lastResults(await getSessions());
+  // v1.19: sticky notes per exercise, and the knee swaps when the newest knee score is high
+  let notes = await getExNotes();
+  let kneeLog = await getKneeLog();
   // v1.8: a session id from the plan, or a session object (the catch-up session is built on the fly)
   const session = typeof sessionRef === 'string' ? sessionById(D.plan, sessionRef) : sessionRef;
   const phase = phaseForWeek(D.plan, week);
@@ -630,6 +648,8 @@ async function previewSession(sessionRef, week) {
 
   const paint = () => {
     tl = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets: withWeights() });
+    const kneeOn = swapScore(D.rules, kneeLog, new Date());
+    const kneeLifts = kneeOn ? applyKneeSwap(tl.steps, D.rules, D.plan) : [];
     const y = window.scrollY;
     view.innerHTML = '';
     const finish = Date.now() + tl.plannedSeconds * 1000;
@@ -645,6 +665,10 @@ async function previewSession(sessionRef, week) {
       phase.note ? el('p', { class: 'hero-note', style: 'margin:0' }, phase.note) : null
     ]));
 
+    if (kneeLifts.length) {
+      view.appendChild(swapNote({ rules: D.rules, score: kneeOn, lifts: kneeLifts, onRate: () => askKnee({ rules: D.rules, when: 'before', title: 'How is the knee today?', current: kneeOn.score,
+        onSaved: async () => { kneeLog = await getKneeLog(); paint(); } }) }));
+    }
     view.appendChild(targetsToday(tl, weights, estimated, lastTime));
 
     const blocks = [];
@@ -660,15 +684,17 @@ async function previewSession(sessionRef, week) {
         e.sets += 1;
       }
     }
-    const card = el('div', { class: 'card' }, [el('h3', {}, ['Today', infoBtn('Weights on this page', 'Weights are in lb. Lifts with two dumbbells show the total of both. Change any of them here. A number marked Estimate is a rough guess from your main lifts and bodyweight, so set it to what you know. Blank ones get filled in after the first set.')])]);
+    const card = el('div', { class: 'card' }, [el('h3', {}, ['Today', infoBtn('Weights on this page', ['Weights are in lb. Lifts with two dumbbells show the total of both. Change any of them here. A number marked Estimate is a rough guess from your main lifts and bodyweight, so set it to what you know. Blank ones get filled in after the first set.', 'Tap a lift\'s name to add a short note, like a seat setting. It shows every time that lift comes up.'])])]);
     for (const b of blocks) {
       const title = b.type === 'warmup' ? 'Warm-up' : (b.type === 'stretch' ? 'Stretch' : (b.type === 'iftime' ? 'If time' : (/^[A-Z]$/.test(b.name) ? `Block ${b.name}` : b.name)));
       const rows = b.ex.map(e => {
         const ex = D.plan.exercises[e.id] || {};
         const st = e.step;
         const reps = st.holdSeconds ? `${st.holdSeconds} s${st.perSide ? '/side' : ''}` : `${st.repRange ? repsText(st.repRange) : (st.target && st.target.reps) || ''}${st.perSide ? '/side' : ''}`;
+        // v1.19: an all-out last set reads "last set all-out" on the line
+        const allOut = tl.steps.some(x => x.amrap && x.exerciseId === e.id);
         const unit = b.type === 'finisher' ? (e.sets === 1 ? 'round' : 'rounds') : (e.sets === 1 ? 'set' : 'sets');
-        const sub = [equipmentFor(ex), `${e.sets} ${unit} × ${reps}`, st.effort ? effortPlain(st.effort) : ''].filter(Boolean).join(' · ');
+        const sub = [equipmentFor(ex), `${e.sets} ${unit} × ${reps}`, allOut ? 'last set all-out' : (st.effort ? effortPlain(st.effort) : '')].filter(Boolean).join(' · ');
         let right;
         if (ex.equipment === 'bodyweight' || st.holdSeconds) right = el('div', { class: 'pre-fixed' }, st.holdSeconds ? 'Timed' : 'Bodyweight');
         else if (e.baseline && weights[e.id] == null) right = el('div', { class: 'pre-fixed' }, 'Work up today');
@@ -677,7 +703,15 @@ async function previewSession(sessionRef, week) {
             onchange: ev => { weights[e.id] = ev.target.value === '' ? null : Number(ev.target.value); delete estimated[e.id]; paint(); } });
           right = el('div', {}, [input, isPair(ex) && weights[e.id] != null ? el('div', { class: 'pair-sub' }, `total · ${pairText(ex, weights[e.id])} lb`) : null, estimated[e.id] ? el('div', { class: 'est' }, 'Estimate') : null]);
         }
-        return el('div', { class: 'pre-ex' }, [el('div', {}, [el('div', { class: 'pre-name' }, e.name), el('div', { class: 'pre-sub' }, sub)]), right]);
+        // v1.19: the name opens the note for this lift; a saved note shows under it
+        const note = noteText(notes, e.id);
+        const left = el('button', { type: 'button', class: 'pre-left', 'data-note': e.id, 'aria-label': `${e.name}: ${note ? 'edit the note' : 'add a note'}`,
+          onclick: () => editNote(e.id, ex.name || e.name, note, all => { notes = all; paint(); }) }, [
+          el('div', { class: 'pre-name' }, [e.name, el('span', { class: 'pre-note-ico' + (note ? ' on' : '') }, [icon('edit')])]),
+          el('div', { class: 'pre-sub' }, sub),
+          noteLine(note, 'ex-note pre-note')
+        ]);
+        return el('div', { class: 'pre-ex' }, [left, right]);
       });
       const mark = /^[A-Z]$/.test(b.name) ? b.name : (b.type === 'warmup' ? 'W' : (b.type === 'stretch' ? 'S' : (b.type === 'finisher' || b.type === 'emom' ? 'F' : '+')));
       card.appendChild(el('div', { class: 'pre-block' }, [
@@ -694,7 +728,7 @@ async function previewSession(sessionRef, week) {
           const t = targets[id];
           if (t && t.weight != null && t.weight !== w) await setTarget(id, { weight: w, source: 'you', updated: new Date().toISOString() });
         }
-        startSession(session, week, withWeights());
+        startSession(session, week, withWeights(), { kneeLog });
       } }, 'Start workout'),
       el('button', { class: 'btn ghost', onclick: () => transition(() => showTab('home'), 'back') }, 'Back')
     ]));
@@ -736,8 +770,10 @@ function targetsToday(tl, weights, estimated, lastTime) {
       value = `${fmtWeight(w)} lb${reps != null ? ` × ${reps}${st.perSide ? '/side' : ''}` : ''}`;
       sub = [isPair(ex) ? `two ${fmtWeight(w / 2)}s` : null, estimated[id] ? 'estimate, change it below' : (lastText || 'first time')].filter(Boolean).join(' · ');
     }
+    // v1.19: a knee swap shows the lift it became; an all-out last set says so
+    if (tl.steps.some(x => x.amrap && x.exerciseId === id)) sub = [sub, 'last set all-out'].filter(Boolean).join(' · ');
     rows.push(el('tr', { 'data-ex': id }, [
-      el('td', {}, [el('div', { class: 'tgt-name' }, ex.name), el('div', { class: 'tgt-sub' }, sub)]),
+      el('td', {}, [el('div', { class: 'tgt-name' }, work.kneeSwap ? work.name : ex.name), el('div', { class: 'tgt-sub' }, sub)]),
       el('td', { class: 'num tgt-val' + (w == null ? ' tgt-none' : '') }, value)
     ]));
   }
@@ -749,11 +785,13 @@ function targetsToday(tl, weights, estimated, lastTime) {
 }
 
 // ---- Session flow ----
-async function startSession(session, week, targetsForToday) {
+async function startSession(session, week, targetsForToday, opts = {}) {
   const settings = await getSettings();
   const targets = targetsForToday || await getTargets();
   const history = lastResults(await getSessions());
   const timeline = buildTimeline({ plan: D.plan, rules: D.rules, settings, session, week, targets, history });
+  // v1.19: the same knee swaps the start page showed
+  if (swapScore(D.rules, opts.kneeLog || await getKneeLog(), new Date())) applyKneeSwap(timeline.steps, D.rules, D.plan);
   await askNotificationPermission(settings);
   player = new Player({ timeline, plan: D.plan, rules: D.rules, settings, targets, container: view, onFinish: onSessionFinished });
   transition(() => { window.scrollTo(0, 0); player.start(); }, 'fwd');
@@ -956,6 +994,12 @@ async function renderProgressTab() {
   renderProgress(view, { plan: D.plan, rules: D.rules, settings, sessions, runs, targets, muscles: D.muscles, today: new Date() }, {
     header: progressHeader(), syncOn: !!(cfg && cfg.repo), onExercise: id => showExercise(id, sessions, settings), ...(onComputer() ? { onLoadBackup } : {})
   });
+  // v1.19: the knee scores, next to the weekly numbers (nothing until the first score)
+  const knee = trendCard({ rules: D.rules, log: await getKneeLog() });
+  if (knee && currentTab === 'progress') {
+    const pr = view.querySelector('#pr-list');
+    if (pr) pr.parentNode.insertBefore(knee, pr); else view.appendChild(knee);
+  }
 }
 
 // ---- Plan and coach check-ins (v1.9) ----

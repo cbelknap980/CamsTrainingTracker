@@ -2,6 +2,8 @@
 // Pure function. Every number comes from rules.json; this file only knows how to apply a rule.
 
 import { roundTo, fmtWeight } from './data.js';
+import { amrapCheck } from './amrap.js';
+import { kneeHeld } from './knee.js';
 
 /**
  * Targets from a benchmark entered by hand: "a set of 5 with 2 reps left".
@@ -96,7 +98,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
 
     // e1RM and personal records for any weighted exercise (benchmark lifts show e1RM on the summary)
     if (ex && !ex.timed) {
-      const cands = sets.filter(s => s.done && !s.skipped && s.weight != null && s.reps);
+      const cands = sets.filter(s => s.done && !s.skipped && s.weight != null && s.reps && !s.kneeSwap); // v1.19: a box squat is not the benchmark
       const best = cands.reduce((m, s) => Math.max(m, epley(loadOf(s), s.reps) || 0), 0);
       const heaviest = cands.reduce((m, s) => Math.max(m, s.weight || 0), 0);
       if (best > 0) {
@@ -174,7 +176,9 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     const baseWeight = last.weight != null ? last.weight : cur.weight;
     const allDone = done.length >= planned.length;
     const allTop = allDone && done.every(s => (s.reps || 0) >= top);
-    const rpeOk = done.every(s => s.rpe == null || s.rpe <= rules.mainLiftTest.maxRpe);
+    // v1.19: an all-out set is Hard or Maxed on purpose, so its effort tap is left out of the test
+    const allOut = done.find(s => s.amrap) || null;
+    const rpeOk = done.every(s => s.amrap || s.rpe == null || s.rpe <= rules.mainLiftTest.maxRpe);
     const detail = `${done.length} x ${summarizeReps(done)} at ${fmtWeight(baseWeight)} lb`;
 
     // v1.8 catch-up: when the session these sets came from already logged this exercise, it set the next target.
@@ -184,6 +188,15 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     if (cu && cu.hadDone) {
       if (cu.undoStall && allDone && cur.stall > 0) cur.stall -= 1;
       say(`${name}: ${detail} made up. Next target stays as the session it came from set it.`, 'hold', 'catch-up sets');
+      next[id] = cur;
+      continue;
+    }
+
+    // v1.19 knee: a set swapped to the knee fallback, or a knee score at rules.knee.swapAt or more on this lift,
+    // holds the weight. Not counted as a miss.
+    const knee = kneeHeld(rules, sets);
+    if (knee) {
+      say(`${name}: ${detail}. ${knee.text} Same weight next time.`, 'hold', knee.reason);
       next[id] = cur;
       continue;
     }
@@ -228,6 +241,28 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
           const why = !allDone ? 'a set was skipped' : (!rpeOk ? 'a set was Hard or Maxed' : `not every set reached ${top}`);
           say(`${name}: ${detail}, ${why}. Same weight next time, aim for ${cur.reps} on every set.`, 'hold', why);
         }
+      }
+      // v1.19: the all-out set checks the effort taps. Too few reps holds a raise; many more than expected raises
+      // the weight further (at most rules.amrap.maxSteps increments).
+      if (allOut) {
+        const up = lines[lines.length - 1].verdict === 'up';
+        // a jump needs every other set done at its target weight and reps that day (plan thread, Nov 21)
+        const metTargets = allDone && done.filter(s => !s.amrap).every(s => !s.target || ((s.target.reps == null || (s.reps || 0) >= s.target.reps) && (s.target.weight == null || s.weight == null || s.weight >= s.target.weight)));
+        const bwAdd = isBw ? bodyweight : 0;
+        const c = amrapCheck({ rules, set: allOut, top, bottom, baseWeight: allOut.weight != null ? allOut.weight : baseWeight, inc, bwAdd, up });
+        const line = lines[lines.length - 1];
+        if (c && c.kind === 'hold') {
+          cur.weight = c.weight; cur.reps = c.reps;
+          Object.assign(line, { text: `${name}: ${detail}. ${c.text}`, verdict: 'hold', reason: c.reason });
+        } else if (c && c.kind === 'jump' && metTargets && (cur.weight == null || c.weight > cur.weight)) {
+          cur.weight = c.weight; cur.reps = c.reps; cur.stall = 0;
+          Object.assign(line, { text: `${name}: ${detail}. ${c.text} Next time ${fmtWeight(cur.weight)} lb x ${c.reps}.`, verdict: 'up', reason: c.reason });
+        } else if (c && c.kind === 'jump' && !metTargets) {
+          line.text += ` All-out set: ${allOut.reps} reps. That raises the weight further only on a day every other set reaches its target.`;
+        } else if (c) {
+          line.text += ` ${c.text}`;
+        }
+        cur.lastAllOut = { weight: allOut.weight, reps: allOut.reps, reserve: c ? c.reserve : null, date: session.endedAt };
       }
     } else {
       if (allTop) {

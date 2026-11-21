@@ -11,6 +11,8 @@ import { applyRestAdjust } from '../js/builder.js';
 import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
 import { numberFlag, flaggedGroups, applyNumberFix } from '../js/sanity.js';
+import { markAmrap, amrapCheck, amrapRepsText, isAmrapWeek } from '../js/amrap.js';
+import { swapScore, latestScore, applyKneeSwap, swappable, askIdx, morningDue, kneeHeld, kneeTrend, kneeEntry } from '../js/knee.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -496,6 +498,96 @@ console.log('v1.9 muscle groups and coach check-ins');
   check('v1.12 open intervals can move to Thursday, Saturday or Sunday; past days and lift days drop off', days('2026-11-25', 'run1').join() === 'Thursday,Saturday,Sunday' && days('2026-11-26', 'run1').join() === 'Thursday*,Saturday,Sunday' && days('2026-11-28', 'run1').join() === 'Saturday*,Sunday' && days('2026-11-29', 'run1').join() === 'Sunday*', [days('2026-11-25', 'run1'), days('2026-11-26', 'run1')]);
   const moveDays = rules.runSchedule.moveTo;
   check('v1.12 no run is ever offered on a lift day', Object.values(moveDays).flat().every(d => !plan.sessions.some(s => s.id === plan.calendar[d])));
+}
+
+// ---- v1.19 all-out last set (rules.amrap) ----
+console.log('v1.19 all-out set');
+{
+  const tg = { back_squat: { weight: 185, reps: 5 }, strict_press: { weight: 95, reps: 5 }, weighted_pullup: { weight: 25, reps: 5 }, front_squat: { weight: 135, reps: 5 }, push_press: { weight: 115, reps: 4 }, power_clean: { weight: 135, reps: 2 }, rdl: { weight: 155, reps: 6 } };
+  const amraps = (sid, week) => buildTimeline({ plan, rules, settings, sessionId: sid, week, targets: tg }).steps.filter(s => s.amrap);
+  check('weeks 4, 6, 9 and 11 have all-out sets; 1-3, 5, 7, 8, 10 and 12 do not', [4, 6, 9, 11].every(w => isAmrapWeek(rules, w)) && [1, 2, 3, 5, 7, 8, 10, 12].every(w => !isAmrapWeek(rules, w)));
+  const a1 = amraps('lift1', 4);
+  check('lift1 week 4: only the last back squat set is all-out', a1.length === 1 && a1[0].exerciseId === 'back_squat' && a1[0].setIndex === 3, a1.map(s => [s.exerciseId, s.setIndex]));
+  check('the all-out set ends on Done, not its timer, and asks for at least the target', a1[0].auto === false && a1[0].amrapFloor === 5 && /at least 5, then as many good reps as you can/.test(a1[0].effortText) && amrapRepsText(a1[0]) === '5+', a1[0]);
+  check('its first tip is the stop rule, and it is planned longer than a normal set', a1[0].tips[0] === rules.amrap.stopWhen && a1[0].seconds > buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, targets: tg }).steps.filter(s => s.exerciseId === 'back_squat' && !s.ramp && s.kind === 'set').at(-1).seconds);
+  const a2 = amraps('lift2', 6).map(s => s.exerciseId).sort().join();
+  check('lift2 week 6: press and pull-up each get one, the 4th set', a2 === 'strict_press,weighted_pullup' && amraps('lift2', 6).every(s => s.setIndex === 4), a2);
+  const a3 = amraps('lift3', 9).map(s => s.exerciseId).sort().join();
+  check('lift3 week 9: front squat and push press, never the power clean', a3 === 'front_squat,push_press', a3);
+  check('a ramp-up, the RDL and accessories are never all-out', [4, 6, 9, 11].every(w => ['lift1', 'lift2', 'lift3'].every(sid => amraps(sid, w).every(s => !s.ramp && rules.amrap.exercises.includes(s.exerciseId)))));
+  const cu = buildCatchUpSession(plan, rules, { lifts: [{ id: 'lift1', short: 'Legs', sets: 2, blocks: [{ blockId: 'A', items: [{ exerciseId: 'back_squat', sets: 2, hadDone: true, undoStall: false }] }] }] });
+  check('a catch-up session in week 4 has no all-out set', !buildTimeline({ plan, rules, settings, session: cu, week: 4, targets: tg }).steps.some(s => s.amrap));
+  check('the other steps still number 0..n', buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 4, targets: tg }).steps.every((s, i) => s.idx === i));
+
+  const sq = (w, reps, rpe, extra) => ws('back_squat', w, reps, rpe, [4, 6], extra);
+  const run = (sets, t = { back_squat: { weight: 185, reps: 6, stall: 0, bestE1rm: 230 } }) => applyProgression({ session: mkSession(4, sets), targets: t, rules, plan, settings });
+  let r4 = run([sq(185, 6, 8), sq(185, 6, 8), sq(185, 8, 10, { amrap: true })]);
+  check('all sets at 6, all-out 8 at Maxed: the Maxed tap does not fail the test, normal +5', r4.targets.back_squat.weight === 190 && r4.lines[0].verdict === 'up' && /All-out set: 8 reps, about 3 left at 6/.test(r4.lines[0].text), r4.lines[0]);
+  r4 = run([sq(185, 6, 8), sq(185, 6, 8), sq(185, 6, 10, { amrap: true })]);
+  check('all-out only 6 (the top): the Solid taps were optimistic, weight holds, no miss counted', r4.targets.back_squat.weight === 185 && r4.targets.back_squat.reps === 6 && (r4.targets.back_squat.stall || 0) === 0 && r4.lines[0].verdict === 'hold' && /harder than they felt/.test(r4.lines[0].text), [r4.targets.back_squat, r4.lines[0]]);
+  r4 = run([sq(185, 6, 8), sq(185, 6, 8), sq(185, 12, 9.5, { amrap: true })]);
+  // e1RM = 185 x (1 + 13/30) = 265; for 6 reps with 2 left: 265 / (1 + 8/30) = 209 -> 205, capped at +3 steps = 200
+  check('all-out 12 at 185: more in the tank, jumps to 200 (3 steps, the cap) instead of 190', r4.targets.back_squat.weight === 200 && r4.targets.back_squat.reps === 4 && r4.lines[0].verdict === 'up' && /More in the tank/.test(r4.lines[0].text), [r4.targets.back_squat, r4.lines[0].text]);
+  r4 = run([sq(185, 6, 8), sq(185, 6, 8), sq(185, 10, 9.5, { amrap: true })]);
+  // e1RM = 185 x (1 + 11/30) = 253; 253 / (1 + 8/30) = 199.7 -> 195
+  check('all-out 10 at 185: next target 195 from the e1RM rule', r4.targets.back_squat.weight === 195, r4.targets.back_squat);
+  r4 = run([sq(185, 4, 8), sq(185, 4, 8), sq(185, 11, 9.5, { amrap: true })], { back_squat: { weight: 185, reps: 4, stall: 1 } });
+  check('sets logged at the target 4 but all-out 11: the all-out set raises the weight instead of a second miss', r4.targets.back_squat.weight > 185 && r4.targets.back_squat.stall === 0 && r4.lines[0].verdict === 'up', [r4.targets.back_squat, r4.lines[0]]);
+  r4 = run([sq(185, 4, 8, { target: { weight: 185, reps: 6 } }), sq(185, 6, 8, { target: { weight: 185, reps: 6 } }), sq(185, 12, 9.5, { amrap: true, target: { weight: 185, reps: 6 } })]);
+  check('a set short of its target that day: no jump, the normal result stands', r4.targets.back_squat.weight === 185 && r4.lines[0].verdict === 'hold' && !/More in the tank/.test(r4.lines[0].text), [r4.targets.back_squat, r4.lines[0].text]);
+  r4 = run([sq(175, 6, 8, { target: { weight: 185, reps: 6 } }), sq(185, 6, 8, { target: { weight: 185, reps: 6 } }), sq(185, 12, 9.5, { amrap: true, target: { weight: 185, reps: 6 } })]);
+  check('a set under its target weight that day: no jump either', r4.targets.back_squat.weight <= 190 && !/More in the tank/.test(r4.lines[0].text), [r4.targets.back_squat, r4.lines[0].text]);
+  r4 = run([sq(185, 6, 8), sq(185, 6, 8), sq(185, 3, 10, { amrap: true })]);
+  check('all-out under the target (3): not every set at 6, weight holds, a miss counts', r4.targets.back_squat.weight === 185 && r4.targets.back_squat.stall === 1 && r4.lines[0].verdict === 'hold', r4.targets.back_squat);
+  const pu = applyProgression({ session: mkSession(6, [ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 11, 9.5, [4, 6], { amrap: true })]), targets: { weighted_pullup: { weight: 25, reps: 6 } }, rules, plan, settings: { ...settings, bodyweightLb: 165 } });
+  // (165 + 25) x (1 + 12/30) = 266; 266 / (1 + 8/30) - 165 = 45 -> capped at 25 + 15 = 40
+  check('weighted pull-up: bodyweight counts in the all-out e1RM, capped at +15', pu.targets.weighted_pullup.weight === 40, pu.targets.weighted_pullup);
+  check('amrapCheck: reserve is reps + 1 - top', amrapCheck({ rules, set: { weight: 100, reps: 8 }, top: 6, bottom: 4, baseWeight: 100, inc: 5, up: true }).reserve === 3);
+  check('the all-out set still counts for PRs', r4.prs.length >= 0 && run([sq(185, 6, 8), sq(185, 6, 8), sq(185, 12, 9.5, { amrap: true })]).prs.some(p => p.kind === 'e1rm'));
+}
+
+// ---- v1.19 knee check (rules.knee) ----
+console.log('v1.19 knee check');
+{
+  const at = (iso, score, when = 'morning', extra = {}) => ({ ...kneeEntry(score, when, extra, new Date(iso)) });
+  const now = new Date('2026-11-27T08:00:00');
+  check('no scores: the swaps are off', swapScore(rules, [], now) === null && latestScore(rules, [], now) === null);
+  check(`a score of ${rules.knee.swapAt} on Tuesday turns the swaps on for Friday`, swapScore(rules, [at('2026-11-24T07:30:00', rules.knee.swapAt)], now) !== null);
+  check(`a score of ${rules.knee.swapAt - 1} does not`, swapScore(rules, [at('2026-11-24T07:30:00', rules.knee.swapAt - 1)], now) === null);
+  check('a newer low score turns them off again', swapScore(rules, [at('2026-11-24T07:30:00', 6), at('2026-11-27T07:50:00', 2, 'before')], now) === null);
+  check(`a high score older than ${rules.knee.carryDays} days no longer counts`, swapScore(rules, [at('2026-11-20T07:30:00', 7)], now) === null);
+  const tg = { back_squat: { weight: 185, reps: 5 }, power_clean: { weight: 135, reps: 2 }, front_squat: { weight: 135, reps: 5 } };
+  const l1k = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, targets: tg });
+  const ch = applyKneeSwap(l1k.steps, rules, plan);
+  check('lift1: the back squat becomes the box squat, same weight, marked kneeSwap', ch.length === 1 && ch[0].id === 'back_squat' && l1k.steps.filter(s => s.exerciseId === 'back_squat' && s.kind === 'set').every(s => s.kneeSwap && s.name === rules.knee.fallbacks.back_squat.name && (s.ramp || s.target.weight === 185)), ch);
+  check('lift1: the set-up step names the box squat; RDL and split squat are left alone', l1k.steps.some(s => s.kind !== 'set' && /Box squat/.test(s.name + ' ' + (s.setupFor || ''))) && !l1k.steps.some(s => s.kind !== 'set' && /Back squat/.test(s.name + ' ' + (s.setupFor || ''))) && l1k.steps.filter(s => ['rdl', 'bss'].includes(s.exerciseId)).every(s => !s.kneeSwap));
+  const l3k = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 3, targets: tg });
+  check('lift3: hang power clean and box front squat', swappable(rules, plan, l3k.steps).map(x => x.to).join() === 'Hang power clean,Box front squat, 3-s lowering', swappable(rules, plan, l3k.steps));
+  const i1 = askIdx(rules, l3k.steps);
+  check('lift3 asks after the first front squat work set (not the clean)', l3k.steps[i1].exerciseId === 'front_squat' && l3k.steps[i1].setIndex === 1 && !l3k.steps[i1].ramp, l3k.steps[i1]);
+  const l1a = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, targets: tg });
+  const fromSet2 = l1a.steps.findIndex(s => s.exerciseId === 'back_squat' && s.setIndex === 2);
+  applyKneeSwap(l1a.steps, rules, plan, { fromIdx: fromSet2 });
+  check('a mid-session swap changes only the sets still to come', l1a.steps.filter(s => s.exerciseId === 'back_squat' && s.kind === 'set' && !s.ramp).map(s => !!s.kneeSwap).join() === 'false,true,true');
+  const l2k = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 3, targets: tg });
+  check('lift2 (upper) has nothing to swap and no knee question', applyKneeSwap(l2k.steps, rules, plan).length === 0 && askIdx(rules, l2k.steps) === -1);
+
+  const legSession = { id: 'ses_a', date: '2026-11-23', sessionName: 'Lift 1: Legs', sets: [ws('back_squat', 185, 5, 8, [4, 6])] };
+  check('Home asks the day after a squat day', morningDue(rules, [], [legSession], new Date('2026-11-24T07:00:00'))?.session.id === 'ses_a');
+  check('not two days after, and not once a morning score is in', morningDue(rules, [], [legSession], new Date('2026-11-25T07:00:00')) === null && morningDue(rules, [at('2026-11-24T06:50:00', 2)], [legSession], new Date('2026-11-24T07:00:00')) === null);
+  check('not after an upper day', morningDue(rules, [], [{ id: 'ses_b', date: '2026-11-25', sessionName: 'Lift 2', sets: [ws('strict_press', 95, 5, 8, [4, 6])] }, legSession], new Date('2026-11-26T07:00:00')) === null);
+
+  const held = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6], { knee: 5 }), ws('back_squat', 205, 6, 8, [4, 6], { kneeSwap: true }), ws('back_squat', 205, 6, 8, [4, 6], { kneeSwap: true })]), targets: { back_squat: { weight: 185, reps: 6, stall: 1, bestE1rm: 225, bestWeight: 190 } }, rules, plan, settings });
+  check('a knee swap holds the weight and the reps, and is not a miss', held.targets.back_squat.weight === 185 && held.targets.back_squat.reps === 6 && held.targets.back_squat.stall === 1 && held.lines[0].verdict === 'hold' && /Knee 5\/10: 2 sets done as box squat/.test(held.lines[0].text), [held.targets.back_squat, held.lines[0].text]);
+  check('heavier box squat sets do not set a back squat PR', !held.prs.length && held.targets.back_squat.bestE1rm === 225 && held.targets.back_squat.bestWeight === 190, [held.prs, held.targets.back_squat]);
+  const high = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6], { knee: rules.knee.swapAt }), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6])]), targets: { back_squat: { weight: 185, reps: 6 } }, rules, plan, settings });
+  check('a high score with the regular lift kept still holds the weight', high.targets.back_squat.weight === 185 && high.lines[0].verdict === 'hold' && high.lines[0].reason === `knee ${rules.knee.swapAt}/10`, high.lines[0]);
+  const low = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6], { knee: 2 }), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6])]), targets: { back_squat: { weight: 185, reps: 6 } }, rules, plan, settings });
+  check('a low score changes nothing: +5 as usual', low.targets.back_squat.weight === 190 && low.lines[0].verdict === 'up');
+  check('kneeHeld: nothing without a score or a swap', kneeHeld(rules, [ws('back_squat', 185, 6, 8, [4, 6])]) === null);
+  const tr = kneeTrend([at('2026-11-24T07:00:00', 3), at('2026-11-24T18:00:00', 5, 'set'), at('2026-11-26T07:00:00', 1)], 84, now);
+  check('the trend keeps the highest score each day, oldest first', tr.map(p => `${p.date}:${p.score}`).join() === '2026-11-24:5,2026-11-26:1', tr);
+  check('a score is kept between 0 and 10', kneeEntry(14, 'set').score === 10 && kneeEntry(-2, 'set').score === 0);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');

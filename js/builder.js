@@ -2,6 +2,7 @@
 // Pure functions, no DOM, no storage. Tested in tests/builder.test.mjs.
 
 import { effortText, effortToRpe, roundTo, equipmentFor } from './data.js';
+import { markAmrap } from './amrap.js';
 
 /**
  * v1.9: coach check-ins move rest times in small steps. restAdjust = { exerciseId | 'session:<id>': seconds }.
@@ -77,6 +78,8 @@ export function buildTimeline({ plan, rules, settings, sessionId, session: custo
     }
   });
 
+  // v1.19: the all-out last set on the main lifts in rules.amrap.weeks
+  markAmrap(ctx, steps, setTiming);
   const withLeads = addLeadIns(ctx, steps);
   steps.length = 0; steps.push(...withLeads);
   steps.forEach((s, i) => { s.idx = i; });

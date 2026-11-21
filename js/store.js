@@ -94,6 +94,25 @@ export async function getCoachApplied() { return (await kvGet('coachApplied')) |
 export async function setCoachApplied(ids) { await kvSet('coachApplied', ids); changed(); }
 
 // ---- in-progress session (for Resume) ----
+// ---- v1.19: a sticky note per exercise, and the knee scores ----
+export const getExNotes = async () => (await kvGet('exNotes')) || {};
+/** Saves (or, with empty text, removes) the note for one exercise. Notes are kept short: 80 characters. */
+export async function setExNote(exerciseId, text) {
+  const all = await getExNotes();
+  const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (t) all[exerciseId] = { text: t, updated: new Date().toISOString() }; else delete all[exerciseId];
+  await kvSet('exNotes', all); changed();
+  return all;
+}
+export const getKneeLog = async () => (await kvGet('knee')) || [];
+/** Adds a knee score (knee.js kneeEntry). A second score for the same set replaces the first. */
+export async function addKneeScore(entry) {
+  const all = (await getKneeLog()).filter(e => !(entry.stepKey && e.stepKey === entry.stepKey));
+  all.push(entry);
+  await kvSet('knee', all.slice(-500)); changed();
+  return all;
+}
+
 export const getInProgress = () => kvGet('inProgress');
 export const setInProgress = state => kvSet('inProgress', state);
 export const clearInProgress = () => kvDel('inProgress');
@@ -184,7 +203,10 @@ export async function exportAll(appVersion, planVersion) {
     checkins: (await kvGet('checkins')) || [],
     coachApplied: (await kvGet('coachApplied')) || [],
     // v1.10: Garmin activities Cameron deleted from the log, so they are not added again
-    garminIgnored: (await kvGet('garminIgnored')) || []
+    garminIgnored: (await kvGet('garminIgnored')) || [],
+    // v1.19: sticky notes per exercise and knee scores
+    exNotes: (await kvGet('exNotes')) || {},
+    knee: (await kvGet('knee')) || []
   };
 }
 
@@ -204,6 +226,9 @@ export async function importAll(backup, opts = {}) {
     if (backup.checkins) t.objectStore('kv').put(backup.checkins, 'checkins');
     if (backup.coachApplied) t.objectStore('kv').put(backup.coachApplied, 'coachApplied');
     if (backup.garminIgnored) t.objectStore('kv').put(backup.garminIgnored, 'garminIgnored');
+    // v1.19: a backup from before notes and knee scores existed leaves them as they are
+    if (backup.exNotes) t.objectStore('kv').put(backup.exNotes, 'exNotes');
+    if (backup.knee) t.objectStore('kv').put(backup.knee, 'knee');
     // a backup from before v1.5 has per-dumbbell numbers: clear the flag so the app asks again
     if (backup.pairTotals) t.objectStore('kv').put(backup.pairTotals, 'pairTotals'); else t.objectStore('kv').delete('pairTotals');
     t.oncomplete = resolve;
