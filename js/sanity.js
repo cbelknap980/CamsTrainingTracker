@@ -90,8 +90,15 @@ function isLatestFor(all, id, record) {
   return !!latest && latest.id === record.id;
 }
 
-/** A target he set himself, on this session's Review or since, stays as he set it (v1.18.1: on Review too). */
-const setByHand = (cur, record) => cur.source === 'you' && !!cur.updated && cur.updated >= (record.endedAt || '');
+/**
+ * A target set after this session stays as it was set, and a late rating or a number fix changes the session only:
+ * one he set himself (on this session's Review or since) gives 'hand', one the coach set since (coach.json from the
+ * nightly review, or a Plan check-in) gives 'coach'. Otherwise ''.
+ */
+function setSince(cur, record) {
+  if (!cur || !cur.updated || cur.updated < (record.endedAt || '')) return '';
+  return cur.source === 'you' ? 'hand' : (cur.source === 'coach' ? 'coach' : '');
+}
 
 /**
  * v1.18.1 (rules R4, rule 12): one lift of a saved session worked out again from the target it had going into that
@@ -168,7 +175,7 @@ export function applyNumberFix({ sessions, targets, recordId, exerciseId, weight
   if (best.e1rm) cur.bestE1rm = best.e1rm;
   if (best.weight) cur.bestWeight = best.weight;
   let retargeted = false, line = null;
-  if (isLatestFor(all, id, record) && !setByHand(cur, record)) {
+  if (isLatestFor(all, id, record) && !setSince(cur, record)) {
     const run = rerunLift({ record, exerciseId: id, plan, rules, settings });
     takeRerun(cur, run.target);
     if (ex && ex.benchmark && mine.e1rm) cur.e1rm = mine.e1rm;
@@ -185,7 +192,7 @@ export function applyNumberFix({ sessions, targets, recordId, exerciseId, weight
  * next target is worked out again from where the lift started that session (rule 12); another set of that lift
  * still not rated keeps it where it is (rule 1).
  * Returns { record, target, retargeted, why, line, stillUnrated }: why is 'latest', 'later' (a later session set the
- * target) or 'hand' (he set it himself). New objects; the inputs are not changed.
+ * target), 'hand' (he set it himself) or 'coach' (the coach set it since). New objects; the inputs are not changed.
  */
 export function rateSavedSet({ sessions, targets, recordId, index, rpe, plan, rules, settings }) {
   const src = sessions.find(s => s.id === recordId);
@@ -198,7 +205,7 @@ export function rateSavedSet({ sessions, targets, recordId, index, rpe, plan, ru
   delete st.unconfirmed;
   const all = sessions.map(s => (s.id === recordId ? record : s));
   const stillUnrated = record.sets.filter(x => x.exerciseId === id && notRated(x)).length;
-  const why = !isLatestFor(all, id, record) ? 'later' : (setByHand(cur, record) ? 'hand' : 'latest');
+  const why = !isLatestFor(all, id, record) ? 'later' : (setSince(cur, record) || 'latest');
   let retargeted = false, line = null;
   if (why === 'latest') {
     const run = rerunLift({ record, exerciseId: id, plan, rules, settings });

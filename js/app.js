@@ -661,7 +661,8 @@ function rateSetSheet(record, index, { onSaved, onCancel } = {}) {
     const nextText = t.weight != null ? `${weightWithPair(ex, t.weight)} × ${t.reps}` : `${t.reps} reps`;
     toast(r.why === 'latest'
       ? (r.stillUnrated ? `Rated. ${r.stillUnrated} more ${name} ${r.stillUnrated === 1 ? 'set' : 'sets'} to rate before its target moves` : `${name} rated. Next time ${nextText}`)
-      : (r.why === 'hand' ? `Rated. You set ${name}'s next target yourself, so it stays` : `Rated. A later session has set ${name}'s target since`), 4500);
+      : (r.why === 'hand' ? `Rated. You set ${name}'s next target yourself, so it stays`
+        : (r.why === 'coach' ? `Rated. The coach has set ${name}'s next target since, so it stays` : `Rated. A later session has set ${name}'s target since`)), 4500);
     if (onSaved) onSaved(r.record);
   } }, 'Save');
   const chips = effortChips(D.rules, null, lvl => {
