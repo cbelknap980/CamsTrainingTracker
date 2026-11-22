@@ -1,5 +1,8 @@
 // plan-view.js - v1.9 Plan tab: goals in order, the 12 weeks, this week day by day, every session as planned with
 // next targets, and the coach check-in thread. Reads the plan data and what the app stores; writes only check-ins.
+// v1.18.3: on the phone (under 1000 px wide) the tab splits into Week, Sessions, Goals and Check-ins, one at a time,
+// with one session shown at a time (Cameron, Nov 22: "too busy and requires too much scrolling", picked option B).
+// A computer keeps every card on one page in two columns. Nothing here changes the plan or a target.
 
 import { el } from './ui.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
@@ -34,7 +37,7 @@ function weeksCard(plan, week) {
   ]);
 }
 
-function thisWeekCard(plan, settings, sessions, runs, today, week) {
+function thisWeekCard(plan, settings, sessions, runs, today, week, onPick) {
   const start = parseISODate(settings.startDate);
   start.setDate(start.getDate() + (week - 1) * 7);
   const todayIso = toISODate(today);
@@ -48,7 +51,8 @@ function thisWeekCard(plan, settings, sessions, runs, today, week) {
     const run = id ? plan.runs.find(r => r.id === id) : null;
     const done = lift ? sessions.find(s => s.sessionId === id && s.week === week) : (run ? runs.find(r => r.date >= toISODate(start) && r.date <= weekEnd && countsFor(plan, r, run)) : null); // v1.12: a run done on another day of the week still counts; v1.18.1: a Garmin run only once he counts it
     const status = done ? 'done' : (iso < todayIso && (lift || run) ? 'missed' : '');
-    return el('div', { class: 'day-row' + (iso === todayIso ? ' today' : '') }, [
+    const pick = onPick && (lift || run) ? () => onPick(lift ? lift.id : 'runs') : null;
+    return el('div', { class: 'day-row' + (iso === todayIso ? ' today' : '') + (pick ? ' tappable' : ''), 'data-day': dow, ...(pick ? { role: 'button', tabindex: '0', onclick: pick, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } } } : {}) }, [
       el('span', { class: 'day-name' }, d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })),
       el('span', {}, lift ? lift.name : (run ? run.name : el('span', { class: 'muted' }, 'Rest or make-up day'))),
       el('span', { class: 'day-status ' + status }, status === 'done' ? '✓ done' : (status === 'missed' ? 'not logged' : (iso === todayIso ? 'today' : '')))
@@ -177,7 +181,30 @@ function checkinCard(data, opts) {
   ]);
 }
 
+const WIDE = '(min-width: 1000px)';
+const PANES = [['week', 'Week'], ['sessions', 'Sessions'], ['goals', 'Goals'], ['coach', 'Check-ins']];
+const ui = { pane: 'week', pick: null }; // the phone's open tab and session; kept while the app is open
+let last = null;
+if (typeof window !== 'undefined' && window.matchMedia) {
+  // a window dragged across 1000 px redraws the Plan tab in the other layout, if it is still the one showing
+  window.matchMedia(WIDE).addEventListener('change', () => { if (last && last.view.querySelector('.plan-grid, .plan-tabs')) renderPlan(...last.args); });
+}
+
+/** The session the phone's Sessions tab opens on: the next lift day from today whose session is not logged yet. */
+export function nextSessionId(plan, settings, sessions, today) {
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(today); d.setDate(d.getDate() + i);
+    const id = plan.calendar[String(d.getDay())];
+    const s = id && plan.sessions.find(x => x.id === id);
+    if (s && !sessions.some(x => x.sessionId === id && x.week === weekNumber(d, settings.startDate))) return id;
+  }
+  return plan.sessions[0].id;
+}
+
 export function renderPlan(view, data, opts = {}) {
+  last = { view, args: [view, data, opts] };
+  const wide = typeof window === 'undefined' || !window.matchMedia || window.matchMedia(WIDE).matches;
+  if (!wide) return renderPhone(view, data, opts);
   const { plan, settings, targets, sessions, runs, goals } = data;
   const today = data.today || new Date();
   const week = Math.max(1, Math.min(12, weekNumber(today, settings.startDate)));
@@ -192,6 +219,48 @@ export function renderPlan(view, data, opts = {}) {
   ]);
   const side = el('div', { class: 'plan-side' }, [checkinCard(data, opts)]);
   view.appendChild(el('div', { class: 'plan-grid' }, [side, main]));
+  const chat = document.getElementById('chat-list');
+  if (chat) chat.scrollTop = chat.scrollHeight;
+}
+
+/** v1.18.3: the phone's Plan tab. Four tabs, each about one screen. */
+function renderPhone(view, data, opts) {
+  const { plan, settings, targets, sessions, runs, goals } = data;
+  const today = data.today || new Date();
+  const week = Math.max(1, Math.min(12, weekNumber(today, settings.startDate)));
+  const go = (pane, pick) => { ui.pane = pane; if (pick) ui.pick = pick; renderPhone(view, data, opts); window.scrollTo(0, 0); };
+  view.innerHTML = '';
+  view.appendChild(el('div', { class: 'row' }, [el('h1', {}, 'Plan')]));
+  view.appendChild(el('div', { class: 'segmented plan-seg', id: 'plan-seg', role: 'tablist' }, PANES.map(([k, label]) =>
+    el('button', { type: 'button', role: 'tab', 'data-pane': k, 'aria-selected': String(k === ui.pane), class: k === ui.pane ? 'on' : '', onclick: () => go(k) }, label))));
+  const pane = el('div', { class: 'plan-tabs', 'data-pane': ui.pane });
+  if (ui.pane === 'week') {
+    const ph = phaseForWeek(plan, week);
+    const strip = weeksCard(plan, week).querySelector('.wk-strip');
+    const tw = thisWeekCard(plan, settings, sessions, runs, today, week, id => go('sessions', id));
+    tw.querySelector('h3').replaceWith(el('div', { class: 'row wk-head' }, [el('h3', { style: 'margin:0' }, 'This week'), el('span', { class: 'muted small' }, 'Tap a day to see it')]));
+    pane.append(
+      el('div', { class: 'card', id: 'plan-weeks' }, [
+        el('div', { class: 'row wk-head' }, [el('b', {}, `Week ${week} of 12`), el('span', { class: 'wk-phase' }, [el('span', { class: `phase-dot ph-${ph.id}` }), ph.name])]),
+        ph.note ? el('p', { class: 'muted wk-note' }, ph.note) : null,
+        strip
+      ]),
+      tw);
+  } else if (ui.pane === 'sessions') {
+    const ids = [...plan.sessions.map(s => s.id), 'runs'];
+    const pick = ids.includes(ui.pick) ? ui.pick : nextSessionId(plan, settings, sessions, today);
+    pane.append(el('div', { class: 'plan-chips', id: 'plan-chips' }, ids.map(id => {
+      const s = plan.sessions.find(x => x.id === id);
+      return el('button', { type: 'button', class: 'plan-chip' + (id === pick ? ' on' : ''), 'data-pick': id, 'aria-pressed': String(id === pick), onclick: () => go('sessions', id) }, s ? s.name.split(':')[0] : 'Runs');
+    })));
+    const s = plan.sessions.find(x => x.id === pick);
+    pane.append(s ? sessionCard(plan, s, targets, settings.restAdjust) : runsCard(plan));
+  } else if (ui.pane === 'goals') {
+    pane.append(goalsCard(goals), weeksCard(plan, week));
+  } else {
+    pane.append(checkinCard(data, opts));
+  }
+  view.appendChild(pane);
   const chat = document.getElementById('chat-list');
   if (chat) chat.scrollTop = chat.scrollHeight;
 }

@@ -335,9 +335,19 @@ with sync_playwright() as p:
     page.screenshot(path=f'{SHOTS}/progress-phone.png', full_page=True)
 
     # ---- v1.9 Plan tab and coach check-ins ----
-    page.click('#tabs button[data-view="plan"]'); page.wait_for_selector('#checkin')
-    check('v1.9 plan: goals, 12 weeks, this week and all three sessions', page.locator('.goal-list li').count() == 10 and page.locator('.wk-cell').count() == 12 and page.locator('.day-row').count() == 7 and page.locator('.plan-session').count() == 3, [page.locator('.goal-list li').count(), page.locator('.plan-session').count()])
+    page.click('#tabs button[data-view="plan"]'); page.wait_for_selector('#plan-seg')
+    # v1.18.3: on the phone the Plan tab is four tabs, Week first, one at a time
+    check('v1.18.3 plan: Week, Sessions, Goals, Check-ins tabs, Week open', [x.strip() for x in page.locator('#plan-seg button').all_inner_texts()] == ['Week', 'Sessions', 'Goals', 'Check-ins'] and page.locator('#plan-seg button.on').get_attribute('data-pane') == 'week', page.locator('#plan-seg').inner_text())
+    check('v1.18.3 plan Week: the 12 weeks and this week, nothing else', page.locator('.wk-cell').count() == 12 and page.locator('.day-row').count() == 7 and page.locator('.plan-session').count() == 0 and page.locator('#checkin').count() == 0 and page.locator('.goal-list').count() == 0, [page.locator('.plan-session').count(), page.locator('#checkin').count()])
     check('v1.9 plan: this week marks the lifts done', page.locator('.day-status.done').count() >= 3, page.locator('.day-status.done').count())
+    check('v1.18.3 plan Week: fits on one screen', page.evaluate('document.scrollingElement.scrollHeight <= window.innerHeight + 2'), page.evaluate('[document.scrollingElement.scrollHeight, window.innerHeight]'))
+    page.click('.day-row[data-day="3"]'); page.wait_for_selector('.plan-chips')
+    check('v1.18.3 plan: tapping Wednesday opens Sessions on Lift 2, one session shown', page.locator('#plan-seg button.on').get_attribute('data-pane') == 'sessions' and page.locator('.plan-chip.on').get_attribute('data-pick') == 'lift2' and page.locator('.plan-session').count() == 1 and page.locator('.plan-session').get_attribute('data-session') == 'lift2', page.locator('.plan-chip.on').inner_text())
+    page.click('.plan-chip[data-pick="runs"]'); page.wait_for_selector('#plan-runs')
+    check('v1.18.3 plan: Runs chip shows the two runs', page.locator('#plan-runs p').count() == 2 and page.locator('.plan-session').count() == 0)
+    page.click('#plan-seg button[data-pane="goals"]'); page.wait_for_selector('.goal-list')
+    check('v1.9 plan: goals in order and the phases', page.locator('.goal-list li').count() == 10 and page.locator('.phase-row').count() == 5, page.locator('.goal-list li').count())
+    page.click('#plan-seg button[data-pane="coach"]'); page.wait_for_selector('#checkin')
     tgt0 = page.evaluate(f"({KV})('targets')")['incline_db_press']['weight']
     page.select_option('#checkin-about', 'incline_db_press'); page.wait_for_timeout(100)
     check('v1.9 check-in: weight tags need an exercise', not page.locator('.tag-btn[data-tag="too_heavy"]').is_disabled())
@@ -349,6 +359,8 @@ with sync_playwright() as p:
     check('v1.9 check-in: Too heavy lowers the next target one step, marked coach', tgt1['weight'] < tgt0 and tgt1['source'] == 'coach', [tgt0, tgt1])
     check('v1.9 check-in: Rest too long takes 15 s off that lift', st.get('restAdjust', {}).get('incline_db_press') == -15, st.get('restAdjust'))
     check('v1.9 check-in: the app answers with what changed', 'next time' in page.locator('.msg.app').last.inner_text(), page.locator('.msg.app').last.inner_text())
+    check('v1.18.3 plan: after Send the Check-ins tab stays open', page.locator('#plan-seg button.on').get_attribute('data-pane') == 'coach')
+    page.click('#plan-seg button[data-pane="sessions"]'); page.click('.plan-chip[data-pick="lift2"]'); page.wait_for_selector('.plan-session[data-session="lift2"]')
     check('v1.9 check-in: the plan shows the shorter rest', '(-15 from check-ins)' in page.locator('.plan-session[data-session="lift2"] tr[data-ex="incline_db_press"]').inner_text())
     chk = page.evaluate(f"({KV})('checkins')")
     check('v1.9 check-in: saved with its tags', len(chk) == 1 and chk[0]['tags'] == ['too_heavy', 'rest_long'] and chk[0]['exerciseId'] == 'incline_db_press', chk)
@@ -359,7 +371,7 @@ with sync_playwright() as p:
     # polish: on a phone the Architecture page moved from the tab bar into Settings
     check('polish: phone tab bar has four tabs', page.locator('#tabs .tab:visible').count() == 4, page.locator('#tabs .tab:visible').count())
     page.click('#settings-btn'); page.wait_for_selector('#arch-open'); page.click('#arch-open'); page.wait_for_selector('.arch-svg')
-    check('architecture draws 19 boxes (v1.18 adds Pacing)', page.locator('.arch-svg g[data-part]').count() == 19 and page.locator('.arch-svg g[data-part="pacing"]').count() == 1, page.locator('.arch-svg g[data-part]').count())
+    check('architecture draws 20 boxes (v1.18 adds Pacing, v1.18.3 the Plan tab)', page.locator('.arch-svg g[data-part]').count() == 20 and page.locator('.arch-svg g[data-part="pacing"]').count() == 1 and page.locator('.arch-svg g[data-part="plantab"]').count() == 1, page.locator('.arch-svg g[data-part]').count())
     page.fill('input[type="search"]', 'trim'); page.wait_for_timeout(100)
     check('search "trim" highlights Player and Rules', page.locator('.arch-svg .box.hit').count() >= 2, page.locator('.arch-svg .box.hit').count())
     check('search filters the part list', page.locator('.arch-part').count() <= 4, page.locator('.arch-part').count())
