@@ -189,6 +189,17 @@
       "description": "The Progress tab, laid out for a computer screen and still usable on the phone: which planned lifts are done, ended early or missed in each of the 12 weeks, a chart of estimated 1RM per benchmark lift from each session's best set, personal records, work sets per week and each accessory's first and latest top set. It reads saved sessions and runs; it changes nothing. On a computer it offers Load backup file, which puts the phone's backup into that browser. v1.9: with one session a lift card shows the best set and the next target instead of a lone dot; clicking a card opens every set of that lift; a card for work sets per muscle group this week against what the plan holds and a 10-set mark (data/muscles.json); sync status moved to the header. v1.14: explanations sit behind (i) buttons; Home has three week rings (js/rings.js: lifts, runs, hard efforts; rules.json weekRings). v1.18: the plan's runs sit in the 12-week grid under the lifts (done, missed, this week), and a Running card shows miles per week with the number of runs, total miles, the longest run and the latest pace."
     },
     {
+      "id": "plantab",
+      "column": "outputs",
+      "name": "Plan tab",
+      "lines": [
+        "this week, each session with its",
+        "next targets, goals, check-ins"
+      ],
+      "file": "js/plan-view.js",
+      "description": "The Plan tab (v1.9): the 12 weeks and their phases, this week day by day, every session as planned with the next target for each lift and its rest, the runs, the goals in order and the coach check-in thread (the only thing it writes). It reads plan.json, goals.json and what the app stores. v1.18.3: on the phone it is four tabs, Week, Sessions, Goals and Check-ins; Sessions shows one lift session or the runs at a time and opens on the next session not logged yet, and tapping a day on Week opens that day's session. A computer 1000 px or wider shows everything on one page in two columns."
+    },
+    {
       "id": "runs",
       "column": "outputs",
       "name": "Runs page",
@@ -338,6 +349,16 @@
       "from": "pacing",
       "to": "builder",
       "label": "seconds per rep and set-up seconds that follow his pace"
+    },
+    {
+      "from": "plan",
+      "to": "plantab",
+      "label": "sessions, goals"
+    },
+    {
+      "from": "storage",
+      "to": "plantab",
+      "label": "targets, check-ins"
     }
   ]
 }

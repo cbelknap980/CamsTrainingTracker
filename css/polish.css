@@ -734,3 +734,23 @@ body.in-session .toast-msg { white-space: normal; overflow: visible; max-width: 
 .count-it-btns { display: flex; flex-wrap: wrap; gap: 8px; }
 .count-it-row .btn.small { flex: none; }
 #run-count-it .btn-row { justify-content: flex-start; flex-wrap: wrap; }
+
+/* v1.18.3: the phone's Plan tab in four tabs (Week, Sessions, Goals, Check-ins), one session at a time */
+.plan-seg { display: flex; width: 100%; margin: 0 0 12px; background: var(--surface-1); }
+.plan-seg button { flex: 1; min-height: 44px; padding: 6px 4px; font-size: 0.9rem; }
+.plan-seg button.on { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+.plan-tabs > .card { margin-bottom: 12px; }
+.plan-tabs .wk-head { gap: 8px; margin-bottom: 4px; }
+.plan-tabs .wk-phase { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-small); font-weight: 700; }
+.plan-tabs .wk-phase .phase-dot { margin-top: 0; }
+.plan-tabs .wk-note { font-size: var(--t-small); margin: 0 0 10px; }
+.plan-tabs .wk-strip { margin-bottom: 4px; }
+.plan-tabs .wk-cell { padding: 6px 0 7px; }
+.day-row.tappable { cursor: pointer; transition: background 0.15s; min-height: 44px; padding-top: 4px; padding-bottom: 4px; }
+.plan-tabs .wk-head .small { font-size: var(--t-small); }
+.day-row.tappable:active { background: rgba(255, 255, 255, 0.04); }
+.plan-chips { display: flex; gap: 8px; margin-bottom: 12px; }
+.plan-chip { flex: 1; min-height: 44px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.9rem; font-weight: 650; cursor: pointer; }
+.plan-chip.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.plan-chip:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) { .plan-chip:active { transform: none; } }
