@@ -399,9 +399,12 @@ async function renderHome() {
   const runRows = week >= 1 && week <= 12 ? weekRuns({ plan: D.plan, settings, runs: allRuns, week, today }) : [];
   const runCtx = { plan: D.plan, rules: D.rules, settings };
   const movedRun = !session && !run ? runRows.find(r => (r.status === 'open' || r.status === 'today') && openRunDays({ ...runCtx, runId: r.id, week, today }).some(d => d.today)) : null;
+  // v1.18.4: "Fast: 7:45-8:15 per mile ..." with the label in bold
+  const runLinePart = t => { const i = t.indexOf(': '); return i > 0 && i < 12 ? el('p', {}, [el('b', {}, t.slice(0, i + 1) + ' '), t.slice(i + 2)]) : el('p', {}, t); };
   const runBody = (card, row, primary) => {
     card.appendChild(el('p', { id: primary ? 'run-ask' : null, style: 'font-weight:600;margin:0 0 4px' }, row.plan.text));
-    card.appendChild(el('p', { class: 'muted' }, row.plan.detail));
+    if (row.plan.lines) card.appendChild(el('div', { class: 'run-lines' }, row.plan.lines.map(runLinePart)));
+    else card.appendChild(el('p', { class: 'muted' }, row.plan.detail));
     if (row.run) {
       card.appendChild(el('p', { id: primary ? 'run-done' : null, style: 'color:var(--good);font-weight:700' }, `✓ Done${row.run.date !== toISODate(today) ? ' ' + fmtDate(row.run.date) : ''} · ${runLine(row.run, D.rules) || 'logged'}`));
       card.appendChild(el('button', { class: 'btn', onclick: () => showTab('runs') }, 'Open Runs'));

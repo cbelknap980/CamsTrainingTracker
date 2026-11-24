@@ -754,3 +754,8 @@ body.in-session .toast-msg { white-space: normal; overflow: visible; max-width: 
 .plan-chip.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .plan-chip:active { transform: scale(0.97); }
 @media (prefers-reduced-motion: reduce) { .plan-chip:active { transform: none; } }
+
+/* v1.18.4: the interval run's targets, one line each (Fast, Easy, warm-up) with the label in bold */
+.run-lines { display: flex; flex-direction: column; gap: 3px; margin: 0 0 8px; color: var(--muted); font-size: var(--t-small); }
+.run-lines p { margin: 0 !important; }
+.run-lines b { color: var(--text); font-weight: 700; }
