@@ -136,7 +136,7 @@ with sync_playwright() as p:
     print('Runs tab, before Garmin')
     page.click('#tabs button[data-view="runs"]'); page.wait_for_selector('#runs-week')
     week = page.locator('#runs-week').inner_text()
-    check('this week shows what each run asks for', '5 × 2 min hard, 2 min easy' in week and '3.5 mi' in week and '0 of 2 planned runs done' in week, week)
+    check('this week shows what each run asks for', '5 × 2 min fast, 2 min easy' in week and 'Fast: 7:45-8:15 per mile' in week and '3.5 mi' in week and '0 of 2 planned runs done' in week, week)
     check('the plan notes are one tap away, not in the way', page.locator('.run-notes[open]').count() == 0 and page.locator('.run-notes summary').count() == 1)
     check('Garmin is offered', 'Connect Garmin' in page.locator('#garmin-row').inner_text())
     page.click('#garmin-setup'); page.wait_for_selector('#garmin-sheet')
@@ -239,7 +239,7 @@ with sync_playwright() as p:
     page.clock.set_system_time('2026-11-24T06:00:00')   # Tuesday of week 2, nothing logged yet
     page.reload(); page.wait_for_selector('#run-ask')
     home = page.locator('.card.accent').inner_text()
-    check('next Tuesday asks for the intervals and offers to log', '5 × 2 min hard, 2 min easy' in home and page.locator('.card.accent button:has-text("Log this run")').count() == 1, home)
+    check('next Tuesday asks for the intervals and offers to log', '5 × 2 min fast, 2 min easy' in home and 'Easy: jog or walk until heart rate is under 160.' in home and 'RPE' not in home and page.locator('.card.accent button:has-text("Log this run")').count() == 1, home)
     page.click('#tabs button[data-view="runs"]'); page.wait_for_selector('#runs-week')
     check('the long run target moves up half a mile after 3.6', '4 mi' in page.locator('.run-plan[data-run="run2"]').inner_text() and 'longest so far 3.6 mi' in page.locator('.run-plan[data-run="run2"]').inner_text(), page.locator('.run-plan[data-run="run2"]').inner_text())
 

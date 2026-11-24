@@ -126,6 +126,17 @@ export function prescription(run, week, runs) {
   const w = Math.min(12, Math.max(1, week || 1));
   if (run.intervals) {
     const iv = run.intervals.find(i => w >= i.weeks[0] && w <= i.weeks[1]) || run.intervals[0];
+    // v1.18.4 (Cameron, Nov 24: "Put a pace target. Instead of RPE can we use heartrate"): the fast parts go by pace,
+    // with heart rate as the check at the end of each one (it lags on a 2-4 min rep); numbers from his Garmin runs
+    const hr = run.hr || {};
+    if (iv.pace && hr.fastEnd) {
+      const lines = [
+        `Fast: ${iv.pace} per mile. Heart rate ${hr.fastEnd[0]}-${hr.fastEnd[1]} by the end of each one.`,
+        `Easy: jog or walk until heart rate is under ${hr.easyUnder}.`,
+        `Warm up ${run.warmupMin} min easy first, cool down ${run.cooldownMin} min after.`
+      ];
+      return { kind: 'intervals', ...iv, text: `${iv.reps} × ${iv.hardMin} min fast, ${iv.easyMin} min easy`, lines, detail: lines.join(' ') };
+    }
     return { kind: 'intervals', ...iv, text: `${iv.reps} × ${iv.hardMin} min hard, ${iv.easyMin} min easy`, detail: `${run.warmupMin} min easy first, ${run.cooldownMin} min easy after · ${run.effort}` };
   }
   if (run.distance) {

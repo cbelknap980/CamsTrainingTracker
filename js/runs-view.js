@@ -301,7 +301,7 @@ export async function renderRunsTab(view, ctx) {
               : (row.status === 'later' ? null : el('button', { class: 'btn small', onclick: () => runForm(plan, settings, null, refresh, { type: row.type }) }, 'Log'))
           ]),
           el('div', { class: 'run-ask' }, row.plan.text),
-          el('div', { class: 'muted run-detail' }, row.plan.detail),
+          row.plan.lines ? el('div', { class: 'muted run-detail run-lines' }, row.plan.lines.map(t => { const i = t.indexOf(': '); return i > 0 && i < 12 ? el('div', {}, [el('b', {}, t.slice(0, i + 1) + ' '), t.slice(i + 2)]) : el('div', {}, t); })) : el('div', { class: 'muted run-detail' }, row.plan.detail),
           row.status === 'open' ? el('div', { class: 'run-moved' }, `Not done ${/weekend/i.test(row.day) ? 'yet' : shortDay(row.date)}. ${openRunText({ plan, rules, settings }, row.id, week, today)}`) : null,
           phone ? countItBlock(row, { plan, rules, settings, runs, week }, () => refresh()) : null,
           row.run ? el('button', { class: 'run-result', onclick: () => runSheet(row.run, full) }, runLine(row.run, rules, true) || 'Logged') : null
