@@ -361,7 +361,10 @@ with sync_playwright() as p:
     check('v1.9 check-in: the app answers with what changed', 'next time' in page.locator('.msg.app').last.inner_text(), page.locator('.msg.app').last.inner_text())
     check('v1.18.3 plan: after Send the Check-ins tab stays open', page.locator('#plan-seg button.on').get_attribute('data-pane') == 'coach')
     page.click('#plan-seg button[data-pane="sessions"]'); page.click('.plan-chip[data-pick="lift2"]'); page.wait_for_selector('.plan-session[data-session="lift2"]')
-    check('v1.9 check-in: the plan shows the shorter rest', '(-15 from check-ins)' in page.locator('.plan-session[data-session="lift2"] tr[data-ex="incline_db_press"]').inner_text())
+    # v1.18.11: the list is one line a lift; rest is on the lift's page
+    page.click('.plan-session[data-session="lift2"] [data-ex="incline_db_press"]'); page.wait_for_selector('#lift-next')
+    check('v1.9 check-in: the plan shows the shorter rest', '(-15 from check-ins)' in page.locator('#lift-next').inner_text(), page.locator('#lift-next').inner_text())
+    page.evaluate("() => import('./js/ui.js').then(m => m.closeModal())"); page.wait_for_timeout(100)
     chk = page.evaluate(f"({KV})('checkins')")
     check('v1.9 check-in: saved with its tags', len(chk) == 1 and chk[0]['tags'] == ['too_heavy', 'rest_long'] and chk[0]['exerciseId'] == 'incline_db_press', chk)
     check('v1.9 plan: page fits the phone width', page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), page.evaluate('[document.documentElement.scrollWidth, window.innerWidth]'))

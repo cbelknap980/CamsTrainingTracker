@@ -2,11 +2,13 @@
 // next targets, and the coach check-in thread. Reads the plan data and what the app stores; writes only check-ins.
 // v1.18.3: on the phone (under 1000 px wide) the tab splits into Week, Sessions, Goals and Check-ins, one at a time,
 // with one session shown at a time (Cameron, Nov 22: "too busy and requires too much scrolling", picked option B).
-// A computer keeps every card on one page in two columns. Nothing here changes the plan or a target.
+// A computer keeps every card on one page in two columns.
+// v1.18.11: each session is one line a lift (sets x reps, weight, a chevron); a tap opens the lift page
+// (lift-detail.js), which can set the next target or a week-12 goal through opts.saveTarget and opts.saveGoal.
 
-import { el, showModal, closeModal } from './ui.js';
-import { projectExercise } from './projection.js';
-import { incrementFor } from './progression.js';
+import { el, infoBtn } from './ui.js';
+import { effectiveTarget } from './progression.js';
+import { openLiftDetail } from './lift-detail.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
 import { TAGS, thread } from './coach.js';
 import { countsFor } from './runs.js';
@@ -63,43 +65,90 @@ function thisWeekCard(plan, settings, sessions, runs, today, week, onPick) {
   return el('div', { class: 'card', id: 'plan-week' }, [el('h3', {}, `Week ${week}, day by day`), ...rows]);
 }
 
-function sessionCard(plan, s, targets, restAdjust, onEx) {
-  const adj = restAdjust || {};
-  const whole = adj[`session:${s.id}`] || 0;
+// v1.18.11 (Cameron, Nov 25: "The base view should just be weight and sets. Make more compact. When we click in then
+// show detail and plan. Also provide a button or [cue] to show I can click in for more details."): one line per lift,
+// its sets x reps and weight for the next time that session comes round, and a chevron. Rest, the plan's rep range,
+// the chart and the goal are one tap in (lift-detail.js).
+const chevron = () => {
+  const NS = 'http://www.w3.org/2000/svg';
+  const g = document.createElementNS(NS, 'svg');
+  g.setAttribute('viewBox', '0 0 16 16'); g.setAttribute('aria-hidden', 'true');
+  const pth = document.createElementNS(NS, 'path');
+  pth.setAttribute('d', 'M6 3.5 10.5 8 6 12.5'); pth.setAttribute('fill', 'none'); pth.setAttribute('stroke', 'currentColor');
+  pth.setAttribute('stroke-width', '2'); pth.setAttribute('stroke-linecap', 'round'); pth.setAttribute('stroke-linejoin', 'round');
+  g.appendChild(pth);
+  return g;
+};
+
+/** The week the session next comes round from today (not logged yet), for its phase: lighter week, heavier weeks. */
+export function nextWeekOf(plan, settings, sessions, sessionId, today) {
+  for (let i = 0; i < 7 * 13; i++) {
+    const d = new Date(today); d.setDate(d.getDate() + i);
+    if (plan.calendar[String(d.getDay())] !== sessionId) continue;
+    const w = weekNumber(d, settings.startDate);
+    if (w > 12) break;
+    if (w >= 1 && !(sessions || []).some(x => x.sessionId === sessionId && x.week === w)) return w;
+  }
+  return Math.max(1, Math.min(12, weekNumber(today, settings.startDate)));
+}
+
+/** What one row shows: { sets, reps, weight } as text for the next time, from the plan item and the stored target. */
+export function rowNumbers({ plan, rules, settings }, it, b, t, phaseId) {
+  const ex = plan.exercises[it.exercise] || { name: it.exercise };
+  const light = rules && rules.phases && rules.phases.light;
+  let sets = it.sets || (b.type === 'finisher' ? (it.rounds ? it.rounds.length : b.rounds) : null);
+  if (sets && phaseId === 'light' && light) sets = Math.max(1, Math.ceil(sets * light.setFactor));
+  const eff = t && rules ? (effectiveTarget({ rules, plan, settings, exerciseId: it.exercise, target: t, phaseId }) || t) : t;
+  const heavy = phaseId === 'heavy' && ex.mainLift && ex.autoProgress !== false && it.reps && rules ? rules.phases.heavy.mainLiftReps : null;
+  const range = heavy || it.reps || null;
+  let reps = '';
+  if (ex.timed) reps = 'hold';
+  else if (eff && eff.reps != null) reps = String(range ? Math.min(Math.max(eff.reps, range[0]), range[1]) : eff.reps);
+  else if (range) reps = repsText(range);
+  const weight = eff && eff.weight != null ? `${ex.equipment === 'weighted_bw' ? '+' : ''}${fmtWeight(eff.weight)} lb` : (ex.equipment === 'bodyweight' || ex.timed ? 'bw' : '');
+  return { sets: sets ? `${sets} × ${reps}` : reps, weight };
+}
+
+function sessionCard(data, s, onEx) {
+  const { plan, settings, targets, sessions } = data;
+  const week = nextWeekOf(plan, settings, sessions, s.id, data.today || new Date());
+  const phaseId = phaseForWeek(plan, week).id;
   const rows = [];
   for (const b of s.blocks) {
     if (b.type === 'warmup' || b.type === 'stretch') {
-      rows.push(el('tr', { class: 'blk' }, [el('td', { colspan: 3 }, `${b.name} · ${b.minutes} min`)]));
+      rows.push(el('div', { class: 'ex-blk ex-blk-quiet' }, `${b.name} · ${b.minutes} min`));
       continue;
     }
     if (b.type === 'emom') {
       const st = b.stations || [];
-      rows.push(el('tr', { class: 'blk' }, [el('td', { colspan: 3 }, `${b.name} · EMOM about ${b.minutes} min${b.room ? ` · ${b.room}` : ''}`)]));
-      st.forEach((x, i) => rows.push(el('tr', {}, [el('td', { colspan: 3 }, [el('div', {}, `Minute ${i + 1}: ${x.name}`), x.cue ? el('div', { class: 'muted small' }, x.cue) : null])])));
+      rows.push(el('div', { class: 'ex-blk' }, `${b.name} · EMOM about ${b.minutes} min${b.room ? ` · ${b.room}` : ''}`));
+      st.forEach((x, i) => rows.push(el('div', { class: 'ex-emom' }, [el('span', {}, `Minute ${i + 1}: ${x.name}`), x.cue ? el('span', { class: 'muted' }, x.cue) : null])));
       continue;
     }
     const label = b.type === 'finisher' ? `Finisher · ${b.rounds} rounds` : (b.type === 'iftime' ? 'If there is time' : `${b.name} · ${b.type === 'superset' ? 'superset' : 'straight sets'}`);
-    rows.push(el('tr', { class: 'blk' }, [el('td', { colspan: 3 }, label)]));
+    rows.push(el('div', { class: 'ex-blk' }, label));
     for (const it of b.items || []) {
       if (!it.exercise) continue;
       const ex = plan.exercises[it.exercise] || { name: it.exercise };
-      const t = targets[it.exercise];
-      const baseRest = it.restSeconds || b.roundRestSeconds || 0;
-      const d = (adj[it.exercise] || 0) + whole;
-      const rest = baseRest ? `${baseRest + d} s rest${d ? ` (${d > 0 ? '+' : ''}${d} from check-ins)` : ''}` : '';
+      const n = rowNumbers(data, it, b, targets[it.exercise], phaseId);
       const tap = onEx ? () => onEx(it.exercise) : null;
-      rows.push(el('tr', { 'data-ex': it.exercise, ...(tap ? { class: 'tappable', role: 'button', tabindex: '0', onclick: tap, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tap(); } } } : {}) }, [
-        el('td', {}, [el('div', {}, ex.name), rest ? el('div', { class: 'muted small' }, rest) : null]),
-        el('td', { class: 'num' }, `${it.sets ? it.sets + ' × ' : ''}${it.reps ? repsText(it.reps) : (ex.timed ? 'hold' : '')}`),
-        el('td', { class: 'num' }, t && t.weight != null ? [`${fmtWeight(t.weight)} lb`, t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : null] : el('span', { class: 'muted' }, '–'))
+      rows.push(el(tap ? 'button' : 'div', { class: 'ex-row', 'data-ex': it.exercise, ...(tap ? { type: 'button', onclick: tap, 'aria-label': `${ex.name}, ${n.sets}${n.weight ? `, ${n.weight}` : ''}. Open for the plan and chart.` } : {}) }, [
+        el('span', { class: 'ex-name' }, ex.name),
+        el('span', { class: 'ex-sets' }, n.sets),
+        el('span', { class: 'ex-wt' + (n.weight === 'bw' || !n.weight ? ' muted' : '') }, n.weight || '–'),
+        tap ? el('span', { class: 'ex-go' }, chevron()) : null
       ]));
     }
   }
+  const ph = phaseForWeek(plan, week);
   return el('div', { class: 'card plan-session', 'data-session': s.id }, [
-    el('div', { class: 'row' }, [el('h2', { style: 'margin:0' }, s.name), el('span', { class: 'muted' }, `${s.day} · about ${s.plannedMinutes} min`)]),
-    s.goal ? el('p', { class: 'muted', style: 'margin:6px 0 0' }, s.goal) : null,
-    el('table', { class: 'plan-table' }, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Sets × reps'), el('th', { class: 'num' }, 'Next')]), ...rows]),
-    onEx ? el('p', { class: 'muted small', style: 'margin:8px 0 0' }, 'Tap an exercise to see where it could be by week 12.') : null
+    el('div', { class: 'ps-head' }, [
+      el('h2', {}, s.name),
+      s.goal ? infoBtn(s.name, s.goal, `What ${s.name} is for`) : null
+    ]),
+    el('div', { class: 'muted ps-sub' }, `${s.day} · about ${s.plannedMinutes} min · week ${week}${ph.id !== 'build' && ph.id !== 'baseline' ? `, ${ph.name.toLowerCase()}` : ''}`),
+    onEx ? el('div', { class: 'ps-hint' }, ['Next time. Tap a lift for its plan and chart ', el('span', { class: 'ex-go mini' }, chevron())]) : null,
+    el('div', { class: 'ex-list' }, rows)
   ]);
 }
 
@@ -218,7 +267,7 @@ export function renderPlan(view, data, opts = {}) {
     weeksCard(plan, weekNumber(today, settings.startDate)),
     el('div', { class: 'plan-pair' }, [thisWeekCard(plan, settings, sessions, runs, today, week), goalsCard(goals)]),
     el('h2', { class: 'section-title' }, 'Sessions'),
-    ...plan.sessions.map(s => sessionCard(plan, s, targets, settings.restAdjust, id => openProjection(data, id))),
+    ...plan.sessions.map(s => sessionCard(data, s, id => openLiftDetail(data, id, opts))),
     runsCard(plan)
   ]);
   const side = el('div', { class: 'plan-side' }, [checkinCard(data, opts)]);
@@ -258,7 +307,7 @@ function renderPhone(view, data, opts) {
       return el('button', { type: 'button', class: 'plan-chip' + (id === pick ? ' on' : ''), 'data-pick': id, 'aria-pressed': String(id === pick), onclick: () => go('sessions', id) }, s ? s.name.split(':')[0] : 'Runs');
     })));
     const s = plan.sessions.find(x => x.id === pick);
-    pane.append(s ? sessionCard(plan, s, targets, settings.restAdjust, id => openProjection(data, id)) : runsCard(plan));
+    pane.append(s ? sessionCard(data, s, id => openLiftDetail(data, id, opts)) : runsCard(plan));
   } else if (ui.pane === 'goals') {
     pane.append(goalsCard(goals), weeksCard(plan, week));
   } else {
@@ -267,123 +316,4 @@ function renderPhone(view, data, opts) {
   view.appendChild(pane);
   const chat = document.getElementById('chat-list');
   if (chat) chat.scrollTop = chat.scrollHeight;
-}
-
-// ---- v1.18.5: tap an exercise for its 12-week projection (Cameron, Nov 24) ----
-
-const SVGNS = 'http://www.w3.org/2000/svg';
-const svgEl = (tag, attrs, kids) => {
-  const n = document.createElementNS(SVGNS, tag);
-  for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, String(v));
-  for (const k of kids || []) if (k) n.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
-  return n;
-};
-// v1.18.8: three cases. Amber, blue and a dashed grey read apart on the sheet's surface, also without colour.
-const CASE = {
-  well: { label: 'Doing well', color: '#e0a030', dash: null },
-  steady: { label: 'Steady', color: '#5b8fe0', dash: null },
-  struggle: { label: 'Struggling', color: '#9aa1ad', dash: '5 4' }
-};
-const CASE_KEYS = ['well', 'steady', 'struggle'];
-
-const tText = (p, t) => (!t ? '–' : (p.kind === 'reps' ? `${t.reps} reps` : `${fmtWeight(t.weight)} × ${t.reps}`));
-
-/** The line chart: the estimated max (or reps) by week for the three cases, each end labelled, the old best dashed. */
-function projChart(p) {
-  const val = t => (!t ? null : (t.shown != null ? t.shown : (p.kind === 'reps' ? t.reps : t.max)));
-  const raw = [{ week: p.weeks[0].week - 1, well: p.now, steady: p.now, struggle: p.now }, ...p.weeks];
-  // the first heavier week trades reps for weight and can read a pound or two lower as a max: draw it level, not as a dip
-  // (a real fall of more than that, a 5% reset, still shows)
-  const seen = {};
-  const pts = raw.map(q => { const o = { week: q.week }; for (const c of CASE_KEYS) { const t = q[c]; let v = t && (p.kind === 'reps' ? t.reps : t.max); if (v != null && seen[c] != null && v < seen[c] && seen[c] - v <= 4) v = seen[c]; if (v != null) seen[c] = v; o[c] = t ? { ...t, shown: v } : t; } return o; });
-  const all = pts.flatMap(x => CASE_KEYS.map(c => val(x[c]))).filter(v => v != null);
-  if (!all.length) return null;
-  let lo = Math.min(...all), hi = Math.max(...all);
-  // v1.18.9 (Cameron, Nov 24: "Lets base it off of benchmarks I should be at"): the benchmark for the lift is always
-  // drawn, however far off; with none, his old best when it is near the lines
-  const std = p.kind === 'weight' && p.standard ? p.standard : null;
-  const best = std ? std.lb : (p.kind === 'weight' && p.oldBest && p.oldBest > lo - (hi - lo) && p.oldBest < hi + (hi - lo) ? p.oldBest : null);
-  if (best != null) { lo = Math.min(lo, best); hi = Math.max(hi, best); }
-  const pad = Math.max(2, (hi - lo) * 0.12); lo -= pad; hi += pad;
-  const W = 340, H = 170, L = 8, R = 40, T = 10, B = 22;
-  const x = w => L + (w - pts[0].week) / (12 - pts[0].week) * (W - L - R);
-  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
-  const line = k => pts.filter(q => val(q[k]) != null).map((q, i) => `${i ? 'L' : 'M'}${x(q.week).toFixed(1)},${y(val(q[k])).toFixed(1)}`).join(' ');
-  const g = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': p.kind === 'reps' ? 'Reps by week, three cases' : 'Estimated max by week, three cases' });
-  for (const w of [pts[0].week, 7, 12].filter((w, i, a) => a.indexOf(w) === i && w >= pts[0].week)) {
-    g.appendChild(svgEl('line', { x1: x(w), x2: x(w), y1: T, y2: H - B, stroke: 'rgba(255,255,255,0.08)', 'stroke-width': 1 }));
-    g.appendChild(svgEl('text', { x: x(w), y: H - 6, 'text-anchor': w === pts[0].week ? 'start' : 'middle', fill: '#9aa1ad', 'font-size': 11 }, [w === pts[0].week ? 'now' : `wk ${w}`]));
-  }
-  if (best != null) {
-    g.appendChild(svgEl('line', { class: 'proj-best', x1: L, x2: x(12), y1: y(best), y2: y(best), stroke: 'rgba(255,255,255,0.35)', 'stroke-width': 1, 'stroke-dasharray': '2 4' }));
-    g.appendChild(svgEl('text', { x: L + 2, y: y(best) - 4, fill: '#9aa1ad', 'font-size': 10 }, [std ? `${std.label}, ${fmtWeight(best)}` : `your old best, ${fmtWeight(best)}`]));
-  }
-  for (const k of ['struggle', 'steady', 'well']) {
-    g.appendChild(svgEl('path', { class: 'proj-line', d: line(k), fill: 'none', stroke: CASE[k].color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', ...(CASE[k].dash ? { 'stroke-dasharray': CASE[k].dash } : {}) }));
-    g.appendChild(svgEl('circle', { cx: x(12), cy: y(val(p.end[k])), r: 3.5, fill: CASE[k].color, stroke: '#23272f', 'stroke-width': 2 }));
-  }
-  // end labels, top to bottom, pushed apart so they never overlap
-  const ends = CASE_KEYS.map(k => ({ k, v: val(p.end[k]), y: y(val(p.end[k])) })).sort((a, b) => a.y - b.y);
-  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 12) ends[i].y = ends[i - 1].y + 12;
-  ends.forEach((e, i) => { if (i && e.v === ends[i - 1].v) return; g.appendChild(svgEl('text', { x: x(12) + 7, y: e.y + 4, fill: e.k === 'well' ? '#f3f4f6' : '#9aa1ad', 'font-size': 12, 'font-weight': e.k === 'well' ? 700 : 500 }, [fmtWeight(e.v)])); });
-  g.appendChild(svgEl('circle', { cx: x(pts[0].week), cy: y(val(p.now)), r: 4, fill: '#f3f4f6', stroke: '#23272f', 'stroke-width': 2 }));
-  return g;
-}
-
-function openProjection(data, exerciseId) {
-  const { plan, rules, settings, sessions, targets } = data;
-  const ex = plan.exercises[exerciseId] || { name: exerciseId };
-  const p = rules ? projectExercise({ plan, rules, settings, sessions, targets, exerciseId, today: data.today || new Date() }) : null;
-  const close = el('button', { class: 'btn', style: 'margin-top:12px', onclick: () => closeModal() }, 'Close');
-  if (!p || p.kind === 'self') {
-    const why = p && p.kind === 'self'
-      ? `The power clean moves when you go heavier on your doubles; the app does not raise it by itself, so there is nothing to project. Now: ${tText({ kind: 'weight' }, p.now)}.`
-      : 'No target yet, so there is nothing to project. It starts from the first session you log.';
-    showModal(el('div', { class: 'proj', id: 'proj-sheet' }, [el('h2', {}, ex.name), el('p', {}, why), close]));
-    return;
-  }
-  const w = p.kind === 'weight';
-  const unit = ex.equipment === 'weighted_bw' ? 'lb added' : (ex.pair ? 'lb, both dumbbells' : 'lb');
-  const pending = targets[exerciseId] && targets[exerciseId].pendingCoach;
-  // one tile per case: where the estimated max (or the reps) ends, and how far that is from today
-  const tile = k => {
-    const t = p.end[k];
-    const v = w ? t.max : t.reps, v0 = w ? p.now.max : p.now.reps;
-    const d = v - v0;
-    return el('div', { class: `proj-case ${k}` }, [
-      el('small', {}, [el('i', { style: `background:${CASE[k].color}` }), CASE[k].label]),
-      el('b', {}, w ? fmtWeight(v) : `${v} reps`),
-      el('div', { class: 'sub' }, d ? `${d > 0 ? '+' : '−'}${fmtWeight(Math.abs(d))}${w ? ' lb' : ''}` : 'no change')
-    ]);
-  };
-  // the weeks worth a row: next week, the last build week, the first and last heavier weeks
-  const first = p.weeks[0].week;
-  const pick = [first, 6, 8, 11].filter((x, i, a) => x >= first && a.indexOf(x) === i);
-  const rows = pick.map(n => p.weeks.find(z => z.week === n)).filter(Boolean);
-  const chart = projChart(p);
-  const rules3 = p.weekly
-    ? [['Doing well', `all reps made, no set Hard, every week: ${fmtWeight(incrementFor(rules, exerciseId, ex))} lb more each time.`],
-       ['Steady', 'every other week a set is Hard: the weight holds that week.'],
-       ['Struggling', 'a rep short two weeks in three: the weight holds, and three misses in a row take 5% off.']]
-    : [['Doing well', 'last set Solid: 2 more reps each time (Easy: more weight right away).'],
-       ['Steady', 'last set Hard: 1 more rep, then more weight at the top of the range.'],
-       ['Struggling', 'a rep short every other session.']];
-  showModal(el('div', { class: 'proj', id: 'proj-sheet' }, [
-    el('h2', {}, ex.name),
-    el('div', { class: 'muted small', id: 'proj-now' }, `Now ${tText(p, p.now)}${w ? `, estimated max ${fmtWeight(p.now.max)} ${ex.equipment === 'weighted_bw' ? 'lb added' : 'lb'}` : ''}${pending ? ' (new coach target, reaches the phone when it next opens)' : ''}`),
-    w && p.standard ? el('div', { class: 'muted small', id: 'proj-standard' }, `${p.standard.label}: ${fmtWeight(p.standard.lb)} lb${ex.equipment === 'weighted_bw' ? ' added' : ''}${p.standard.lb > p.now.max ? `, ${fmtWeight(p.standard.lb - p.now.max)} to go` : ', already past it'}${p.oldBest ? `. Your best single: ${fmtWeight(p.oldBest)}` : ''}`) : null,
-    el('h3', {}, w ? `Estimated max by week 12 (${unit})` : 'Reps by week 12'),
-    el('div', { class: 'proj-cases' }, CASE_KEYS.map(tile)),
-    chart,
-    el('h3', {}, 'Target for the week'),
-    el('table', { id: 'proj-table' }, [
-      el('tr', {}, [el('th', {}, 'Week'), ...CASE_KEYS.map(k => el('th', {}, CASE[k].label))]),
-      ...rows.map(r => el('tr', {}, [el('td', {}, `${r.week}${r.phase === 'heavy' && p.mainLift ? ' (heavier)' : ''}`), ...CASE_KEYS.map(k => el('td', {}, tText(p, r[k])))])),
-      p.mainLift && w ? el('tr', { id: 'proj-retest' }, [el('td', {}, '12 (retest)'), ...CASE_KEYS.map(k => el('td', {}, `~${fmtWeight(p.end[k].fiveRep)} × 5`))]) : null
-    ]),
-    el('h3', {}, 'What puts you on each line'),
-    el('ul', { class: 'proj-rules' }, rules3.map(([a, b]) => el('li', {}, [el('b', {}, a + ': '), b]))),
-    el('p', {}, `${p.mainLift && w ? `Estimated max (${unit}) is what a target works out to for one rep, so 5-rep and 3-rep weeks compare. ` : ''}No line runs past ${Math.round((((rules.projection || {}).maxGain || {})[p.mainLift ? 'main' : 'accessory'] || 0) * 100)}% over today, about the most a trained lifter adds in a block this long.`),
-    close
-  ]));
 }
