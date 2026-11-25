@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.10",
+  "rulesVersion": "1.11",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -27,6 +27,13 @@
       "exercises": ["back_squat", "front_squat", "strict_press", "weighted_pullup", "push_press"],
       "reps": 5
     }
+  },
+  "lastSetRating": {
+    "description": "v1.18.7 (Cameron, Nov 24: \"What about other lifts too. You should be taking into account how i rates the... Last set\"): the effort picked on the last work set of a lift stands for the lift. Earlier sets the timer logged with no effort picked no longer hold the target (their guessed effort is ignored); an unrated last set still holds it. Accessories move by that rating: Easy (up to easyUpTo) adds a weight step now with reps at the bottom of the range, Solid (up to solidUpTo) adds solidReps reps, Hard or Maxed adds one rep as before, and a missed rep adds at most one. The top of the range still steps the weight. Week 2 no longer holds accessory weights. Main lifts keep rules R5, judged on the sets he rated.",
+    "decides": true,
+    "easyUpTo": 6.9,
+    "solidUpTo": 8.7,
+    "solidReps": 2
   },
   "accessoryRule": {
     "description": "Add reps up to the top of the range first, then the smallest weight jump for that equipment.",

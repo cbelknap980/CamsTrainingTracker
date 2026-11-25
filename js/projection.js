@@ -8,6 +8,9 @@ import { applyProgression, effectiveTarget, epley, bodyweightOf, isExcluded, wee
 import { weekNumber, phaseForWeek, parseISODate, toISODate, snapLoad } from './data.js';
 
 const SOLID = 8;
+// v1.18.7: accessories are planned at 0-2 reps left, so their lines assume a Hard last set (one more rep a session);
+// a Solid or Easy last set moves them faster than either line (rules.lastSetRating).
+const HARD = 9;
 
 /** Every session from `today` to the end of week 12 that has this exercise and is not logged yet, in order. */
 export function occurrences({ plan, settings, sessions, exerciseId, today }) {
@@ -52,7 +55,7 @@ function run({ plan, rules, settings, exerciseId, target, occ, short }) {
     const sets = Array.from({ length: n }, (_, k) => ({
       exerciseId, setIndex: k + 1, weight: t.weight != null ? t.weight : null,
       reps: reps != null && short(i) && k === n - 1 ? Math.max(0, reps - 1) : reps,
-      target: { weight: t.weight, reps }, repRange: range, rpe: SOLID, done: true
+      target: { weight: t.weight, reps }, repRange: range, rpe: ex.mainLift ? SOLID : HARD, done: true
     }));
     const res = applyProgression({ session: { id: `p${i}`, week: o.week, phase: { id: ph.id }, endedAt: `${o.date}T20:00:00Z`, sets }, targets, rules, plan, settings });
     targets = res.targets;

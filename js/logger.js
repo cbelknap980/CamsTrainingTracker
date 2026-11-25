@@ -161,7 +161,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
       const oneLift = new Set(unchecked.map(st => st.exerciseId)).size === 1;
       container.appendChild(el('div', { class: 'card review-unchecked', id: 'review-unchecked' }, [
         el('h2', {}, `${unchecked.length} ${one ? 'set was' : 'sets were'} logged by the timer`),
-        el('p', { class: 'muted', style: 'margin:0 0 6px' }, `The clock ran out before an effort was picked. Saved without a rating, ${oneLift ? 'that lift keeps its' : 'those lifts keep their'} target next time. Tap one to rate it or correct it.`),
+        el('p', { class: 'muted', style: 'margin:0 0 6px' }, `The clock ran out before an effort was picked. The rating on a lift's last set decides its next target; a lift whose last set has no rating keeps its target next time. Tap one to rate it or correct it.`),
         ...unchecked.map(st => {
           const ex = plan.exercises[st.exerciseId];
           return el('div', { class: 'open-item unchecked', onclick: () => editSet(st, ex) }, [

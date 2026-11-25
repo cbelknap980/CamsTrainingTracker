@@ -1445,7 +1445,7 @@ export class Player {
     const nums = `${r.weight != null ? `${fmtWeight(r.weight)} lb${isPair(ex) ? ` (${pairText(ex, r.weight)})` : ''} × ` : ''}${r.reps != null ? r.reps : '?'}${o.perSide ? ' / side' : ' reps'}`;
     showModal(el('div', { class: 'rate-missed', id: 'rate-missed' }, [
       el('h2', {}, `${o.name}${where ? ', ' + where : ''}`),
-      el('p', { class: 'muted', style: 'margin:2px 0 10px' }, `${nums}. The timer logged it before you picked how hard it was; until you do, this lift keeps its target next time.`),
+      el('p', { class: 'muted', style: 'margin:2px 0 10px' }, `${nums}. The timer logged it before you picked how hard it was; the rating on this lift's last set decides its next target.`),
       effortChips(this.rules, null, lvl => { this.fixRecord(j, { rpe: lvl.rpe }); closeModal(); this.renderStep(); }),
       el('div', { class: 'btn-row', style: 'margin-top:12px' }, [
         el('button', { class: 'btn', onclick: () => { closeModal(); this.openFix(j); } }, 'Fix weight or reps'),
