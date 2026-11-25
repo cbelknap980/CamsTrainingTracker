@@ -132,7 +132,7 @@ check('baseline e1RM recorded (216)', r.e1rms.back_squat === 216, r.e1rms);
 
 // main lift pass
 r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 7, [4, 6])]), targets: { back_squat: { weight: 185, reps: 6, stall: 0 } }, rules, plan, settings });
-check('main lift pass -> +5 lb, reps to bottom', r.targets.back_squat.weight === 190 && r.targets.back_squat.reps === 4, r.targets.back_squat);
+check('main lift pass -> +5 lb, reps settle at 5 (v1.18.6, rules R5: was reps to the bottom, 4)', r.targets.back_squat.weight === 190 && r.targets.back_squat.reps === 5, r.targets.back_squat);
 // press increments 2.5
 r = applyProgression({ session: mkSession(3, [ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6])]), targets: { strict_press: { weight: 95, reps: 6 } }, rules, plan, settings });
 check('press pass -> +2.5 lb', r.targets.strict_press.weight === 97.5, r.targets.strict_press);
@@ -200,9 +200,9 @@ check('v1.18.1 R4 rule 9: a clean baseline of 155 is the target itself (no 90%)'
   check('v1.18.1 R4 rule 7: week 8 shows the heavy start, 195 x 3 for a 185 x 5 target', w8.weight === 195 && w8.reps === 3, w8);
   const sets8 = [1, 2, 3, 4].map(() => ws('back_squat', 195, 3, 8, [3, 5]));
   const h = applyProgression({ session: mkSession(8, sets8), targets: { back_squat: { weight: 185, reps: 5, stall: 2 } }, rules, plan, settings });
-  check('v1.18.1 R4 rule 7: that session is read against 195 x 3: next 195 x 4, count 0, marked so it is not applied again', h.targets.back_squat.weight === 195 && h.targets.back_squat.reps === 4 && h.targets.back_squat.stall === 0 && h.targets.back_squat.heavyStart && h.targets.back_squat.heavyStart.week === 8 && h.targets.back_squat.heavyStart.from.weight === 185, h.targets.back_squat);
+  check('v1.18.1 R4 rule 7: that session is read against 195 x 3: next 200 x 3 (v1.18.6: a step every clean session), count 0, marked so it is not applied again', h.targets.back_squat.weight === 200 && h.targets.back_squat.reps === 3 && h.targets.back_squat.stall === 0 && h.targets.back_squat.heavyStart && h.targets.back_squat.heavyStart.week === 8 && h.targets.back_squat.heavyStart.from.weight === 185, h.targets.back_squat);
   const w9 = shown(9, h.targets.back_squat);
-  check('v1.18.1 R4 rule 7: week 9 shows 195 x 4 (no second 5%)', w9.weight === 195 && w9.reps === 4, w9);
+  check('v1.18.1 R4 rule 7: week 9 shows 200 x 3 (no second 5%)', w9.weight === 200 && w9.reps === 3, w9);
   const eff = effectiveTarget({ rules, plan, settings, exerciseId: 'power_clean', target: { weight: 155, reps: 2 }, phaseId: 'heavy' });
   check('v1.18.1 R4 rule 7: never on the clean', eff.weight === 155, eff);
   check('v1.18.1 R4 rule 12: the engine hands back each lift\'s target going in (null when it had none)', h.before.back_squat.weight === 185 && h.before.back_squat.stall === 2 && !h.before.back_squat.heavyStart
@@ -497,12 +497,12 @@ console.log('v1.9 muscle groups and coach check-ins');
   const heavy = mkRec('h8', 8, [W(195, 3, 8, { repRange: [3, 5], target: t8, setIndex: 1 }), W(195, 3, 8, { repRange: [3, 5], target: t8, setIndex: 2 }), W(195, 3, 8, { repRange: [3, 5], target: t8, setIndex: 3 }), W(19, 3, 8, { repRange: [3, 5], target: t8, setIndex: 4 })], '2027-01-05T17:00:00Z', 'heavy');
   const a8 = save(heavy, { back_squat: { weight: 185, reps: 5, stall: 0, source: 'engine' } });
   const f8 = applyNumberFix({ sessions: [heavy], targets: a8, recordId: 'h8', exerciseId: 'back_squat', weights: { 3: 195 }, checked: [3], plan, rules, settings });
-  check('v1.18.1 rule 12, week 8: re-run from the bare 185 x 5 applies the heavy start once: 195 x 4, marked', f8.target.weight === 195 && f8.target.reps === 4 && f8.target.stall === 0 && f8.target.heavyStart && f8.target.heavyStart.week === 8, f8.target);
-  const t9 = { weight: 195, reps: 4 };
-  const w9 = mkRec('h9', 9, [W(195, 4, 8, { repRange: [3, 5], target: t9, setIndex: 1 }), W(195, 4, 8, { repRange: [3, 5], target: t9, setIndex: 2 }), W(195, 4, 8, { repRange: [3, 5], target: t9, setIndex: 3 }), W(19, 4, 8, { repRange: [3, 5], target: t9, setIndex: 4 })], '2027-01-12T17:00:00Z', 'heavy');
+  check('v1.18.1 rule 12, week 8: re-run from the bare 185 x 5 applies the heavy start once: 200 x 3 next (v1.18.6), marked', f8.target.weight === 200 && f8.target.reps === 3 && f8.target.stall === 0 && f8.target.heavyStart && f8.target.heavyStart.week === 8, f8.target);
+  const t9 = { weight: 200, reps: 3 };
+  const w9 = mkRec('h9', 9, [W(200, 3, 8, { repRange: [3, 5], target: t9, setIndex: 1 }), W(200, 3, 8, { repRange: [3, 5], target: t9, setIndex: 2 }), W(200, 3, 8, { repRange: [3, 5], target: t9, setIndex: 3 }), W(20, 3, 8, { repRange: [3, 5], target: t9, setIndex: 4 })], '2027-01-12T17:00:00Z', 'heavy');
   const a9 = save(w9, { back_squat: f8.target });
-  const f9 = applyNumberFix({ sessions: [heavy, w9], targets: a9, recordId: 'h9', exerciseId: 'back_squat', weights: { 3: 195 }, checked: [3], plan, rules, settings });
-  check('v1.18.1 rule 12, week 9: a marked target keeps its mark, no second 5% (195 x 5)', f9.target.weight === 195 && f9.target.reps === 5 && f9.target.heavyStart && f9.target.heavyStart.week === 8, f9.target);
+  const f9 = applyNumberFix({ sessions: [heavy, w9], targets: a9, recordId: 'h9', exerciseId: 'back_squat', weights: { 3: 200 }, checked: [3], plan, rules, settings });
+  check('v1.18.1 rule 12, week 9: a marked target keeps its mark, no second 5% (205 x 3, one step)', f9.target.weight === 205 && f9.target.reps === 3 && f9.target.heavyStart && f9.target.heavyStart.week === 8, f9.target);
   const old8 = { ...heavy, id: 'o8', targetsBefore: undefined };
   const r8 = rerunLift({ record: old8, exerciseId: 'back_squat', plan, rules, settings });
   check('v1.18.1 rule 12: a session saved before v1.18.1 starts from the target it showed, at count 0, with no second heavy start', r8.going.weight === 195 && r8.going.stall === 0 && r8.target.weight === 195 && r8.target.reps === 3, [r8.going, r8.target]);
@@ -512,7 +512,7 @@ console.log('v1.9 muscle groups and coach check-ins');
   const a6 = save(w6, { back_squat: { weight: 185, reps: 5, stall: 0 } });
   const marked = { ...a6.back_squat, weight: 195, reps: 3, heavyStart: { week: 8, from: { weight: a6.back_squat.weight, reps: a6.back_squat.reps } } };
   const f6 = applyNumberFix({ sessions: [w6], targets: { back_squat: marked }, recordId: 'w6', exerciseId: 'back_squat', weights: { 2: 185 }, checked: [2], plan, rules, settings });
-  check('v1.18.1 rule 12: a fix to the week-6 session drops the heavy-start mark Home had put on (it comes back from the fixed target)', !f6.target.heavyStart && f6.target.weight === 185 && f6.target.reps === 6, f6.target);
+  check('v1.18.1 rule 12: a fix to the week-6 session drops the heavy-start mark Home had put on (it comes back from the fixed target)', !f6.target.heavyStart && f6.target.weight === 190 && f6.target.reps === 5, f6.target);
 
   // rating a set after Save
   const t6b = { weight: 185, reps: 6 };
@@ -520,7 +520,7 @@ console.log('v1.9 muscle groups and coach check-ins');
   const au = save(un, { back_squat: { weight: 185, reps: 6, stall: 1, source: 'engine' } });
   check('v1.18.1 rate after Save: saved unrated, the squat holds at 185 x 6, count 1', au.back_squat.weight === 185 && au.back_squat.stall === 1 && /no effort picked/.test(un.whatChanged[0].text), [au.back_squat, un.whatChanged[0].text]);
   const rated = rateSavedSet({ sessions: [un], targets: au, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
-  check('v1.18.1 rate after Save: rated Solid, the session counts: 190 x 4, count 0, the line says it was rated later', rated.why === 'latest' && rated.retargeted && rated.target.weight === 190 && rated.target.reps === 4 && rated.target.stall === 0 && !rated.record.sets[2].unconfirmed && rated.record.sets[2].rpe === 8 && /rated after saving/.test(rated.record.whatChanged[0].text) && un.sets[2].unconfirmed === true, [rated.target, rated.record.whatChanged[0]]);
+  check('v1.18.1 rate after Save: rated Solid, the session counts: 190 x 5 (v1.18.6), count 0, the line says it was rated later', rated.why === 'latest' && rated.retargeted && rated.target.weight === 190 && rated.target.reps === 5 && rated.target.stall === 0 && !rated.record.sets[2].unconfirmed && rated.record.sets[2].rpe === 8 && /rated after saving/.test(rated.record.whatChanged[0].text) && un.sets[2].unconfirmed === true, [rated.target, rated.record.whatChanged[0]]);
   const two = mkRec('u2', 3, [W(185, 6, 8, { target: t6b, setIndex: 1 }), W(185, 6, 8, { target: t6b, setIndex: 2, unconfirmed: true }), W(185, 6, 8, { target: t6b, setIndex: 3, unconfirmed: true })], '2026-12-01T17:00:00Z');
   const a2 = save(two, { back_squat: { weight: 185, reps: 6, stall: 1 } });
   const one = rateSavedSet({ sessions: [two], targets: a2, recordId: 'u2', index: 1, rpe: 8, plan, rules, settings });
@@ -535,12 +535,12 @@ console.log('v1.9 muscle groups and coach check-ins');
   const byCoach = rateSavedSet({ sessions: [un], targets: { back_squat: { weight: 180, reps: 6, stall: 0, source: 'coach', updated: '2026-12-02T05:00:00.000Z' } }, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
   check('v1.18.1 rate after Save: a target the coach set after the session stays (the nightly review or a check-in)', byCoach.why === 'coach' && !byCoach.retargeted && byCoach.target.weight === 180 && byCoach.record.sets[2].rpe === 8, byCoach.target);
   const coachBefore = rateSavedSet({ sessions: [un], targets: { back_squat: { weight: 185, reps: 6, stall: 1, source: 'coach', updated: '2026-11-29T05:00:00.000Z' } }, recordId: 'u1', index: 2, rpe: 8, plan, rules, settings });
-  check('v1.18.1 rate after Save: a coach target from before the session moves as usual (190 x 4)', coachBefore.why === 'latest' && coachBefore.target.weight === 190 && coachBefore.target.reps === 4, coachBefore.target);
+  check('v1.18.1 rate after Save: a coach target from before the session moves as usual (190 x 5)', coachBefore.why === 'latest' && coachBefore.target.weight === 190 && coachBefore.target.reps === 5, coachBefore.target);
   const fixCoach = applyNumberFix({ sessions: [w6], targets: { back_squat: { weight: 190, reps: 5, stall: 0, source: 'coach', updated: '2026-12-23T05:00:00.000Z' } }, recordId: 'w6', exerciseId: 'back_squat', weights: { 2: 185 }, checked: [2], plan, rules, settings });
   check('v1.18.1 number fix: a target the coach set since stays; the session is still corrected', !fixCoach.retargeted && fixCoach.target.weight === 190 && fixCoach.target.reps === 5 && fixCoach.record.sets[2].weight === 185, [fixCoach.target, fixCoach.record.sets[2]]);
   const pre = { ...un, id: 'p1', targetsBefore: undefined };
   const preR = rateSavedSet({ sessions: [pre], targets: { back_squat: { weight: 185, reps: 6, stall: 0 } }, recordId: 'p1', index: 2, rpe: 8, plan, rules, settings });
-  check('v1.18.1 rate after Save: a session saved before v1.18.1 re-runs from the target it showed (190 x 4)', preR.target.weight === 190 && preR.target.reps === 4, preR.target);
+  check('v1.18.1 rate after Save: a session saved before v1.18.1 re-runs from the target it showed (190 x 5)', preR.target.weight === 190 && preR.target.reps === 5, preR.target);
 }
 
 // ---- v1.10: runs and Garmin ----
@@ -1019,6 +1019,55 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('v1.18.5 progression: a 55 target reads as 50; 3 x 12 at 50 moves to 60 (2 x 30), never 65', pr.targets.curl.weight === 60, pr.targets.curl);
   const hold = applyProgression({ session: { ...sess, sets: sess.sets.map(x => ({ ...x, unconfirmed: true })) }, targets: { curl: { weight: 55, reps: 10 } }, rules, plan, settings });
   check('v1.18.5 progression: an unrated session holds at 50, not 55', hold.targets.curl.weight === 50, hold.targets.curl);
+}
+
+
+// ---- v1.18.6: rules R5, main lifts step up every clean session (Cameron, Nov 24: "I want to be pushed") ----
+{
+  console.log('\nv1.18.6: weekly steps on the main lifts (rules R5)');
+  const go = (id, week, t, sets, range) => applyProgression({ session: mkSession(week, sets.map(([w, r, e, x]) => ws(id, w, r, e, range, x))), targets: { [id]: { stall: 0, ...t } }, rules, plan, settings }).targets[id];
+  let t = go('back_squat', 3, { weight: 195, reps: 5 }, [[195, 5, 8], [195, 5, 8], [195, 5, 6]], [4, 6]);
+  check('R5 squat: 195 x 5 on all three sets at Solid or easier -> 200 x 5', t.weight === 200 && t.reps === 5 && t.stall === 0, t);
+  t = go('back_squat', 3, { weight: 195, reps: 5 }, [[195, 5, 8], [195, 5, 9], [195, 5, 8]], [4, 6]);
+  check('R5 squat: a Hard set that made its reps holds 195 x 5, nothing counted', t.weight === 195 && t.reps === 5 && t.stall === 0, t);
+  t = go('back_squat', 3, { weight: 195, reps: 5 }, [[195, 5, 8], [195, 5, 8], [195, 4, 9]], [4, 6]);
+  check('R5 squat: a missed rep holds 195 x 5 and counts one flat session', t.weight === 195 && t.reps === 5 && t.stall === 1, t);
+  t = go('back_squat', 3, { weight: 195, reps: 5, stall: 2 }, [[195, 5, 8], [195, 5, 8], [195, 4, 9]], [4, 6]);
+  check('R5 squat: the third flat session in a row still takes 5% off (185 x 5)', t.weight === 185 && t.reps === 5 && t.stall === 0, t);
+  t = go('back_squat', 3, { weight: 185, reps: 6 }, [[185, 6, 8], [185, 6, 8], [185, 6, 8]], [4, 6]);
+  check('R5 squat: a 6-rep target steps up and settles at 5 reps (190 x 5)', t.weight === 190 && t.reps === 5, t);
+  t = go('back_squat', 3, { weight: 190, reps: 4 }, [[190, 4, 8], [190, 4, 8], [190, 4, 8]], [4, 6]);
+  check('R5 squat: a 4-rep target gains a rep before weight (190 x 5)', t.weight === 190 && t.reps === 5, t);
+  t = go('back_squat', 3, { weight: 195, reps: 5 }, [[195, 5, 8], [195, 5, 8], [195, 5, 8, { unconfirmed: true }]], [4, 6]);
+  check('R5 squat: an unrated set still holds the target (R4 rule 1)', t.weight === 195 && t.reps === 5, t);
+  t = go('back_squat', 3, { weight: 195, reps: 5 }, [[195, 5, 8], [195, 5, 8], [null, null, null, { done: false, skipped: true }]], [4, 6]);
+  check('R5 squat: two of three sets done holds', t.weight === 195 && t.reps === 5, t);
+  t = go('back_squat', 3, { weight: 195, reps: 5 }, [[200, 5, 8], [200, 5, 8], [200, 5, 8]], [4, 6]);
+  check('R5 squat: 200 x 5 done against a 195 target -> 205 x 5', t.weight === 205 && t.reps === 5, t);
+  t = go('back_squat', 3, { weight: 195, reps: 5 }, [[205, 4, 9], [205, 4, 9], [205, 4, 9]], [4, 6]);
+  check('R5 squat: 205 x 4 at Hard against 195 x 5 -> the target follows to 205 x 4, no extra step', t.weight === 205 && t.reps === 4, t);
+  t = go('strict_press', 2, { weight: 90, reps: 5 }, [[90, 5, 8], [90, 5, 8], [90, 5, 8], [90, 5, 8]], [4, 6]);
+  check('R5 press: week 2 no longer blocks a step (90 x 5 -> 92.5 x 5)', t.weight === 92.5 && t.reps === 5, t);
+  t = go('weighted_pullup', 3, { weight: 30, reps: 5 }, [[30, 5, 8], [30, 5, 8], [30, 5, 8], [30, 5, 8]], [4, 6]);
+  check('R5 pull-up: +30 x 5 -> +35 x 5', t.weight === 35 && t.reps === 5, t);
+  t = go('push_press', 3, { weight: 95, reps: 5 }, [[95, 5, 8], [95, 5, 8], [95, 5, 8]], [3, 5]);
+  check('R5 push press: steps are 5 lb now (95 x 5 -> 100 x 5)', t.weight === 100 && t.reps === 5, t);
+  t = go('front_squat', 3, { weight: 140, reps: 5 }, [[140, 5, 8], [140, 5, 8], [140, 5, 8]], [5, 6]);
+  check('R5 front squat: 140 x 5 -> 145 x 5', t.weight === 145 && t.reps === 5, t);
+  t = go('back_squat', 9, { weight: 225, reps: 3, heavyStart: { week: 8, from: { weight: 215, reps: 5 } } }, [[225, 3, 8], [225, 3, 8], [225, 3, 8]], [3, 5]);
+  check('R5 heavier weeks: reps stay at 3 and the weight steps (225 x 3 -> 230 x 3)', t.weight === 230 && t.reps === 3, t);
+  t = go('back_squat', 7, { weight: 215, reps: 5 }, [[215, 5, 8], [215, 5, 8]], [4, 6]);
+  check('R5 lighter week: nothing moves', t.weight === 215 && t.reps === 5, t);
+  t = go('rdl', 3, { weight: 195, reps: 8 }, [[195, 8, 8], [195, 8, 8], [195, 8, 8]], [6, 8]);
+  check('RDL: accessory rule unchanged, steps land on 10s (195 x 8 -> 200 x 6)', t.weight === 200 && t.reps === 6, t);
+  t = go('rdl', 4, { weight: 200, reps: 8 }, [[200, 8, 8], [200, 8, 8], [200, 8, 8]], [6, 8]);
+  check('RDL: then 10 lb a step (200 x 8 -> 210 x 6)', t.weight === 210 && t.reps === 6, t);
+  t = go('rdl', 3, { weight: 195, reps: 6 }, [[195, 6, 8], [195, 6, 8], [195, 6, 8]], [6, 8]);
+  check('RDL: reps first (195 x 6 -> 195 x 7)', t.weight === 195 && t.reps === 7, t);
+  const old = JSON.parse(JSON.stringify(rules)); delete old.mainLiftTest.weekly;
+  const o = applyProgression({ session: mkSession(3, [1, 2, 3].map(() => ws('back_squat', 195, 5, 8, [4, 6]))), targets: { back_squat: { weight: 195, reps: 5, stall: 0 } }, rules: old, plan, settings }).targets.back_squat;
+  check('without rules.mainLiftTest.weekly the R4 rule still applies (195 x 5 -> 195 x 6)', o.weight === 195 && o.reps === 6, o);
+  check('the power clean is not a weekly lift', !rules.mainLiftTest.weekly.exercises.includes('power_clean') && rules.mainLiftTest.weekly.exercises.length === 5);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');

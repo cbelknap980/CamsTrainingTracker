@@ -335,19 +335,19 @@ function openProjection(data, exerciseId) {
     el('div', { class: 'muted small' }, `${p.sessionsLeft} sessions left in the 12 weeks`),
     el('div', { class: 'proj-now' }, [
       box('Now', p.now, e1(p.now) + (e1(p.now) ? bw : '')),
-      box('Week 12, on plan', p.end.plan, e1(p.end.plan))
+      box(p.weekly ? 'Week 12, best case' : 'Week 12, on plan', p.end.plan, e1(p.end.plan))
     ]),
     chart,
     chart ? el('div', { class: 'proj-key' }, [
-      el('span', {}, [el('i', { style: `background:${COLORS.plan}` }), 'On plan']),
-      el('span', {}, [el('i', { style: `background:${COLORS.slower}` }), 'Slower']),
+      el('span', {}, [el('i', { style: `background:${COLORS.plan}` }), p.weekly ? 'Best case' : 'On plan']),
+      el('span', {}, [el('i', { style: `background:${COLORS.slower}` }), p.weekly ? 'Steady' : 'Slower']),
       el('span', {}, p.kind === 'reps' ? 'reps' : (ex.equipment === 'weighted_bw' ? 'lb added' : (ex.pair ? 'lb, both dumbbells' : 'lb')))
     ]) : null,
     el('table', { id: 'proj-table' }, [
-      el('tr', {}, [el('th', {}, 'Target after week'), el('th', {}, 'On plan'), el('th', {}, 'Slower')]),
+      el('tr', {}, [el('th', {}, 'Target after week'), el('th', {}, p.weekly ? 'Best case' : 'On plan'), el('th', {}, p.weekly ? 'Steady' : 'Slower')]),
       ...rows.map(w => el('tr', {}, [el('td', {}, `${w.week}${w.phase === 'light' ? ' (lighter)' : (w.phase === 'heavy' && p.mainLift ? ' (heavier)' : '')}`), el('td', {}, tText(p, w.plan)), el('td', {}, tText(p, w.slower))]))
     ]),
-    el('p', {}, `On plan: every set makes its reps at Solid or easier. Slower: every other session falls a rep short, so it moves about half as often. Both use the app's own rules, the same ones that set your targets after each session${p.mainLift ? ' (week 7 holds, weeks 8-11 start 5% heavier at 3-5 reps, week 12 is the retest)' : ''}. Real progress usually lands between the two${p.mainLift ? '' : ', and small lifts tend to slow down before the end'}.`),
+    el('p', {}, p.weekly ? `Best case: every set makes its reps at Solid or easier every week, so the weight goes up every week. Steady: that happens every other week. A Hard week holds the weight, and so does a missed rep. Both use the app's own rules (week 7 holds, weeks 8-11 start 5% heavier at 3 reps, week 12 is the retest). Expect to land between the two, closer to best case early on.` : `On plan: every set makes its reps at Solid or easier. Slower: every other session falls a rep short, so it moves about half as often. Both use the app's own rules, the same ones that set your targets after each session${p.mainLift ? ' (week 7 holds, weeks 8-11 start 5% heavier at 3-5 reps, week 12 is the retest)' : ''}. Real progress usually lands between the two${p.mainLift ? '' : ', and small lifts tend to slow down before the end'}.`),
     close
   ]));
 }
