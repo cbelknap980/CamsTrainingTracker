@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.11",
+  "rulesVersion": "1.12",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -27,6 +27,10 @@
       "exercises": ["back_squat", "front_squat", "strict_press", "weighted_pullup", "push_press"],
       "reps": 5
     }
+  },
+  "projection": {
+    "description": "v1.18.8 (Cameron, Nov 24: \"Reserach what progress I could should be making over the 12 weeks. What happens if I struggle vs if I do well\"): the Plan sheet runs the rules three ways (doing well, steady, struggling). maxGain stops a line once the estimated max is that far over today's, because steps in a straight line never last 12 weeks: trained men added about 17.5 kg (95% CI 8.5 to 26.5) to a squat 1RM in 8 to 12 weeks (Androulakis-Korakakis, Fisher and Steele, Sports Medicine 2020), roughly 10 to 15%, and strength lost in a 10-week break was back within 5 weeks of retraining (Halonen et al., Scand J Med Sci Sports 2024). Only the sheet uses this; targets never do.",
+    "maxGain": { "main": 0.2, "accessory": 0.35 }
   },
   "lastSetRating": {
     "description": "v1.18.7 (Cameron, Nov 24: \"What about other lifts too. You should be taking into account how i rates the... Last set\"): the effort picked on the last work set of a lift stands for the lift. Earlier sets the timer logged with no effort picked no longer hold the target (their guessed effort is ignored); an unrated last set still holds it. Accessories move by that rating: Easy (up to easyUpTo) adds a weight step now with reps at the bottom of the range, Solid (up to solidUpTo) adds solidReps reps, Hard or Maxed adds one rep as before, and a missed rep adds at most one. The top of the range still steps the weight. Week 2 no longer holds accessory weights. Main lifts keep rules R5, judged on the sets he rated.",

@@ -6,6 +6,7 @@
 
 import { el, showModal, closeModal } from './ui.js';
 import { projectExercise } from './projection.js';
+import { incrementFor } from './progression.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
 import { TAGS, thread } from './coach.js';
 import { countsFor } from './runs.js';
@@ -277,39 +278,52 @@ const svgEl = (tag, attrs, kids) => {
   for (const k of kids || []) if (k) n.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
   return n;
 };
-const COLORS = { plan: '#c97f0a', slower: '#5b8fe0' };   // checked for colour-blind separation on the sheet's surface
+// v1.18.8: three cases. Amber, blue and a dashed grey read apart on the sheet's surface, also without colour.
+const CASE = {
+  well: { label: 'Doing well', color: '#e0a030', dash: null },
+  steady: { label: 'Steady', color: '#5b8fe0', dash: null },
+  struggle: { label: 'Struggling', color: '#9aa1ad', dash: '5 4' }
+};
+const CASE_KEYS = ['well', 'steady', 'struggle'];
 
 const tText = (p, t) => (!t ? '–' : (p.kind === 'reps' ? `${t.reps} reps` : `${fmtWeight(t.weight)} × ${t.reps}`));
 
-/** The line chart: the target weight (or reps) by week, on plan and slower, with the value at each end labelled. */
+/** The line chart: the estimated max (or reps) by week for the three cases, each end labelled, the old best dashed. */
 function projChart(p) {
-  const val = t => (p.kind === 'reps' ? t.reps : t.weight);
-  const pts = [{ week: p.weeks[0].week - 1, plan: p.now, slower: p.now }, ...p.weeks];
-  const all = pts.flatMap(x => [val(x.plan), val(x.slower)]).filter(v => v != null);
+  const val = t => (!t ? null : (t.shown != null ? t.shown : (p.kind === 'reps' ? t.reps : t.max)));
+  const raw = [{ week: p.weeks[0].week - 1, well: p.now, steady: p.now, struggle: p.now }, ...p.weeks];
+  // the first heavier week trades reps for weight and can read a pound or two lower as a max: draw it level, not as a dip
+  // (a real fall of more than that, a 5% reset, still shows)
+  const seen = {};
+  const pts = raw.map(q => { const o = { week: q.week }; for (const c of CASE_KEYS) { const t = q[c]; let v = t && (p.kind === 'reps' ? t.reps : t.max); if (v != null && seen[c] != null && v < seen[c] && seen[c] - v <= 4) v = seen[c]; if (v != null) seen[c] = v; o[c] = t ? { ...t, shown: v } : t; } return o; });
+  const all = pts.flatMap(x => CASE_KEYS.map(c => val(x[c]))).filter(v => v != null);
   if (!all.length) return null;
   let lo = Math.min(...all), hi = Math.max(...all);
+  const best = p.kind === 'weight' && p.oldBest && p.oldBest > lo - (hi - lo) && p.oldBest < hi + (hi - lo) ? p.oldBest : null;
+  if (best != null) { lo = Math.min(lo, best); hi = Math.max(hi, best); }
   const pad = Math.max(2, (hi - lo) * 0.12); lo -= pad; hi += pad;
-  const W = 340, H = 150, L = 8, R = 46, T = 10, B = 22;
+  const W = 340, H = 170, L = 8, R = 40, T = 10, B = 22;
   const x = w => L + (w - pts[0].week) / (12 - pts[0].week) * (W - L - R);
   const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
   const line = k => pts.filter(q => val(q[k]) != null).map((q, i) => `${i ? 'L' : 'M'}${x(q.week).toFixed(1)},${y(val(q[k])).toFixed(1)}`).join(' ');
-  const g = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': p.kind === 'reps' ? 'Reps by week' : 'Target weight by week' });
+  const g = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': p.kind === 'reps' ? 'Reps by week, three cases' : 'Estimated max by week, three cases' });
   for (const w of [pts[0].week, 7, 12].filter((w, i, a) => a.indexOf(w) === i && w >= pts[0].week)) {
     g.appendChild(svgEl('line', { x1: x(w), x2: x(w), y1: T, y2: H - B, stroke: 'rgba(255,255,255,0.08)', 'stroke-width': 1 }));
     g.appendChild(svgEl('text', { x: x(w), y: H - 6, 'text-anchor': w === pts[0].week ? 'start' : 'middle', fill: '#9aa1ad', 'font-size': 11 }, [w === pts[0].week ? 'now' : `wk ${w}`]));
   }
-  const endP = val(p.end.plan), endS = val(p.end.slower);
-  for (const k of ['slower', 'plan']) {
-    g.appendChild(svgEl('path', { d: line(k), fill: 'none', stroke: COLORS[k], 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
-    const v = val(p.end[k]);
-    g.appendChild(svgEl('circle', { cx: x(12), cy: y(v), r: 4, fill: COLORS[k], stroke: '#23272f', 'stroke-width': 2 }));
+  if (best != null) {
+    g.appendChild(svgEl('line', { class: 'proj-best', x1: L, x2: x(12), y1: y(best), y2: y(best), stroke: 'rgba(255,255,255,0.35)', 'stroke-width': 1, 'stroke-dasharray': '2 4' }));
+    g.appendChild(svgEl('text', { x: L + 2, y: y(best) - 4, fill: '#9aa1ad', 'font-size': 10 }, [`your old best, ${fmtWeight(best)}`]));
   }
-  const yP = y(endP), yS = y(endS);
-  const apart = Math.abs(yP - yS) >= 13;
-  g.appendChild(svgEl('text', { x: x(12) + 8, y: (apart ? yP : Math.min(yP, yS) - 2) + 4, fill: '#f3f4f6', 'font-size': 12, 'font-weight': 700 }, [fmtWeight(endP)]));
-  if (apart) g.appendChild(svgEl('text', { x: x(12) + 8, y: yS + 4, fill: '#9aa1ad', 'font-size': 12 }, [fmtWeight(endS)]));
-  const v0 = val(p.now);
-  g.appendChild(svgEl('circle', { cx: x(pts[0].week), cy: y(v0), r: 4, fill: '#f3f4f6', stroke: '#23272f', 'stroke-width': 2 }));
+  for (const k of ['struggle', 'steady', 'well']) {
+    g.appendChild(svgEl('path', { class: 'proj-line', d: line(k), fill: 'none', stroke: CASE[k].color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', ...(CASE[k].dash ? { 'stroke-dasharray': CASE[k].dash } : {}) }));
+    g.appendChild(svgEl('circle', { cx: x(12), cy: y(val(p.end[k])), r: 3.5, fill: CASE[k].color, stroke: '#23272f', 'stroke-width': 2 }));
+  }
+  // end labels, top to bottom, pushed apart so they never overlap
+  const ends = CASE_KEYS.map(k => ({ k, v: val(p.end[k]), y: y(val(p.end[k])) })).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 12) ends[i].y = ends[i - 1].y + 12;
+  ends.forEach((e, i) => { if (i && e.v === ends[i - 1].v) return; g.appendChild(svgEl('text', { x: x(12) + 7, y: e.y + 4, fill: e.k === 'well' ? '#f3f4f6' : '#9aa1ad', 'font-size': 12, 'font-weight': e.k === 'well' ? 700 : 500 }, [fmtWeight(e.v)])); });
+  g.appendChild(svgEl('circle', { cx: x(pts[0].week), cy: y(val(p.now)), r: 4, fill: '#f3f4f6', stroke: '#23272f', 'stroke-width': 2 }));
   return g;
 }
 
@@ -325,29 +339,47 @@ function openProjection(data, exerciseId) {
     showModal(el('div', { class: 'proj', id: 'proj-sheet' }, [el('h2', {}, ex.name), el('p', {}, why), close]));
     return;
   }
-  const e1 = t => (p.kind === 'weight' && t && t.e1rm ? `est. 1RM ${t.e1rm}` : '');
-  const bw = ex.equipment === 'weighted_bw' ? ' (bodyweight in)' : '';
-  const box = (label, t, sub) => el('div', {}, [el('small', {}, label), el('b', {}, tText(p, t)), el('div', { class: 'sub' }, sub)]);
-  const rows = p.weeks.filter(w => w.week === p.weeks[0].week || w.week % 2 === 0 || w.week === 7 || w.week === 12).filter((w, i, a) => a.findIndex(z => z.week === w.week) === i);
+  const w = p.kind === 'weight';
+  const unit = ex.equipment === 'weighted_bw' ? 'lb added' : (ex.pair ? 'lb, both dumbbells' : 'lb');
+  const pending = targets[exerciseId] && targets[exerciseId].pendingCoach;
+  // one tile per case: where the estimated max (or the reps) ends, and how far that is from today
+  const tile = k => {
+    const t = p.end[k];
+    const v = w ? t.max : t.reps, v0 = w ? p.now.max : p.now.reps;
+    const d = v - v0;
+    return el('div', { class: `proj-case ${k}` }, [
+      el('small', {}, [el('i', { style: `background:${CASE[k].color}` }), CASE[k].label]),
+      el('b', {}, w ? fmtWeight(v) : `${v} reps`),
+      el('div', { class: 'sub' }, d ? `${d > 0 ? '+' : '−'}${fmtWeight(Math.abs(d))}${w ? ' lb' : ''}` : 'no change')
+    ]);
+  };
+  // the weeks worth a row: next week, the last build week, the first and last heavier weeks
+  const first = p.weeks[0].week;
+  const pick = [first, 6, 8, 11].filter((x, i, a) => x >= first && a.indexOf(x) === i);
+  const rows = pick.map(n => p.weeks.find(z => z.week === n)).filter(Boolean);
   const chart = projChart(p);
+  const rules3 = p.weekly
+    ? [['Doing well', `all reps made, no set Hard, every week: ${fmtWeight(incrementFor(rules, exerciseId, ex))} lb more each time.`],
+       ['Steady', 'every other week a set is Hard: the weight holds that week.'],
+       ['Struggling', 'a rep short two weeks in three: the weight holds, and three misses in a row take 5% off.']]
+    : [['Doing well', 'last set Solid: 2 more reps each time (Easy: more weight right away).'],
+       ['Steady', 'last set Hard: 1 more rep, then more weight at the top of the range.'],
+       ['Struggling', 'a rep short every other session.']];
   showModal(el('div', { class: 'proj', id: 'proj-sheet' }, [
     el('h2', {}, ex.name),
-    el('div', { class: 'muted small' }, `${p.sessionsLeft} sessions left in the 12 weeks`),
-    el('div', { class: 'proj-now' }, [
-      box('Now', p.now, e1(p.now) + (e1(p.now) ? bw : '')),
-      box(p.weekly ? 'Week 12, best case' : 'Week 12, on plan', p.end.plan, e1(p.end.plan))
-    ]),
+    el('div', { class: 'muted small', id: 'proj-now' }, `Now ${tText(p, p.now)}${w ? `, estimated max ${fmtWeight(p.now.max)} ${ex.equipment === 'weighted_bw' ? 'lb added' : 'lb'}` : ''}${pending ? ' (new coach target, reaches the phone when it next opens)' : ''}`),
+    el('h3', {}, w ? `Estimated max by week 12 (${unit})` : 'Reps by week 12'),
+    el('div', { class: 'proj-cases' }, CASE_KEYS.map(tile)),
     chart,
-    chart ? el('div', { class: 'proj-key' }, [
-      el('span', {}, [el('i', { style: `background:${COLORS.plan}` }), p.weekly ? 'Best case' : 'On plan']),
-      el('span', {}, [el('i', { style: `background:${COLORS.slower}` }), p.weekly ? 'Steady' : 'Slower']),
-      el('span', {}, p.kind === 'reps' ? 'reps' : (ex.equipment === 'weighted_bw' ? 'lb added' : (ex.pair ? 'lb, both dumbbells' : 'lb')))
-    ]) : null,
+    el('h3', {}, 'Target for the week'),
     el('table', { id: 'proj-table' }, [
-      el('tr', {}, [el('th', {}, 'Target after week'), el('th', {}, p.weekly ? 'Best case' : 'On plan'), el('th', {}, p.weekly ? 'Steady' : 'Slower')]),
-      ...rows.map(w => el('tr', {}, [el('td', {}, `${w.week}${w.phase === 'light' ? ' (lighter)' : (w.phase === 'heavy' && p.mainLift ? ' (heavier)' : '')}`), el('td', {}, tText(p, w.plan)), el('td', {}, tText(p, w.slower))]))
+      el('tr', {}, [el('th', {}, 'Week'), ...CASE_KEYS.map(k => el('th', {}, CASE[k].label))]),
+      ...rows.map(r => el('tr', {}, [el('td', {}, `${r.week}${r.phase === 'heavy' && p.mainLift ? ' (heavier)' : ''}`), ...CASE_KEYS.map(k => el('td', {}, tText(p, r[k])))])),
+      p.mainLift && w ? el('tr', { id: 'proj-retest' }, [el('td', {}, '12 (retest)'), ...CASE_KEYS.map(k => el('td', {}, `~${fmtWeight(p.end[k].fiveRep)} × 5`))]) : null
     ]),
-    el('p', {}, p.weekly ? `Best case: every set makes its reps at Solid or easier every week, so the weight goes up every week. Steady: that happens every other week. A Hard week holds the weight, and so does a missed rep. Both use the app's own rules (week 7 holds, weeks 8-11 start 5% heavier at 3 reps, week 12 is the retest). Expect to land between the two, closer to best case early on.` : `On plan: every set makes its reps with a Hard last set, so it gains a rep a session and weight at the top of the range. Slower: every other session falls a rep short. A last set you rate Solid or Easy moves it faster than either line. Both use the app's own rules, the same ones that set your targets after each session${p.mainLift ? ' (week 7 holds, weeks 8-11 start 5% heavier at 3-5 reps, week 12 is the retest)' : ''}. Real progress usually lands between the two${p.mainLift ? '' : ', and small lifts tend to slow down before the end'}.`),
+    el('h3', {}, 'What puts you on each line'),
+    el('ul', { class: 'proj-rules' }, rules3.map(([a, b]) => el('li', {}, [el('b', {}, a + ': '), b]))),
+    el('p', {}, `${p.mainLift && w ? `Estimated max (${unit}) is what a target works out to for one rep, so 5-rep and 3-rep weeks compare. ` : ''}No line runs past ${Math.round((((rules.projection || {}).maxGain || {})[p.mainLift ? 'main' : 'accessory'] || 0) * 100)}% over today, about the most a trained lifter adds in a block this long.`),
     close
   ]));
 }

@@ -1102,5 +1102,30 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('the power clean is not a weekly lift', !rules.mainLiftTest.weekly.exercises.includes('power_clean') && rules.mainLiftTest.weekly.exercises.length === 5);
 }
 
+
+// ---- v1.18.8: the projection's three cases ----
+{
+  console.log('\nv1.18.8: projection, three cases');
+  const { projectExercise } = await import('../js/projection.js');
+  const today = new Date('2026-11-25T12:00:00');
+  const proj = (id, t) => projectExercise({ plan, rules, settings: { ...settings, startDate: '2026-11-16' }, sessions: [], targets: { [id]: t }, exerciseId: id, today });
+  const sq = proj('back_squat', { weight: 195, reps: 5, stall: 0 });
+  check('squat from 195 x 5: doing well 245 x 3, steady 225 x 3, struggling 220 x 3 by week 11', sq.end.well.weight === 245 && sq.end.well.reps === 3 && sq.end.steady.weight === 225 && sq.end.struggle.weight === 220, sq.end);
+  check('squat: estimated max 228 now; 270, 248, 242 at the end; retest 5-rep weights 230, 210, 205', sq.now.max === 228 && sq.end.well.max === 270 && sq.end.steady.max === 248 && sq.end.struggle.max === 242 && sq.end.well.fiveRep === 230 && sq.end.steady.fiveRep === 210 && sq.end.struggle.fiveRep === 205, [sq.now, sq.end]);
+  check('squat: the struggling case never resets (a rep short two weeks in three, the third clears the count)', sq.weeks.every((w, i, a) => !i || w.struggle.weight >= a[i - 1].struggle.weight - 0), sq.weeks.map(w => w.struggle.weight));
+  check('squat: his old best (245) comes from plan.json', sq.oldBest === 245 && sq.weekly === true);
+  const pu = proj('weighted_pullup', { weight: 30, reps: 5, stall: 0 });
+  check('pull-up: max is added weight (63 now) and no case passes 20% over today on bodyweight + load', pu.now.max === 63 && pu.end.well.e1rm <= Math.round(228 * 1.2) && pu.end.well.max > pu.end.steady.max && pu.end.steady.max > pu.end.struggle.max, [pu.now, pu.end]);
+  const cu = proj('curl', { weight: 50, reps: 10 });
+  check('curl: every case stays within 35% of today and on dumbbells the gym has', ['well', 'steady', 'struggle'].every(c => cu.end[c].e1rm <= 67 * 1.35 + 1 && cu.end[c].weight % 10 === 0) && cu.weekly === false, cu.end);
+  const lr = proj('lateral_raise', { weight: 30, reps: 12 });
+  check('lateral raise: no more 30 -> 80; one dumbbell step at most (40)', lr.end.well.weight <= 40, lr.end.well);
+  const aw = proj('ab_wheel', { reps: 10 });
+  check('ab wheel: reps only, doing well reaches the top of the range', aw.kind === 'reps' && aw.end.well.reps === 12, aw.end);
+  const noCap = JSON.parse(JSON.stringify(rules)); delete noCap.projection;
+  const free = projectExercise({ plan, rules: noCap, settings: { ...settings, startDate: '2026-11-16' }, sessions: [], targets: { lateral_raise: { weight: 30, reps: 12 } }, exerciseId: 'lateral_raise', today });
+  check('without rules.projection the lines run free (the cap is what holds them)', free.end.well.weight > 40, free.end.well);
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);

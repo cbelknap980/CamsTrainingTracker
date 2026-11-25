@@ -777,6 +777,18 @@ body.in-session .toast-msg { white-space: normal; overflow: visible; max-width: 
 .proj .proj-now b { font-size: 1.3rem; }
 .proj .proj-now .sub { color: var(--muted); font-size: var(--t-small, 0.8rem); }
 .proj svg { display: block; width: 100%; height: auto; margin: 4px 0 6px; }
+/* v1.18.8: three cases (doing well, steady, struggling) */
+.proj h3 { margin: 14px 0 6px; font-size: var(--t-small, 0.85rem); color: var(--muted); font-weight: 600; }
+.proj .proj-cases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.proj .proj-case { background: var(--surface-2); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.proj .proj-case small { display: block; color: var(--muted); font-size: 0.74rem; white-space: nowrap; }
+.proj .proj-case small i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.proj .proj-case b { font-size: 1.25rem; }
+.proj .proj-case .sub { color: var(--muted); font-size: 0.74rem; }
+.proj .proj-rules { margin: 0; padding-left: 18px; color: var(--muted); font-size: var(--t-small, 0.85rem); }
+.proj .proj-rules li { margin: 3px 0; }
+.proj .proj-rules b { color: var(--text, #f3f4f6); font-weight: 600; }
+.proj #proj-retest td { border-bottom: 0; color: var(--muted); }
 .proj .proj-key { display: flex; gap: 14px; font-size: var(--t-small, 0.8rem); color: var(--muted); flex-wrap: wrap; }
 .proj .proj-key i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
 .proj table { width: 100%; border-collapse: collapse; font-size: var(--t-small, 0.85rem); margin-top: 8px; }
