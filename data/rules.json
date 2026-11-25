@@ -1,9 +1,10 @@
 {
-  "rulesVersion": "1.12",
+  "rulesVersion": "1.13",
   "increments": {
+    "description": "v1.18.10 (Cameron, Nov 25: \"Smallest increment for these types of weights should be 5lb\"): every step is 5 lb or more. The strict press stepped 2.5 lb (92.5 needs 1.25 lb plates); it now steps 5 like everything else.",
     "default": 5,
     "byExercise": {
-      "strict_press": 2.5,
+      "strict_press": 5,
       "push_press": 5,
       "weighted_pullup": 5,
       "rdl": 10
@@ -307,6 +308,11 @@
         "fraction": 0.26
       }
     }
+  },
+  "loads": {
+    "description": "v1.18.10 (Cameron, Nov 25: \"Smallest increment for these types of weights should be 5lb. How is 248lb or 242lbs friendly\"): every weight the app asks for lands on a stepLb grid (barbell, machine, cable and added pull-up weight in total; dumbbells per hand), the nearest one, the lighter on a tie; and every estimated max it shows is rounded to estimateStepLb.",
+    "stepLb": 5,
+    "estimateStepLb": 5
   },
   "dumbbells": {
     "description": "v1.18.5 (Cameron, Nov 24: \"gym does not have 27.5lb dumbells\"): a size in notAvailableLb is never asked for: a dumbbell target of that size (a two-dumbbell total counts per hand) moves to the nearest perHandStepLb step the gym has, the lighter one on a tie, and a logged set at that size is flagged for him to check.",

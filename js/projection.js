@@ -8,7 +8,7 @@
 // Pure functions, no DOM, no storage.
 
 import { applyProgression, effectiveTarget, epley, bodyweightOf, isExcluded, weeklyFor, incrementFor } from './progression.js';
-import { weekNumber, phaseForWeek, parseISODate, toISODate, snapLoad } from './data.js';
+import { weekNumber, phaseForWeek, parseISODate, toISODate, snapLoad, roundEst } from './data.js';
 
 const SOLID = 8;
 // v1.18.7: accessories are planned at 0-2 reps left, so their lines assume a Hard last set (one more rep a session);
@@ -114,7 +114,7 @@ export function projectExercise({ plan, rules, settings, sessions, targets, exer
   const withE = t => {
     if (!t) return null;
     const e1rm = e1rmOf(ex, t, settings);
-    return { ...t, e1rm, max: e1rm != null ? Math.round(e1rm - add) : null, fiveRep: e1rm != null ? Math.floor((e1rm / (1 + 5 / 30) - add) / inc + 1e-9) * inc : null };
+    return { ...t, e1rm, max: e1rm != null ? roundEst(e1rm - add, rules) : null, fiveRep: e1rm != null ? Math.floor((e1rm / (1 + 5 / 30) - add) / inc + 1e-9) * inc : null };
   };
   const sc = scenarios(weekly);
   const runs = {};
@@ -126,5 +126,5 @@ export function projectExercise({ plan, rules, settings, sessions, targets, exer
     for (const c of CASES) if (runs[c][w]) last[c] = withE(runs[c][w]);
     weeks.push({ week: w, phase: phaseForWeek(plan, w).id, ...last });
   }
-  return { kind, now, weeks, end: { ...last }, sessionsLeft: occ.length, mainLift: !!ex.mainLift, weekly, oldBest: ex.oldBest && ex.oldBest.lb ? ex.oldBest.lb : null, standard: ex.standard && ex.standard.lb ? { lb: ex.standard.lb, label: ex.standard.label || 'Benchmark' } : null };
+  return { kind, now, weeks, end: { ...last }, sessionsLeft: occ.length, mainLift: !!ex.mainLift, weekly, oldBest: ex.oldBest && ex.oldBest.lb ? roundEst(ex.oldBest.lb, rules) : null, standard: ex.standard && ex.standard.lb ? { lb: roundEst(ex.standard.lb, rules), label: ex.standard.label || 'Benchmark' } : null };
 }

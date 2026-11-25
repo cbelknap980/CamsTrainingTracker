@@ -58,7 +58,7 @@ export function bodyweightOf(settings) {
  */
 export function targetFromBenchmark({ rules, exerciseId, ex, benchmark, repRange, bodyweightAdd, existing }) {
   const inc = incrementFor(rules, exerciseId, ex);
-  const w = roundTo(benchmark * trainingFractionFor(rules, exerciseId, ex), inc);
+  const w = snapLoad(rules, ex, roundTo(benchmark * trainingFractionFor(rules, exerciseId, ex), inc));
   const e = epley(benchmark + (bodyweightAdd || 0), isExcluded(rules, exerciseId, ex) ? rules.baseline.cleanTopSetReps : rules.baseline.topSetReps);
   const cur = { ...(existing || {}) };
   cur.weight = w;
@@ -84,9 +84,13 @@ export function checkPR(target, weight, reps, bodyweightAdd) {
   return kinds;
 }
 
+/**
+ * Estimated 1RM (Epley). v1.18.10 (Cameron, Nov 25: "How is 248lb or 242lbs friendly"): rounded to the nearest 5 lb,
+ * the same as every weight the app shows; an estimate is not good to a pound anyway.
+ */
 export function epley(weight, reps) {
   if (!weight || !reps) return null;
-  return Math.round(weight * (1 + reps / 30));
+  return Math.round(weight * (1 + reps / 30) / 5) * 5;
 }
 
 /** Weight step for an exercise. v1.5: a two-dumbbell lift (ex.pair) is stored as a total, so its step is doubled. */
@@ -385,7 +389,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     //    A new baseline starts a new block, so the heavy start (rule 7) is due again in its heavy weeks.
     if (baselineSet && baselineSet.weight != null) {
       const fraction = trainingFractionFor(rules, id, ex);
-      const w = roundTo(baselineSet.weight * fraction, inc);
+      const w = snapLoad(rules, ex, roundTo(baselineSet.weight * fraction, inc));
       const bottom = planned.length && planned[0].repRange ? planned[0].repRange[0] : (baselineSet.reps || 5);
       Object.assign(cur, { weight: w, reps: bottom, stall: 0, source: 'baseline', baselineWeight: baselineSet.weight, baselineE1rm: e1rms[id] || null, updated: session.endedAt, sessionId: session.id });
       delete cur.heavyStart;

@@ -2,7 +2,7 @@
 // show whole). Drawn on a canvas on the phone; nothing is uploaded. On Android, Save image opens the share
 // sheet (Photos, Drive, Messages); elsewhere it downloads the PNG.
 
-import { fmtWeight, fmtDate } from './data.js';
+import { fmtWeight, fmtDate, roundEst } from './data.js';
 
 const W = 1080, H = 1350;
 const C = { bg: '#0d0f13', card: '#161a20', edge: 'rgba(255,255,255,0.07)', text: '#f3f4f6', muted: '#959cab', accent: '#f5a524', good: '#3dcc7a', ring: 'rgba(255,255,255,0.10)' };
@@ -94,7 +94,7 @@ export async function drawShareCard(record, { prev, rings, weekLabel } = {}) {
     rr(ctx, 100, y + 28, 72, 40, 12); ctx.fillStyle = C.accent; ctx.fill();
     ctx.fillStyle = '#1a1200'; ctx.font = font(800, 24); ctx.textAlign = 'center'; ctx.fillText('PR', 136, y + 57); ctx.textAlign = 'left';
     ctx.fillStyle = C.text; ctx.font = font(700, 36);
-    const what = p.kind === 'e1rm' ? `est. 1RM ${p.value} lb` : `${fmtWeight(p.value)} lb`;
+    const what = p.kind === 'e1rm' ? `est. 1RM ${roundEst(p.value)} lb` : `${fmtWeight(p.value)} lb`;
     ctx.fillText(fit(ctx, p.name, W - 144 - 160 - ctx.measureText(what).width - 40), 196, y + 61);
     ctx.textAlign = 'right'; ctx.fillStyle = C.accent; ctx.fillText(what, W - 104, y + 61); ctx.textAlign = 'left';
     y += 96;

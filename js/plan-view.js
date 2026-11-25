@@ -292,10 +292,10 @@ const tText = (p, t) => (!t ? '–' : (p.kind === 'reps' ? `${t.reps} reps` : `$
 function projChart(p) {
   const val = t => (!t ? null : (t.shown != null ? t.shown : (p.kind === 'reps' ? t.reps : t.max)));
   const raw = [{ week: p.weeks[0].week - 1, well: p.now, steady: p.now, struggle: p.now }, ...p.weeks];
-  // the first heavier week trades reps for weight and can read a pound or two lower as a max: draw it level, not as a dip
+  // the first heavier week trades reps for weight and can read one 5 lb step lower as a max: draw it level, not as a dip
   // (a real fall of more than that, a 5% reset, still shows)
   const seen = {};
-  const pts = raw.map(q => { const o = { week: q.week }; for (const c of CASE_KEYS) { const t = q[c]; let v = t && (p.kind === 'reps' ? t.reps : t.max); if (v != null && seen[c] != null && v < seen[c] && seen[c] - v <= 4) v = seen[c]; if (v != null) seen[c] = v; o[c] = t ? { ...t, shown: v } : t; } return o; });
+  const pts = raw.map(q => { const o = { week: q.week }; for (const c of CASE_KEYS) { const t = q[c]; let v = t && (p.kind === 'reps' ? t.reps : t.max); if (v != null && seen[c] != null && v < seen[c] && seen[c] - v <= 5) v = seen[c]; if (v != null) seen[c] = v; o[c] = t ? { ...t, shown: v } : t; } return o; });
   const all = pts.flatMap(x => CASE_KEYS.map(c => val(x[c]))).filter(v => v != null);
   if (!all.length) return null;
   let lo = Math.min(...all), hi = Math.max(...all);
