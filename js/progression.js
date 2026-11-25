@@ -26,6 +26,12 @@ export function weeklyFor(rules, exerciseId) {
   return w && Array.isArray(w.exercises) && w.exercises.includes(exerciseId) ? w : null;
 }
 
+/** v1.18.7: rules.lastSetRating when it is switched on (decides: true), else null. */
+export function lastSetRule(rules) {
+  const r = rules && rules.lastSetRating;
+  return r && r.decides ? r : null;
+}
+
 /** Share of a week-1 benchmark a lift trains at. v1.18.1 (R4 rule 9): the power clean trains at the weight itself. */
 export function trainingFractionFor(rules, exerciseId, ex) {
   return isExcluded(rules, exerciseId, ex) ? 1 : rules.baseline.trainingFraction;
@@ -267,12 +273,19 @@ export function accessoryNext(target, sets, o) {
   if (!good.length) return out('hold', 'nothing');
   if (phase === 'light') return out('hold', 'light');
   if (sets.some(s => s.unconfirmed)) return out('hold', 'unrated');
-  const week2 = phase === 'baseline';
+  // v1.18.7 (rules.lastSetRating): the effort he picked on the last set sets the pace. Easy: add weight now.
+  // Solid: solidReps more reps. Hard or Maxed, or no rating: one more rep, as before. Week 2 no longer holds the weight.
+  const L = o.lastSet || null;
+  const lastRpe = L && okNum(good[good.length - 1].rpe) && !good[good.length - 1].unconfirmed ? good[good.length - 1].rpe : null;
+  const easy = lastRpe != null && lastRpe <= (L.easyUpTo != null ? L.easyUpTo : 6.9);
+  const solid = lastRpe != null && !easy && lastRpe <= (L.solidUpTo != null ? L.solidUpTo : 8.7);
+  const more = solid ? (L.solidReps || 2) : 1;
+  const week2 = phase === 'baseline' && !L;
   const clean = good.every(s => !okNum(s.rpe) || s.rpe <= maxRpe);
   if (bw) {
     const rs = Math.min(...good.map(s => s.reps));
     const allTop = good.length >= planned && rs >= hi;
-    cur.reps = allTop ? hi : Math.min(rs + 1, hi);
+    cur.reps = allTop ? hi : Math.min(rs + (easy ? Math.max(more, L.solidReps || 2) : more), hi);
     return out(cur.reps > (target.reps || 0) ? 'up' : 'hold', 'bodyweight', { allTop, lo, hi });
   }
   const W = cur.weight;
@@ -281,8 +294,9 @@ export function accessoryNext(target, sets, o) {
   cur.weight = S.weight;
   if (week2) { cur.reps = Math.min(S.reps + (clean ? 1 : 0), hi); return out(cur.weight > W ? 'up' : 'hold', 'week2', { W }); }
   if (S.full >= planned && S.reps >= hi) { cur.weight = stepUp(cur.weight, inc); cur.reps = lo; return out('up', 'top', { W, lo, hi }); }
-  cur.reps = Math.min(S.reps + 1, hi);
-  return out(cur.weight > W ? 'up' : 'hold', 'oneMore', { W });
+  if (easy && S.full >= planned && !S.missed) { cur.weight = stepUp(cur.weight, inc); cur.reps = lo; return out('up', 'easyUp', { W, lo, hi }); }
+  cur.reps = Math.min(S.reps + (S.missed ? 1 : more), hi);
+  return out(cur.weight > W ? 'up' : 'hold', more > 1 && !S.missed ? 'solidMore' : 'oneMore', { W });
 }
 
 /**
@@ -443,7 +457,14 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     // v1.18 (rules R4, rule 1; Cameron: bad numbers must not move the plan): a set the timer logged before an effort
     // was picked carries the app's guess. Saved without a rating, the target and the flat count stay as they are for
     // the next session (v1.18.1: rating it later, on the saved session, re-runs this).
-    const unrated = done.filter(s => s.unconfirmed).length;
+    // v1.18.7 (rules.lastSetRating, Cameron Nov 24: "You should be taking into account how i rates the... Last set"):
+    // when the last work set of the lift has an effort he picked, it stands for the lift: the app's guesses on earlier
+    // unrated sets are dropped, and they no longer hold the target. An unrated last set still holds it.
+    const lastRule = lastSetRule(rules);
+    const lastWork = done[done.length - 1];
+    let judged = done;
+    if (lastRule && lastWork && !lastWork.unconfirmed && done.some(s => s.unconfirmed)) judged = done.map(s => (s.unconfirmed ? { ...s, unconfirmed: false, rpe: null } : s));
+    const unrated = judged.filter(s => s.unconfirmed).length;
     if (unrated) {
       say(`${name}: ${detail}. ${unrated === 1 ? 'One set had' : `${unrated} sets had`} no effort picked, so the target stays the same next time.${heavyNote}`, 'hold', 'effort not rated');
       if (heavyNote) { cur.source = 'engine'; cur.updated = session.endedAt; cur.sessionId = session.id; }
@@ -454,9 +475,9 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     const target = { weight: cur.weight, reps: cur.reps, stall: cur.stall || 0 };
     const opts = { phase, range, planned: planned.length, inc, maxRpe: rules.mainLiftTest.maxRpe, weekly: weeklyFor(rules, id) };
     let outcome;
-    if (isExcluded(rules, id, ex)) outcome = cleanNext(target, done, opts);                                        // rule 9
-    else if (ex.mainLift) outcome = mainLiftNext(target, done, { ...opts, add: isBw ? bodyweightOf(settings) : 0, floor: ex.equipment === 'barbell' ? rules.rampUp.barWeightLb : 0, stall: stallRules });
-    else outcome = accessoryNext(target, done, opts);                                                              // rule 10
+    if (isExcluded(rules, id, ex)) outcome = cleanNext(target, judged, opts);                                      // rule 9
+    else if (ex.mainLift) outcome = mainLiftNext(target, judged, { ...opts, add: isBw ? bodyweightOf(settings) : 0, floor: ex.equipment === 'barbell' ? rules.rampUp.barWeightLb : 0, stall: stallRules });
+    else outcome = accessoryNext(target, judged, { ...opts, lastSet: lastRule });                                   // rule 10
     // R4 rule 13: the v1.19 all-out check goes here, on `outcome`, after these rules and before the target is written.
 
     const text = lineFor(outcome, { name, detail, stall: stallRules });
@@ -487,6 +508,8 @@ function lineFor(o, { name, detail, stall }) {
     case 'notAll': return { text: `${name}: ${detail}, a set was skipped or done lighter. Same target next time.`, reason: 'a set was skipped or done lighter' };
     case 'weekly': return { text: `${name}: ${detail}, every set made at Solid effort or easier. ${nextTime}`, reason: 'all sets made, Solid or easier' };
     case 'heavierWeekly': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target with every set made, Solid or easier. ${nextTime}`, reason: 'lifted more, every set made' };
+    case 'easyUp': return { text: `${name}: ${detail}, last set Easy. ${nextTime}`, reason: 'last set Easy: more weight' };
+    case 'solidMore': return { text: `${name}: ${detail}, last set Solid. ${o.weight > o.W ? `Next time ${lb(o.weight)}, the weight you used` : 'Same weight'}, aim for ${o.reps} next time.`, reason: `last set Solid: aim for ${o.reps} reps` };
     case 'top': return { text: `${name}: ${detail}, every set at ${o.hi}${o.R != null ? ' at Solid effort or easier' : ''}. ${nextTime}`, reason: `all sets at ${o.hi}${o.R != null ? ', Solid or easier' : ''}` };
     case 'week2Top': return { text: `${name}: ${detail}, every set at ${o.hi}. Baseline weeks, weight stays; ${o.hi} again next time.`, reason: 'baseline weeks, weight stays' };
     case 'oneMore': return o.R != null

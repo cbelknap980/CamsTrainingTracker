@@ -4,7 +4,7 @@
 // and on Home for anything already saved. A set marked numberOk is never flagged again. Rules: rules.json numberCheck.
 // Pure functions, no DOM, no storage.
 
-import { applyProgression, epley } from './progression.js';
+import { applyProgression, epley, lastSetRule } from './progression.js';
 import { fmtWeight, dumbbellOk } from './data.js';
 
 /**
@@ -210,7 +210,10 @@ export function rateSavedSet({ sessions, targets, recordId, index, rpe, plan, ru
   st.rpe = rpe;
   delete st.unconfirmed;
   const all = sessions.map(s => (s.id === recordId ? record : s));
-  const stillUnrated = record.sets.filter(x => x.exerciseId === id && notRated(x)).length;
+  // v1.18.7 (rules.lastSetRating): once the lift's last work set is rated it stands for the lift, so nothing is left to rate
+  const work = record.sets.filter(x => x.exerciseId === id && x.done && !x.skipped && !x.ramp && !x.baseline && !x.retest);
+  const lastRated = !!lastSetRule(rules) && work.length > 0 && !notRated(work[work.length - 1]);
+  const stillUnrated = lastRated ? 0 : record.sets.filter(x => x.exerciseId === id && notRated(x)).length;
   const why = !isLatestFor(all, id, record) ? 'later' : (setSince(cur, record) || 'latest');
   let retargeted = false, line = null;
   if (why === 'latest') {
