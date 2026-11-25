@@ -569,7 +569,7 @@ function mainLiftsCard(targets, settings, flags = [], sessions = []) {
     ]);
   });
   return el('div', { class: 'card', id: 'next-targets' }, [
-    el('h3', {}, ['Main lifts', infoBtn('Main lifts', `Next time is the weight and reps the app will ask for the next time you do the lift. It comes from your last session: every set at the top of the rep range at Solid or easier adds weight, the target made at Solid or easier adds a rep, and anything else holds. ${flatWords(D.rules)} The power clean follows the weight you use; the app never raises it. e1RM is your estimated one-rep max from your best set. Tap a lift to change its target by hand, or to enter a benchmark (the weight you can do for 5 with 2 left). Pull-up weights are the weight you add.`)]),
+    el('h3', {}, ['Main lifts', infoBtn('Main lifts', `Next time is the weight and reps the app will ask for the next time you do the lift. It comes from your last session: every set made at Solid or easier adds weight (5 lb, 2.5 on the strict press) and the reps stay at 5, or 3 in the heavier weeks; a Hard or Maxed set, or a missed rep, holds the weight. ${flatWords(D.rules)} The power clean follows the weight you use; the app never raises it. e1RM is your estimated one-rep max from your best set. Tap a lift to change its target by hand, or to enter a benchmark (the weight you can do for 5 with 2 left). Pull-up weights are the weight you add.`)]),
     el('table', { class: 'tgt-table' }, [el('tr', {}, [el('th', {}, 'Lift'), el('th', { class: 'num' }, 'Next time')]), ...rows]),
     el('p', { class: 'muted', style: 'margin-top:8px' }, 'Other lifts show their targets on the start page of that day\'s workout.')
   ]);

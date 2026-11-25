@@ -52,7 +52,7 @@ try:
     pg.click('#plan-seg [data-pane="sessions"]'); pg.click('[data-pick="lift1"]'); pg.wait_for_timeout(150)
     pg.click('tr[data-ex="back_squat"]'); pg.wait_for_selector('#proj-sheet')
     sh = pg.locator('#proj-sheet').inner_text()
-    check('back squat: now 185 x 6, a week-12 target, a chart and a week table', 'Now' in sh and '185 × 6' in sh and 'Week 12, on plan' in sh and pg.locator('#proj-sheet svg path').count() == 2 and pg.locator('#proj-table tr').count() >= 5, sh[:300])
+    check('back squat: now 185 x 6, a week-12 target, a chart and a week table', 'Now' in sh and '185 × 6' in sh and 'Week 12, best case' in sh and pg.locator('#proj-sheet svg path').count() == 2 and pg.locator('#proj-table tr').count() >= 5, sh[:300])
     pg.evaluate("() => import('./js/ui.js').then(m => m.closeModal())"); pg.wait_for_timeout(100)
     pg.click('tr[data-ex="curl"]'); pg.wait_for_selector('#proj-sheet')
     sh = pg.locator('#proj-sheet').inner_text()

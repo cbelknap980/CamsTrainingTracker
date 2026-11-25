@@ -1,11 +1,12 @@
 {
-  "rulesVersion": "1.9.2",
+  "rulesVersion": "1.10",
   "increments": {
     "default": 5,
     "byExercise": {
       "strict_press": 2.5,
-      "push_press": 2.5,
-      "weighted_pullup": 5
+      "push_press": 5,
+      "weighted_pullup": 5,
+      "rdl": 10
     }
   },
   "smallestJump": {
@@ -20,7 +21,12 @@
     "description": "Add weight when every set reaches the top of the rep range at Solid effort or easier (RPE 8 or lower).",
     "allSetsAtTopOfRange": true,
     "maxRpe": 8,
-    "repNudge": 1
+    "repNudge": 1,
+    "weekly": {
+      "description": "v1.18.6 (rules R5, approved by Cameron Nov 24 2026: \"All these seem pretty low... not ramping up enough... I want to be pushed\"): the lifts in exercises step up one increment after every session whose planned sets all made the target reps at Solid effort or easier, and the reps stay at reps (the bottom of the range, 3, in the heavier weeks) instead of climbing 4, 5, 6 before each step. A target under reps gains a rep first. A Hard or Maxed day that made its reps holds, a missed rep holds and counts as flat, and week 2 no longer blocks a step for these lifts. Under the old rule a step took three sessions and the week-12 targets were about what he lifted in week 1. Same day: push press steps 5 lb (was 2.5; it sat level with his strict press) and the Romanian deadlift 10 lb.",
+      "exercises": ["back_squat", "front_squat", "strict_press", "weighted_pullup", "push_press"],
+      "reps": 5
+    }
   },
   "accessoryRule": {
     "description": "Add reps up to the top of the range first, then the smallest weight jump for that equipment.",

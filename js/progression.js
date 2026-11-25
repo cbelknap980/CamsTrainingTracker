@@ -20,6 +20,12 @@ export function isExcluded(rules, exerciseId, ex) {
   return !!((ex && ex.autoProgress === false) || ((rules && rules.excludeFromAutoProgression) || []).includes(exerciseId));
 }
 
+/** v1.18.6 (rules R5): the weekly-step settings for a main lift listed in rules.mainLiftTest.weekly, else null. */
+export function weeklyFor(rules, exerciseId) {
+  const w = rules && rules.mainLiftTest && rules.mainLiftTest.weekly;
+  return w && Array.isArray(w.exercises) && w.exercises.includes(exerciseId) ? w : null;
+}
+
 /** Share of a week-1 benchmark a lift trains at. v1.18.1 (R4 rule 9): the power clean trains at the weight itself. */
 export function trainingFractionFor(rules, exerciseId, ex) {
   return isExcluded(rules, exerciseId, ex) ? 1 : rules.baseline.trainingFraction;
@@ -163,6 +169,10 @@ export function effectiveTarget({ rules, plan, settings, exerciseId, target, pha
  */
 export function mainLiftNext(target, sets, o) {
   const { phase, range, planned, inc, add = 0, floor = 0, maxRpe = 8 } = o;
+  // v1.18.6 (rules R5, Cameron Nov 24: "not ramping up enough... I want to be pushed"): a lift listed in
+  // rules.mainLiftTest.weekly steps up after every session whose sets all made the reps at Solid or easier, and the
+  // reps stay at weekly.reps (the bottom of the range in the heavy weeks) instead of climbing 4, 5, 6 first.
+  const weekly = o.weekly || null;
   const st = o.stall || {};
   const resetAfter = st.sessionsBeforeDrop, resetFraction = st.dropFraction, resetReps = st.resetReps || 'keep';
   const flatAtRpe = st.flatAtRpe == null ? null : st.flatAtRpe;
@@ -179,7 +189,8 @@ export function mainLiftNext(target, sets, o) {
   // an all-out set (v1.19) is left out of every effort test; its reps count like any other set's
   const worst = Math.max(0, ...S.effortSets.filter(s => !s.amrap).map(s => (okNum(s.rpe) ? s.rpe : 0)));
   const clean = worst <= maxRpe;
-  const week2 = phase === 'baseline';                                                                 // rule 5
+  const week2 = phase === 'baseline' && !weekly;                                                      // rule 5 (R5: a weekly lift moves in week 2 too)
+  const want = weekly ? clampTo(phase === 'heavy' ? lo : (weekly.reps || R), range) : hi;             // the reps a step up asks for
   const base = { W, R, S, lo, hi, resetAfter, resetFraction };
   const flat = key => {                                                                               // rules 3c, 3d, 4
     if (week2) return out('hold', key, { ...base, week2: true });
@@ -193,14 +204,20 @@ export function mainLiftNext(target, sets, o) {
     return out('drop', 'reset', { ...base, because: key, atFloor });
   };
   if (S.kind === 'heavier') {                                                                         // rule 2
-    const up = !week2 && allDone && S.reps >= hi && clean;
-    if (up) { cur.weight = stepUp(S.weight, inc); cur.reps = lo; } else { cur.weight = S.weight; cur.reps = Math.min(S.reps, hi); }
+    const up = !week2 && allDone && S.reps >= want && clean;
+    if (up) { cur.weight = stepUp(S.weight, inc); cur.reps = weekly ? want : lo; } else { cur.weight = S.weight; cur.reps = Math.min(S.reps, hi); }
     cur.stall = 0;
-    return out('up', up ? 'heavierTop' : 'heavier', base);
+    return out('up', up ? (weekly ? 'heavierWeekly' : 'heavierTop') : 'heavier', base);
   }
   if (S.kind === 'lighter') return S.missed ? flat('miss') : out('hold', 'lighter', base);            // rule 2, lighter
   if (S.missed) return flat('miss');                                                                  // 3d
   if (!allDone) return out('hold', 'notAll', base);                                                   // 3e
+  if (weekly && clean) {                                                                              // R5: 3a and 3b for a weekly lift
+    cur.stall = 0;
+    if (S.reps >= want) { cur.weight = stepUp(W, inc); cur.reps = want; return out('up', 'weekly', base); }
+    cur.reps = Math.min(S.reps + 1, want);
+    return out('up', 'oneMore', base);
+  }
   if (clean && S.reps >= hi) {                                                                        // 3a
     cur.stall = 0;
     if (week2) { cur.reps = hi; return out('hold', 'week2Top', base); }
@@ -435,7 +452,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     }
 
     const target = { weight: cur.weight, reps: cur.reps, stall: cur.stall || 0 };
-    const opts = { phase, range, planned: planned.length, inc, maxRpe: rules.mainLiftTest.maxRpe };
+    const opts = { phase, range, planned: planned.length, inc, maxRpe: rules.mainLiftTest.maxRpe, weekly: weeklyFor(rules, id) };
     let outcome;
     if (isExcluded(rules, id, ex)) outcome = cleanNext(target, done, opts);                                        // rule 9
     else if (ex.mainLift) outcome = mainLiftNext(target, done, { ...opts, add: isBw ? bodyweightOf(settings) : 0, floor: ex.equipment === 'barbell' ? rules.rampUp.barWeightLb : 0, stall: stallRules });
@@ -468,6 +485,8 @@ function lineFor(o, { name, detail, stall }) {
     case 'heavier': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target. ${nextTime}`, reason: 'lifted more than the target' };
     case 'lighter': return { text: `${name}: ${detail}, lighter than the ${lb(o.W)} target or ended early. Same target next time.`, reason: 'lighter day: target holds' };
     case 'notAll': return { text: `${name}: ${detail}, a set was skipped or done lighter. Same target next time.`, reason: 'a set was skipped or done lighter' };
+    case 'weekly': return { text: `${name}: ${detail}, every set made at Solid effort or easier. ${nextTime}`, reason: 'all sets made, Solid or easier' };
+    case 'heavierWeekly': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target with every set made, Solid or easier. ${nextTime}`, reason: 'lifted more, every set made' };
     case 'top': return { text: `${name}: ${detail}, every set at ${o.hi}${o.R != null ? ' at Solid effort or easier' : ''}. ${nextTime}`, reason: `all sets at ${o.hi}${o.R != null ? ', Solid or easier' : ''}` };
     case 'week2Top': return { text: `${name}: ${detail}, every set at ${o.hi}. Baseline weeks, weight stays; ${o.hi} again next time.`, reason: 'baseline weeks, weight stays' };
     case 'oneMore': return o.R != null

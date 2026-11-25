@@ -4,7 +4,7 @@
 // Two runs: "on plan" (every set makes its reps at Solid or easier) and "slower" (every other session falls a rep
 // short on its last set, so the lift moves about half as often). Pure functions, no DOM, no storage.
 
-import { applyProgression, effectiveTarget, epley, bodyweightOf, isExcluded } from './progression.js';
+import { applyProgression, effectiveTarget, epley, bodyweightOf, isExcluded, weeklyFor } from './progression.js';
 import { weekNumber, phaseForWeek, parseISODate, toISODate, snapLoad } from './data.js';
 
 const SOLID = 8;
@@ -97,5 +97,5 @@ export function projectExercise({ plan, rules, settings, sessions, targets, exer
     if (slower[w]) lastS = withE(slower[w]);
     weeks.push({ week: w, phase: phaseForWeek(plan, w).id, plan: lastP, slower: lastS });
   }
-  return { kind, now, weeks, end: { plan: lastP, slower: lastS }, sessionsLeft: occ.length, mainLift: !!ex.mainLift };
+  return { kind, now, weeks, end: { plan: lastP, slower: lastS }, sessionsLeft: occ.length, mainLift: !!ex.mainLift, weekly: !!(ex.mainLift && weeklyFor(rules, exerciseId)) };
 }
