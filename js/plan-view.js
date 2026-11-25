@@ -299,7 +299,10 @@ function projChart(p) {
   const all = pts.flatMap(x => CASE_KEYS.map(c => val(x[c]))).filter(v => v != null);
   if (!all.length) return null;
   let lo = Math.min(...all), hi = Math.max(...all);
-  const best = p.kind === 'weight' && p.oldBest && p.oldBest > lo - (hi - lo) && p.oldBest < hi + (hi - lo) ? p.oldBest : null;
+  // v1.18.9 (Cameron, Nov 24: "Lets base it off of benchmarks I should be at"): the benchmark for the lift is always
+  // drawn, however far off; with none, his old best when it is near the lines
+  const std = p.kind === 'weight' && p.standard ? p.standard : null;
+  const best = std ? std.lb : (p.kind === 'weight' && p.oldBest && p.oldBest > lo - (hi - lo) && p.oldBest < hi + (hi - lo) ? p.oldBest : null);
   if (best != null) { lo = Math.min(lo, best); hi = Math.max(hi, best); }
   const pad = Math.max(2, (hi - lo) * 0.12); lo -= pad; hi += pad;
   const W = 340, H = 170, L = 8, R = 40, T = 10, B = 22;
@@ -313,7 +316,7 @@ function projChart(p) {
   }
   if (best != null) {
     g.appendChild(svgEl('line', { class: 'proj-best', x1: L, x2: x(12), y1: y(best), y2: y(best), stroke: 'rgba(255,255,255,0.35)', 'stroke-width': 1, 'stroke-dasharray': '2 4' }));
-    g.appendChild(svgEl('text', { x: L + 2, y: y(best) - 4, fill: '#9aa1ad', 'font-size': 10 }, [`your old best, ${fmtWeight(best)}`]));
+    g.appendChild(svgEl('text', { x: L + 2, y: y(best) - 4, fill: '#9aa1ad', 'font-size': 10 }, [std ? `${std.label}, ${fmtWeight(best)}` : `your old best, ${fmtWeight(best)}`]));
   }
   for (const k of ['struggle', 'steady', 'well']) {
     g.appendChild(svgEl('path', { class: 'proj-line', d: line(k), fill: 'none', stroke: CASE[k].color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', ...(CASE[k].dash ? { 'stroke-dasharray': CASE[k].dash } : {}) }));
@@ -368,6 +371,7 @@ function openProjection(data, exerciseId) {
   showModal(el('div', { class: 'proj', id: 'proj-sheet' }, [
     el('h2', {}, ex.name),
     el('div', { class: 'muted small', id: 'proj-now' }, `Now ${tText(p, p.now)}${w ? `, estimated max ${fmtWeight(p.now.max)} ${ex.equipment === 'weighted_bw' ? 'lb added' : 'lb'}` : ''}${pending ? ' (new coach target, reaches the phone when it next opens)' : ''}`),
+    w && p.standard ? el('div', { class: 'muted small', id: 'proj-standard' }, `${p.standard.label}: ${fmtWeight(p.standard.lb)} lb${ex.equipment === 'weighted_bw' ? ' added' : ''}${p.standard.lb > p.now.max ? `, ${fmtWeight(p.standard.lb - p.now.max)} to go` : ', already past it'}${p.oldBest ? `. Your best single: ${fmtWeight(p.oldBest)}` : ''}`) : null,
     el('h3', {}, w ? `Estimated max by week 12 (${unit})` : 'Reps by week 12'),
     el('div', { class: 'proj-cases' }, CASE_KEYS.map(tile)),
     chart,

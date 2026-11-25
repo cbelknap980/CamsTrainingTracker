@@ -65,7 +65,8 @@
   "exercises": {
     "back_squat": {
       "name": "Back squat",
-      "oldBest": { "lb": 245, "note": "Cameron, Nov 24 2026: 'Ive backsquated up to 245'. Reps and date not known yet; drawn on the Plan projection as a reference line." },
+      "oldBest": { "lb": 245, "note": "Cameron, Nov 24 2026: 'Ive backsquated up to 245', a single ('I could probaly go higher with dedicated effort')." },
+      "standard": { "lb": 274, "label": "Intermediate at 165 lb", "note": "Strength Level community standards, men, 1RM (strengthlevel.com, read Nov 24 2026): Intermediate = stronger than 50% of lifters who log the lift. Between the 160 lb row (265) and the 170 lb row (282). Novice 206, Advanced 350." },
       "logName": "Back squat",
       "equipment": "barbell",
       "mainLift": true,
@@ -225,6 +226,7 @@
     },
     "weighted_pullup": {
       "name": "Weighted pull-up",
+      "standard": { "lb": 69, "label": "Intermediate, all men", "note": "Strength Level community standards, men, 1RM (strengthlevel.com, read Nov 24 2026): Intermediate = stronger than 50% of lifters who log the lift. Added weight, all bodyweights. Novice +29, Advanced +114." },
       "equipment": "weighted_bw",
       "mainLift": true,
       "benchmark": true,
@@ -362,6 +364,7 @@
     },
     "front_squat": {
       "name": "Front squat",
+      "standard": { "lb": 216, "label": "Intermediate at 165 lb", "note": "Strength Level community standards, men, 1RM (strengthlevel.com, read Nov 24 2026): Intermediate = stronger than 50% of lifters who log the lift. Between the 160 lb row (210) and the 170 lb row (222). Novice 164, Advanced 277." },
       "equipment": "barbell",
       "mainLift": true,
       "benchmark": true,
@@ -379,6 +382,7 @@
     },
     "push_press": {
       "name": "Push press",
+      "standard": { "lb": 180, "label": "Intermediate, all men", "note": "Strength Level community standards, men, 1RM (strengthlevel.com, read Nov 24 2026): Intermediate = stronger than 50% of lifters who log the lift. All bodyweights; the site does not split the push press by bodyweight. Novice 129, Advanced 240." },
       "equipment": "barbell",
       "mainLift": true,
       "benchmark": true,

@@ -1114,6 +1114,7 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('squat: estimated max 228 now; 270, 248, 242 at the end; retest 5-rep weights 230, 210, 205', sq.now.max === 228 && sq.end.well.max === 270 && sq.end.steady.max === 248 && sq.end.struggle.max === 242 && sq.end.well.fiveRep === 230 && sq.end.steady.fiveRep === 210 && sq.end.struggle.fiveRep === 205, [sq.now, sq.end]);
   check('squat: the struggling case never resets (a rep short two weeks in three, the third clears the count)', sq.weeks.every((w, i, a) => !i || w.struggle.weight >= a[i - 1].struggle.weight - 0), sq.weeks.map(w => w.struggle.weight));
   check('squat: his old best (245) comes from plan.json', sq.oldBest === 245 && sq.weekly === true);
+  check('v1.18.9 squat: the benchmark (Intermediate at 165 lb, 274) comes from plan.json; accessories have none', sq.standard.lb === 274 && /165/.test(sq.standard.label) && proj('curl', { weight: 50, reps: 10 }).standard === null);
   const pu = proj('weighted_pullup', { weight: 30, reps: 5, stall: 0 });
   check('pull-up: max is added weight (63 now) and no case passes 20% over today on bodyweight + load', pu.now.max === 63 && pu.end.well.e1rm <= Math.round(228 * 1.2) && pu.end.well.max > pu.end.steady.max && pu.end.steady.max > pu.end.struggle.max, [pu.now, pu.end]);
   const cu = proj('curl', { weight: 50, reps: 10 });
