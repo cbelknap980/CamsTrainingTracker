@@ -1151,6 +1151,14 @@ async function renderPlanTab() {
   const [settings, targets, sessions, runs, checkins, coachFile, cfg] = await Promise.all([getSettings(), getTargets(), getSessions(), getRuns(), getCheckins(), kvGet('coach'), getSync()]);
   if (currentTab !== 'plan') return;
   const canWrite = !(cfg && cfg.role === 'viewer');
+  // v1.18.8: a computer set to Only views shows the phone's last upload, so a coach target the phone has not applied
+  // yet was missing from Plan (Cameron's sheet started at 185 x 6 after 195 x 5 was set). Show it here, marked pending.
+  if (!canWrite && coachFile) {
+    for (const a of pendingAdjustments(coachFile, await getCoachApplied(), D.plan)) {
+      if (!a.exerciseId || (a.weight == null && a.reps == null)) continue;
+      targets[a.exerciseId] = { ...(targets[a.exerciseId] || {}), ...(a.weight != null ? { weight: Number(a.weight) } : {}), ...(a.reps != null ? { reps: Number(a.reps) } : {}), source: 'coach', pendingCoach: true };
+    }
+  }
   renderPlan(view, { plan: D.plan, rules: D.rules, goals: D.goals, settings, targets, sessions, runs, checkins, coachFile, today: new Date() }, { canWrite, onSend: sendCheckin });
 }
 async function sendCheckin(input) {
