@@ -372,9 +372,9 @@ with sync_playwright() as p:
 
     # ---- Architecture tab + search ----
     # polish: on a phone the Architecture page moved from the tab bar into Settings
-    check('polish: phone tab bar has four tabs', page.locator('#tabs .tab:visible').count() == 4, page.locator('#tabs .tab:visible').count())
+    check('polish: phone tab bar has five tabs (v1.20 adds Nutrition)', page.locator('#tabs .tab:visible').count() == 5, page.locator('#tabs .tab:visible').count())
     page.click('#settings-btn'); page.wait_for_selector('#arch-open'); page.click('#arch-open'); page.wait_for_selector('.arch-svg')
-    check('architecture draws 20 boxes (v1.18 adds Pacing, v1.18.3 the Plan tab)', page.locator('.arch-svg g[data-part]').count() == 20 and page.locator('.arch-svg g[data-part="pacing"]').count() == 1 and page.locator('.arch-svg g[data-part="plantab"]').count() == 1, page.locator('.arch-svg g[data-part]').count())
+    check('architecture draws 21 boxes (v1.18 adds Pacing, v1.18.3 the Plan tab, v1.20 Nutrition)', page.locator('.arch-svg g[data-part]').count() == 21 and page.locator('.arch-svg g[data-part="pacing"]').count() == 1 and page.locator('.arch-svg g[data-part="plantab"]').count() == 1, page.locator('.arch-svg g[data-part]').count())
     page.fill('input[type="search"]', 'trim'); page.wait_for_timeout(100)
     check('search "trim" highlights Player and Rules', page.locator('.arch-svg .box.hit').count() >= 2, page.locator('.arch-svg .box.hit').count())
     check('search filters the part list', page.locator('.arch-part').count() <= 4, page.locator('.arch-part').count())

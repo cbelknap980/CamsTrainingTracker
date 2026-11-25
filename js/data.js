@@ -1,20 +1,21 @@
 // data.js - loads the data files and provides plan helpers (week number, phase, today's session).
 
-export const APP_VERSION = '1.18.16';
+export const APP_VERSION = '1.20.0';
 
 let cache = null;
 
 export async function loadData() {
   if (cache) return cache;
-  const [plan, rules, settingsDefaults, architecture, muscles, goals] = await Promise.all([
+  const [plan, rules, settingsDefaults, architecture, muscles, goals, foods] = await Promise.all([
     fetchJSON('data/plan.json'),
     fetchJSON('data/rules.json'),
     fetchJSON('data/settings.json'),
     fetchJSON('data/architecture.json'),
     fetchJSON('data/muscles.json'),
-    fetchJSON('data/goals.json')
+    fetchJSON('data/goals.json'),
+    fetchJSON('data/foods.json') // v1.20: the Nutrition tab's starting buttons and number checks
   ]);
-  cache = { plan, rules, settingsDefaults, architecture, muscles, goals };
+  cache = { plan, rules, settingsDefaults, architecture, muscles, goals, foods };
   return cache;
 }
 

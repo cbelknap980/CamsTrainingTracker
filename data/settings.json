@@ -2,6 +2,7 @@
   "startDate": "2026-11-16",
   "units": "lb",
   "bodyweightLb": 165,
+  "proteinGoalG": 160,
   "cues": { "vibrate": true, "beep": true, "loud": true, "warningTick": true, "notify": true, "voice": true },
   "autoAdvance": true,
   "adaptTiming": true,

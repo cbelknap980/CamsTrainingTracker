@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "description": "v1.20 Nutrition tab (Cameron, Nov 25: \"a very simple nutrition tracking app to mainly focus on protein intake for now... little buttons... for things that I consistently eat\"). The buttons he starts with, in the order they show, and the checks a typed number goes through. Protein only for now. g is grams of protein in one serving; qty and unit say what one serving is. source: label = read off the package (his photo of Nov 25 or the brand's label), estimate = a typical number until he checks it (the button shows est. until he saves it once). Once he edits the buttons in the app his own list is kept on the phone and this file is only the starting list.",
+  "check": {
+    "description": "Numbers that look wrong are held for a second look (Cameron's rule, Nov 19). A protein amount must be a number above 0 and at most refuseG; one serving over servingWarnG, or one entry over entryWarnG, asks Save anyway first. The same food added again within repeatSeconds says so in the toast with Undo (a double tap).",
+    "refuseG": 300,
+    "servingWarnG": 80,
+    "entryWarnG": 120,
+    "repeatSeconds": 60
+  },
+  "amounts": [0.5, 1, 1.5, 2, 3],
+  "foods": [
+    { "id": "whey", "name": "Gold Standard whey", "qty": 1, "unit": "scoop", "units": "scoops", "g": 24, "source": "label" },
+    { "id": "chicken", "name": "Chicken", "qty": 0.5, "unit": "lb", "units": "lb", "g": 50, "source": "estimate", "note": "Half of a 1 lb pack, weighed raw. Chicken breast is about 100 g of protein a pound raw." },
+    { "id": "turkey", "name": "Turkey breast", "qty": 0.5, "unit": "lb", "units": "lb", "g": 45, "source": "estimate", "note": "Half of a 1 lb pack. Turkey breast runs about 85 to 110 g of protein a pound depending on the kind; check your pack." },
+    { "id": "canned_chicken", "name": "Canned chicken", "qty": 1, "unit": "can", "units": "cans", "g": 50, "source": "estimate", "note": "A 12.5 oz can, drained. Check the can: servings per can times protein per serving." },
+    { "id": "oikos", "name": "Oikos Triple Zero", "qty": 1, "unit": "cup", "units": "cups", "g": 15, "source": "label" },
+    { "id": "pure_protein", "name": "Pure Protein bar", "qty": 1, "unit": "bar", "units": "bars", "g": 20, "source": "label" },
+    { "id": "think_bar", "name": "think! bar", "qty": 1, "unit": "bar", "units": "bars", "g": 20, "source": "label" },
+    { "id": "fitcrunch", "name": "FitCrunch bar", "qty": 1, "unit": "bar", "units": "bars", "g": 16, "source": "label" },
+    { "id": "chomps", "name": "Chomps stick", "qty": 1, "unit": "stick", "units": "sticks", "g": 10, "source": "label" },
+    { "id": "rice", "name": "Ben's rice", "qty": 1, "unit": "pouch", "units": "pouches", "g": 8, "source": "estimate", "note": "One Ready Rice pouch is 2 cups. Check the back for protein per cup and double it." }
+  ]
+}

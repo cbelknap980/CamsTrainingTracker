@@ -22,6 +22,7 @@ import { changesFor, replyFor, pendingAdjustments, withRest, keepsOwnTarget, sta
 import { ownTargetFlagged } from './lift-goal.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp, effortChips } from './ui.js';
 import { weekRings, ringsCard } from './rings.js';
+import { renderNutritionTab, proteinHomeCard } from './nutrition-view.js';
 import { flaggedGroups, applyNumberFix, rateSavedSet, impossibleNumber } from './sanity.js';
 
 const view = document.getElementById('view');
@@ -236,7 +237,7 @@ async function openShortcut() {
   const go = new URLSearchParams(location.search).get('go');
   if (!go) return false;
   try { history.replaceState(history.state, '', location.pathname + location.hash); } catch (e) { /* ignore */ }
-  if (go === 'runs' || go === 'progress' || go === 'plan') { showTab(go); return true; }
+  if (go === 'runs' || go === 'progress' || go === 'plan' || go === 'nutrition') { showTab(go); return true; }
   if (go === 'today') {
     const settings = await getSettings();
     const today = new Date();
@@ -311,7 +312,7 @@ async function updateWeekChip() {
   document.getElementById('week-chip').textContent = week >= 1 && week <= 12 ? `Week ${week} · ${phase.name}` : phase.name;
 }
 
-const TAB_ORDER = ['home', 'progress', 'plan', 'runs', 'architecture'];
+const TAB_ORDER = ['home', 'progress', 'plan', 'runs', 'nutrition', 'architecture'];
 const scrollByTab = {};
 function showTab(name, { restore = false } = {}) {
   if (name === 'history') { progressMode = 'sessions'; name = 'progress'; } // v1.9: the log lives in Progress
@@ -328,6 +329,8 @@ function showTab(name, { restore = false } = {}) {
     if (name === 'progress') return renderProgressTab();
     if (name === 'plan') return renderPlanTab();
     if (name === 'runs') return renderRunsTab(view, { plan: D.plan, rules: D.rules, onOpenSync: () => renderSyncSheet() });
+    // v1.20: protein (a computer set to Only views shows it without the buttons)
+    if (name === 'nutrition') return getSync().then(cfg => renderNutritionTab(view, { foodsData: D.foods, canWrite: !(cfg && cfg.role === 'viewer') }));
     if (name === 'architecture') return renderArchitecture(view, D.architecture, D.plan);
   };
   const y = restore ? (scrollByTab[name] || 0) : 0;
@@ -500,6 +503,8 @@ async function renderHome() {
     todayCard.appendChild(el('p', { class: 'muted' }, 'Nothing owed this week. Rest, or pick a session below.'));
   }
   view.appendChild(todayCard);
+  // v1.20: today's protein in one line; a tap opens the Nutrition tab
+  view.appendChild(await proteinHomeCard(() => showTab('nutrition')));
   if (hasOwed && (session || run)) {
     const c = el('div', { class: 'card', id: 'catchup-card' }, [el('h3', {}, 'Owed this week')]);
     catchUpBody(c, false);
