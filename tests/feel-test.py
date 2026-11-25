@@ -244,7 +244,7 @@ with sync_playwright() as p:
     check('one weight fills every set', all(x.input_value() == '195' for x in p2.locator('.fix-row input').all()) and p2.locator('.fix-row').count() == 4, [x.input_value() for x in p2.locator('.fix-row input').all()])
     p2.screenshot(path=f'{SHOTS}/v116-fix-sheet.png')
     p2.click('#fix-save'); p2.wait_for_selector('.fix-sheet', state='detached'); p2.wait_for_timeout(300)
-    check('after the fix the card is gone and the squat target is 175 x 4 (90% of 195)', p2.locator('#check-numbers').count() == 0 and '175 lb × 4' in p2.locator('#next-targets tr[data-ex=back_squat]').inner_text() and 'e1RM 228' in p2.locator('#next-targets tr[data-ex=back_squat]').inner_text(), p2.locator('#next-targets tr[data-ex=back_squat]').inner_text())
+    check('after the fix the card is gone and the squat target is 175 x 4 (90% of 195)', p2.locator('#check-numbers').count() == 0 and '175 lb × 4' in p2.locator('#next-targets tr[data-ex=back_squat]').inner_text() and 'e1RM 230' in p2.locator('#next-targets tr[data-ex=back_squat]').inner_text(), p2.locator('#next-targets tr[data-ex=back_squat]').inner_text())
     saved = p2.evaluate("() => import('./js/store.js').then(async m => (await m.getSessions()).find(s => s.id === 'ses_n17'))")
     check('the saved session holds 195 on every set and says it was corrected', [x['weight'] for x in saved['sets']] == [195, 195, 195, 195] and 'corrected' in saved['whatChanged'][0]['text'], [x['weight'] for x in saved['sets']])
     p2.locator('#next-targets').scroll_into_view_if_needed(); p2.wait_for_timeout(3600)

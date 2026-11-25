@@ -3,7 +3,7 @@
 
 import { applyProgression, incrementFor } from './progression.js';
 import { getTargets, setTargets, putSession, putRun, newId, getSettings } from './store.js';
-import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, fmtDate, weekNumber, effortLabel, getData, weightWithPair, isPair } from './data.js';
+import { APP_VERSION, toISODate, fmtWeight, fmtMinutes, fmtDate, weekNumber, effortLabel, getData, weightWithPair, isPair, roundEst } from './data.js';
 import { el, toast, closeModal, showModal, effortChips, countUp } from './ui.js';
 import { ringsCard } from './rings.js';
 import { sessionNumbers, drawShareCard, shareOrSave } from './share-card.js';
@@ -209,7 +209,7 @@ export async function renderReview(container, draft, ctx, { onSave, onCancel, on
       }
       container.appendChild(card);
     }
-    if (result.prs && result.prs.length) container.appendChild(el('div', { class: 'card pr-card' }, [el('h2', {}, 'Personal records'), el('ul', { class: 'lines' }, result.prs.map(p => el('li', {}, p.kind === 'e1rm' ? `${p.name}: e1RM ${p.value} lb (was ${p.prev})` : `${p.name}: heaviest ${fmtWeight(p.value)} lb (was ${fmtWeight(p.prev)})`)))]));
+    if (result.prs && result.prs.length) container.appendChild(el('div', { class: 'card pr-card' }, [el('h2', {}, 'Personal records'), el('ul', { class: 'lines' }, result.prs.map(p => el('li', {}, p.kind === 'e1rm' ? `${p.name}: e1RM ${roundEst(p.value)} lb (was ${roundEst(p.prev)})` : `${p.name}: heaviest ${fmtWeight(p.value)} lb (was ${fmtWeight(p.prev)})`)))]));
     container.appendChild(el('div', { class: 'stack' }, [
       el('button', { class: 'btn primary', id: 'save-session', disabled: gate && open.length > 0, onclick: () => { if (gate && open.length) return; onSave(overrides); } }, gate && open.length ? `Save session (${open.length} to check first)` : 'Save session'),
       onCancel ? el('button', { class: 'btn ghost', onclick: onCancel }, 'Back') : null,
@@ -294,7 +294,7 @@ export function renderSummary(container, record, { onDone, onBackup, prev, rings
     el('h2', {}, `${record.prs.length === 1 ? 'Personal record' : `${record.prs.length} personal records`}`),
     el('div', { class: 'pr-rows' }, record.prs.map(p => el('div', { class: 'pr-row' }, [
       el('span', { class: 'pr-badge big' }, 'PR'),
-      el('div', { class: 'pr-what' }, [el('b', {}, p.name), el('span', { class: 'muted' }, p.kind === 'e1rm' ? `estimated 1RM, was ${p.prev}` : `heaviest set, was ${fmtWeight(p.prev)}`)]),
+      el('div', { class: 'pr-what' }, [el('b', {}, p.name), el('span', { class: 'muted' }, p.kind === 'e1rm' ? `estimated 1RM, was ${roundEst(p.prev)}` : `heaviest set, was ${fmtWeight(p.prev)}`)]),
       el('div', { class: 'pr-val' }, [num(p.value, v => fmtWeight(Math.round(v * 2) / 2)), el('small', {}, ' lb')])
     ])))
   ]) : null;
@@ -306,7 +306,7 @@ export function renderSummary(container, record, { onDone, onBackup, prev, rings
   const e1 = Object.entries(record.e1rms || {});
   const bench = e1.length ? el('div', { class: 'card' }, [
     el('h2', {}, 'Estimated 1RM today'),
-    el('table', {}, e1.map(([id, v]) => el('tr', {}, [el('td', {}, record.sets.find(s => s.exerciseId === id)?.name || id), el('td', { class: 'num' }, `${v} lb`)])))
+    el('table', {}, e1.map(([id, v]) => el('tr', {}, [el('td', {}, record.sets.find(s => s.exerciseId === id)?.name || id), el('td', { class: 'num' }, `${roundEst(v)} lb`)])))   // v1.18.10: older records kept the pound
   ]) : null;
   const sets = el('div', { class: 'card' }, [
     el('h2', {}, 'Sets'),

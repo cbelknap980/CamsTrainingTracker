@@ -23,7 +23,7 @@ def check(name, cond, info=''):
 
 # Made-up numbers, not anyone's log. Week 3 (a build week), Lift 3: Full body.
 TARGETS = {'power_clean': {'weight': 185, 'reps': 2}, 'front_squat': {'weight': 245, 'reps': 5}, 'lateral_raise': {'weight': 40, 'reps': 12},
-           'push_press': {'weight': 162.5, 'reps': 3}, 'db_row': {'weight': 110, 'reps': 8}, 'preacher_curl': {'weight': 35, 'reps': 8},
+           'push_press': {'weight': 165, 'reps': 3}, 'db_row': {'weight': 110, 'reps': 8}, 'preacher_curl': {'weight': 35, 'reps': 8},
            'rope_pushdown': {'weight': 120, 'reps': 10}, 'calf_raise': {'weight': 245, 'reps': 10}, 'leg_curl': {'weight': 130, 'reps': 10}}
 # The same lift a week earlier: Set-up done for the front squat came 2:30 into a 1:00 set-up (one of the two
 # sessions in a row that set-up time needs before it changes).
@@ -193,7 +193,7 @@ with sync_playwright() as p:
     print('360 x 698 (his phone): Lift 3 from the first drill to the last stretch')
     browser, page, errors = open_app(p, 360, 698)
     pre = start_lift3(page)
-    check('start page: Lift 3 with the made-up weights, no learned times yet', 'Full body' in pre and '245 lb × 5' in pre and '162.5 lb × 3' in pre and page.locator('#pacing-note').count() == 0, pre[:300])
+    check('start page: Lift 3 with the made-up weights, no learned times yet', 'Full body' in pre and '245 lb × 5' in pre and '165 lb × 3' in pre and page.locator('#pacing-note').count() == 0, pre[:300])
     page.click('#start-workout'); page.wait_for_selector('.player'); page.wait_for_timeout(150)
     w = Walk(page, '360')
     seen = {}
@@ -226,7 +226,7 @@ with sync_playwright() as p:
             w.tap('#plan-btn'); page.wait_for_selector('#plan-sheet')
             sheet = page.locator('#plan-sheet').inner_text()
             rows = {r.locator('.ov-name').inner_text().strip(): r.locator('.ov-target').inner_text().strip() for r in page.locator('#plan-sheet .ov-row').all()}
-            check('whole workout: seven blocks, each lift with sets, reps and weight', page.locator('#plan-sheet .ov-block').count() == 7 and rows.get('Power clean') == '4 sets · 185 lb × 2' and rows.get('Front squat') == '3 sets · 245 lb × 5' and rows.get('Push press') == '3 sets · 162.5 lb × 3' and rows.get('Standing calf raise') == '3 rounds · 245 lb × 10', rows)
+            check('whole workout: seven blocks, each lift with sets, reps and weight', page.locator('#plan-sheet .ov-block').count() == 7 and rows.get('Power clean') == '4 sets · 185 lb × 2' and rows.get('Front squat') == '3 sets · 245 lb × 5' and rows.get('Push press') == '3 sets · 165 lb × 3' and rows.get('Standing calf raise') == '3 rounds · 245 lb × 10', rows)
             check('whole workout: dumbbell pairs, one side at a time, holds and stretches read right', rows.get('Lateral raise') == '3 sets · 40 lb (2 × 20) × 12' and rows.get('Dumbbell row') == '3 sets · 110 lb × 8 / side' and rows.get('Side plank') == '3 rounds · 25 s / side' and rows.get('Couch stretch') == '1:00 / side' and rows.get('Forward fold') == '0:45', rows)
             check('whole workout: ramp-up weights listed, time in the gym on top, nothing wider than the screen', 'Ramp-up' in sheet and '45×5' in sheet.replace(' ', '') and 'in the gym' in page.locator('#plan-sheet .ov-sub').inner_text() and page.evaluate("(() => { const m = document.querySelector('#modal .sheet') || document.querySelector('#modal'); return m.scrollWidth <= m.clientWidth + 1 && document.documentElement.scrollWidth <= window.innerWidth; })()"), sheet[:300])
             if KEEP: page.screenshot(path=f'{SHOTS}/w118-plan-sheet.png')
@@ -343,14 +343,14 @@ with sync_playwright() as p:
             check('two dumbbells: the total is the big number, "2 × 20 lb" under it', page.locator('#hero-readout .hw-num').inner_text().strip() == '40' and 'lb total' in hero and '2 × 20 lb' in hero and page.locator('.hl-reps b').inner_text().strip() == '12', hero)
             return False
 
-        # ---- a weight with a decimal, and the boxes for typing it ----
+        # ---- a three-digit weight, and the boxes for typing it (v1.18.10: targets are on 5 lb steps now) ----
         if k == 'work' and nm == 'Push press' and 'pp' not in seen:
             seen['pp'] = 1
             num = page.locator('#hero-readout .hw-num')
-            check('162.5 lb fits whole (Cameron: "3 digits in weight cutoff")', num.inner_text().strip() == '162.5' and page.evaluate("(() => { const n = document.querySelector('#hero-readout .hero-weight'); return n.scrollWidth <= n.clientWidth + 1; })()"), num.inner_text())
+            check('165 lb fits whole (Cameron: "3 digits in weight cutoff")', num.inner_text().strip() == '165' and page.evaluate("(() => { const n = document.querySelector('#hero-readout .hero-weight'); return n.scrollWidth <= n.clientWidth + 1; })()"), num.inner_text())
             w.tap('.player-actions .secondary button:has-text("Edit")')
             e = w.state(); m = w.look(e, 'edit open')
-            check('edit panel: weight box shows 162.5 whole, nothing scrolls', e['edit'] and page.locator('#in-weight').input_value() == '162.5' and not m['cut'] and m['docScroll'] <= 1 and m['mainOver'] <= 1, m)
+            check('edit panel: weight box shows 165 whole (and a typed 162.5 would fit), nothing scrolls', e['edit'] and page.locator('#in-weight').input_value() == '165' and not m['cut'] and m['docScroll'] <= 1 and m['mainOver'] <= 1, m)
             w.tap('.player-actions .secondary button:has-text("Hide")')
             return False
 

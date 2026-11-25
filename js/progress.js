@@ -4,7 +4,7 @@
 
 import { epley } from './progression.js';
 import { el, infoBtn } from './ui.js';
-import { fmtWeight, fmtDate, weekNumber, phaseForWeek, parseISODate } from './data.js';
+import { fmtWeight, fmtDate, weekNumber, phaseForWeek, parseISODate, roundEst } from './data.js';
 import { owedSetsFor, CATCHUP_ID } from './catchup.js';
 import { weekRuns, weeklyMiles, countsMiles, fmtDuration, paceOf } from './runs.js';
 
@@ -445,7 +445,7 @@ export function renderProgress(view, data, opts = {}) {
     el('h3', {}, 'Personal records'),
     prs.length ? el('table', {}, prs.slice(0, 12).map(p => el('tr', {}, [
       el('td', {}, [el('div', {}, p.name), el('div', { class: 'muted', style: 'font-size:var(--t-small)' }, fmtDate(p.date))]),
-      el('td', { class: 'num' }, p.kind === 'e1rm' ? `est. 1RM ${p.value} lb` : `heaviest ${fmtWeight(p.value)} lb`),
+      el('td', { class: 'num' }, p.kind === 'e1rm' ? `est. 1RM ${roundEst(p.value)} lb` : `heaviest ${fmtWeight(p.value)} lb`),
       el('td', { class: 'num muted' }, `was ${fmtWeight(p.prev)}`)
     ]))) : el('p', { class: 'muted', style: 'margin:0' }, 'None yet. A record shows up when you beat a number from an earlier session.')
   ]));

@@ -3,6 +3,7 @@
 import { exportAll, importAll, getSessions, getRuns } from './store.js';
 import { runUpgrades } from './upgrade.js';
 import { APP_VERSION, fmtDate } from './data.js';
+import { epley } from './progression.js';
 import { toast } from './ui.js';
 
 async function shareOrDownload(blob, filename, title) {
@@ -72,7 +73,7 @@ export async function exportExcel(settings, plan) {
       const ex = plan.exercises[set.exerciseId];
       const isBw = ex && ex.equipment === 'weighted_bw';
       const load = set.weight != null ? set.weight + (isBw ? bw : 0) : null;
-      const e1 = load && set.reps && !set.holdSeconds ? Math.round(load * (1 + set.reps / 30)) : '';
+      const e1 = load && set.reps && !set.holdSeconds ? epley(load, set.reps) : '';   // v1.18.10: to 5 lb, as the app shows it
       const notes = [set.baseline ? 'baseline top set' : '', set.retest ? 'retest' : '', set.holdSeconds ? 'seconds in Reps' : '', isBw ? `bodyweight ${bw} + added` : ''].filter(Boolean).join('; ');
       logRows.push([s.date, s.week, s.logName, set.logName || set.name, set.round || set.setIndex || '', isBw ? load : (set.weight == null ? '' : set.weight), set.reps == null ? '' : set.reps, set.rpe == null ? '' : set.rpe, e1, notes]);
     }

@@ -88,9 +88,9 @@ with sync_playwright() as p:
     page.click('#tabs .tab[data-view="progress"]'); page.wait_for_timeout(400); page.click('#progress-mode [data-mode="exercises"]'); page.wait_for_timeout(400)
     row = page.locator('.list-item', has_text='Weighted pull-up').inner_text()
     check('exercise list shows the top set of the newest session, not its first set', '25 lb × 5' in row, row)
-    check('pull-up e1RM uses the bodyweight from Settings (200 + 25 lb x 5 = 263)', 'best e1RM 263' in row, row)
+    check('pull-up e1RM uses the bodyweight from Settings (200 + 25 lb x 5 = 262.5, shown to 5 lb: 265)', 'best e1RM 265' in row, row)
     page.locator('.list-item', has_text='Weighted pull-up').click(); page.wait_for_timeout(200)
-    check('the pull-up sheet uses the same bodyweight', '263' in page.locator('#modal').inner_text(), page.locator('#modal').inner_text()[:200])
+    check('the pull-up sheet uses the same bodyweight', '265' in page.locator('#modal').inner_text(), page.locator('#modal').inner_text()[:200])
     page.keyboard.press('Escape')
 
     print('Settings')

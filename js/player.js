@@ -13,8 +13,8 @@
 
 import { trimToFit, remainingSeconds, leadIns, setTiming, blankStep } from './builder.js';
 import { setInProgress, clearInProgress, setPendingReview, newId } from './store.js';
-import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText } from './data.js';
-import { incrementFor, checkPR, trainingFractionFor } from './progression.js';
+import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText, snapLoad } from './data.js';
+import { incrementFor, checkPR, trainingFractionFor, epley } from './progression.js';
 import { el, showModal, closeModal, toast, hideToast, dropStepToast, effortChips, onBack, dropBack, haptic } from './ui.js';
 import { numberFlag, impossibleNumber } from './sanity.js';
 import { icon } from './icons.js';
@@ -738,7 +738,7 @@ export class Player {
   raiseBest(exerciseId, weight, reps, kinds) {
     const ex = this.plan.exercises[exerciseId];
     const bwAdd = ex && ex.equipment === 'weighted_bw' ? (this.settings.bodyweightLb || 0) : 0;
-    const e = Math.round((weight + bwAdd) * (1 + reps / 30));
+    const e = epley(weight + bwAdd, reps);   // v1.18.10: rounded to 5 lb, as everywhere
     if (!this.targets) return e;
     const t = this.targets[exerciseId] = { ...(this.targets[exerciseId] || {}) };
     if (kinds.includes('e1rm') && !(t.bestE1rm >= e)) t.bestE1rm = e;
@@ -776,7 +776,7 @@ export class Player {
     if (s.baseline) {
       const inc = incrementFor(this.rules, s.exerciseId, ex);
       // v1.18.1 (rules R4 rule 9): the power clean trains at the top double's weight, not 90% of it
-      const tw = roundTo(weight * trainingFractionFor(this.rules, s.exerciseId, ex), inc);
+      const tw = snapLoad(this.rules, ex, roundTo(weight * trainingFractionFor(this.rules, s.exerciseId, ex), inc));
       this.steps.forEach((o, i) => { if (i > idx && o.exerciseId === s.exerciseId && o.fillFromBaseline && !o.done) { o.target = { ...(o.target || {}), weight: tw }; } });
       toast(`Training weight for today: ${fmtWeight(tw)} lb`);
     } else if (!s.ramp && weight !== oldWeight) {
