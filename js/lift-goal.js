@@ -147,6 +147,22 @@ export function checkTarget({ rules, plan, settings, exerciseId, current, weight
   return { level: 'ok', text: '' };
 }
 
+/** The plan's rep range for a lift (its first item), for a check made away from the Plan page. */
+export function rangeOf(plan, exerciseId) {
+  for (const s of plan.sessions) for (const b of s.blocks) for (const it of b.items || []) if (it.exercise === exerciseId) return it.reps || null;
+  return null;
+}
+
+/**
+ * v1.18.12: true when a target he sets by hand gets a warning from checkTarget against the target it replaces. Kept
+ * on the target as `flagged`, so the coach file can still correct a number he saved past a warning (coach.js
+ * keepsOwnTarget). `range` null leaves out the plan's rep range (a rep count off the plan is his call).
+ */
+export function ownTargetFlagged({ rules, plan, settings, exerciseId, before, weight, reps, range = null }) {
+  const r = reps != null ? reps : (before ? before.reps : null);
+  return checkTarget({ rules, plan, settings, exerciseId, current: before || null, weight, reps: r, range }).level !== 'ok';
+}
+
 /**
  * The points the Plan chart draws, from projection.js projectExercise: one column per week from the next session's
  * week to 12, each with what that week's session asks for (week.lift), so week 3 is the target he has now.

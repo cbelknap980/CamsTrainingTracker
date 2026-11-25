@@ -182,6 +182,35 @@ try:
     check('no page errors', not errors, errors)
     ctx.close()
 
+    print('v1.18.12: the coach file and targets he set himself')
+    errors3 = []
+    ctx = browser.new_context(viewport={'width': 393, 'height': 851}, reduced_motion='reduce', device_scale_factor=1, is_mobile=True, has_touch=True, timezone_id='America/Denver')
+    ctx.route('https://api.github.com/**', lambda r: r.abort())
+    pg = ctx.new_page(); pg.on('pageerror', lambda e: errors3.append(str(e)))
+    pg.clock.install(time=datetime.datetime.fromisoformat('2026-11-25T09:30:00-07:00'))
+    pg.goto(BASE); pg.wait_for_selector('#view')
+    own = dict(DATA, targets=dict(DATA['targets'],
+        back_squat={'weight': 205, 'reps': 5, 'stall': 0, 'source': 'you', 'flagged': False, 'updated': '2026-11-25T15:00:00.000Z'},
+        rdl={'weight': 260, 'reps': 7, 'source': 'you', 'flagged': True, 'updated': '2026-11-25T15:00:00.000Z'}))
+    pg.evaluate("b => import('./js/store.js').then(m => m.importAll(b))", own)
+    pg.evaluate("c => import('./js/store.js').then(m => m.kvSet('coach', c))", {'version': 1, 'adjustments': [
+        {'id': 'a1', 'exerciseId': 'back_squat', 'weight': 200, 'reps': 5, 'restDelta': 15},
+        {'id': 'a2', 'exerciseId': 'rdl', 'weight': 205, 'reps': 7},
+        {'id': 'a3', 'exerciseId': 'calf_raise', 'weight': 110, 'reps': 12}]})
+    pg.reload(); pg.wait_for_timeout(900)
+    tt = pg.locator('#toast').inner_text() if pg.locator('#toast').is_visible() else ''
+    T = pg.evaluate("() => import('./js/store.js').then(m => m.getTargets())")
+    S = pg.evaluate("() => import('./js/store.js').then(m => m.getSettings())")
+    check('his own squat target (205, set since his last squat) stays; the coach\'s 200 is left out', T['back_squat']['weight'] == 205 and T['back_squat']['source'] == 'you', T['back_squat'])
+    check('...the rest change in the same coach note still applies (+15 s)', (S.get('restAdjust') or {}).get('back_squat') == 15, S.get('restAdjust'))
+    check('a target he saved past a warning (RDL 260) is corrected by the coach (205)', T['rdl']['weight'] == 205 and T['rdl']['source'] == 'coach', T['rdl'])
+    check('a coach target over a coach target applies as before (calf raise 110)', T['calf_raise']['weight'] == 110, T['calf_raise'])
+    check('the toast says what was kept', 'Kept the target you set on Back squat' in tt and 'Coach updated' in tt, tt)
+    done = pg.evaluate("() => import('./js/store.js').then(m => m.getCoachApplied())")
+    check('all three notes are marked done, so the old squat number never lands later', sorted(done) == ['a1', 'a2', 'a3'], done)
+    check('no page errors', not errors3, errors3)
+    ctx.close()
+
     print('A computer set to Only views')
     errors2 = []
     ctx, pg = open_at(browser, '2026-11-25T09:30:00-07:00', errors2, size={'width': 1280, 'height': 900}, viewer=True)
@@ -195,5 +224,5 @@ try:
 finally:
   server.terminate()
 
-print('\nAll v1.18.11 checks passed' if not fails else f'\n{len(fails)} FAILED')
+print('\nAll v1.18.11 and v1.18.12 checks passed' if not fails else f'\n{len(fails)} FAILED')
 sys.exit(1 if fails else 0)

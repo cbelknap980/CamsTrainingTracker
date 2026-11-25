@@ -9,6 +9,7 @@ import { ringsCard } from './rings.js';
 import { sessionNumbers, drawShareCard, shareOrSave } from './share-card.js';
 import { icon } from './icons.js';
 import { numberFlag, impossibleNumber } from './sanity.js';
+import { ownTargetFlagged } from './lift-goal.js';
 
 /** Build the (unsaved) session record from the Player's draft and run the engine without saving. */
 export async function previewSession(draft, { plan, rules }) {
@@ -33,9 +34,11 @@ export async function saveSession(draft, { plan, rules, overrides }) {
     const t = result.targets[id] || (result.targets[id] = {});
     const changed = (o.weight != null && o.weight !== t.weight) || (o.reps != null && o.reps !== t.reps);
     if (!changed) continue;
+    const engineSaid = { weight: t.weight, reps: t.reps };
     if (o.weight != null) t.weight = o.weight;
     if (o.reps != null) t.reps = o.reps;
     t.source = 'you'; t.updated = record.endedAt; t.sessionId = record.id;
+    t.flagged = ownTargetFlagged({ rules, plan, settings, exerciseId: id, before: engineSaid.weight != null || engineSaid.reps != null ? engineSaid : null, weight: t.weight, reps: t.reps }); // v1.18.12
     const line = result.lines.find(l => l.exerciseId === id);
     const txt = ` You set next time to ${fmtWeight(t.weight)} lb${t.reps != null ? ' x ' + t.reps : ''}.`;
     if (line) { line.text += txt; line.verdict = 'you'; line.next = { weight: t.weight, reps: t.reps }; }

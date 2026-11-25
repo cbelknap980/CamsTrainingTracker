@@ -1276,5 +1276,26 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('nextWeekOf: Monday\'s session logged in week 2 comes round next in week 3', nextWeekOf(plan, { ...settings, startDate: '2026-11-16' }, [{ sessionId: 'lift1', week: 2 }], 'lift1', new Date('2026-11-25T12:00:00')) === 3);
 }
 
+// ---- v1.18.12: the coach file keeps the targets he set himself ----
+{
+  console.log('\nv1.18.12: the coach file and his own targets');
+  const { keepsOwnTarget } = await import('../js/coach.js');
+  const { ownTargetFlagged } = await import('../js/lift-goal.js');
+  const sq = (endedAt, ex = 'back_squat') => ({ endedAt, sets: [{ exerciseId: ex, done: true, weight: 195, reps: 5 }] });
+  const you = (updated, extra = {}) => ({ weight: 205, reps: 5, source: 'you', updated, ...extra });
+  check('a target he set after his last squat stays', keepsOwnTarget(you('2026-11-25T15:00:00.000Z'), [sq('2026-11-24T01:00:00.000Z')], 'back_squat'));
+  check('one set on that session\'s Review (same time as its end) stays', keepsOwnTarget(you('2026-11-24T01:00:00.000Z'), [sq('2026-11-24T01:00:00.000Z')], 'back_squat'));
+  check('one set before a later squat session does not (that session moved on from it)', !keepsOwnTarget(you('2026-11-20T15:00:00.000Z'), [sq('2026-11-24T01:00:00.000Z')], 'back_squat'));
+  check('a later session of another lift does not count', keepsOwnTarget(you('2026-11-20T15:00:00.000Z'), [sq('2026-11-18T01:00:00.000Z'), sq('2026-11-24T01:00:00.000Z', 'rdl')], 'back_squat'));
+  check('a skipped or ramp-up set is not a logged session', keepsOwnTarget(you('2026-11-20T15:00:00.000Z'), [{ endedAt: '2026-11-24T01:00:00.000Z', sets: [{ exerciseId: 'back_squat', done: true, ramp: true }, { exerciseId: 'back_squat', done: false, skipped: true }] }], 'back_squat'));
+  check('one he saved past a warning (flagged) does not', !keepsOwnTarget(you('2026-11-25T15:00:00.000Z', { flagged: true }), [], 'back_squat'));
+  check('a coach or engine target does not', !keepsOwnTarget({ weight: 195, reps: 5, source: 'coach', updated: '2026-11-25T15:00:00.000Z' }, [], 'back_squat') && !keepsOwnTarget(null, [], 'back_squat'));
+  const of = (id, before, weight, reps) => ownTargetFlagged({ rules, plan, settings, exerciseId: id, before, weight, reps });
+  check('hand-set 205 x 5 over 195 x 5: not flagged', !of('back_squat', { weight: 195, reps: 5 }, 205, 5));
+  check('hand-set 235 x 5 over 195 x 5 (20% jump): flagged', of('back_squat', { weight: 195, reps: 5 }, 235, 5));
+  check('hand-set 30 on the squat (under the bar): flagged', of('back_squat', { weight: 195, reps: 5 }, 30, 5));
+  check('a rep count off the plan alone is his call: not flagged', !of('back_squat', { weight: 195, reps: 5 }, 195, 8));
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
