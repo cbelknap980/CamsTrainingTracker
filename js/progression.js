@@ -32,6 +32,27 @@ export function lastSetRule(rules) {
   return r && r.decides ? r : null;
 }
 
+/**
+ * v1.18.11 (Cameron, Nov 25: "Allow me to edit and override as an option if I want to push towards a goal"): extra
+ * pounds on a weekly main lift's step up while he pushes toward a goal he set in Plan (settings.liftGoals[id] =
+ * { weight, reps, push }). 0 when there is no goal, it does not push, the lift is not on the weekly rule, or the target
+ * already reaches the goal's estimated max (then the lift is back on its normal step). A Hard set or a missed rep
+ * still holds the weight; only the size of a clean session's step changes.
+ */
+export function goalPushFor(rules, exerciseId, ex, settings, target) {
+  const g = settings && settings.liftGoals && settings.liftGoals[exerciseId];
+  if (!g || !(g.push > 0) || !okNum(g.weight) || !okNum(g.reps) || g.reps < 1) return 0;
+  if (!ex || !ex.mainLift || isExcluded(rules, exerciseId, ex) || !weeklyFor(rules, exerciseId)) return 0;
+  if (!target || !okNum(target.weight) || !okNum(target.reps) || target.reps < 1) return 0;
+  const add = ex.equipment === 'weighted_bw' ? bodyweightOf(settings) : 0;
+  return goalMax(g.weight + add, g.reps) > (epley(target.weight + add, target.reps) || 0) ? g.push : 0;
+}
+
+/** A goal's estimated max on the load moved: a single is its own weight, more reps go through epley. */
+export function goalMax(load, reps) {
+  return reps === 1 ? load : epley(load, reps);
+}
+
 /** Share of a week-1 benchmark a lift trains at. v1.18.1 (R4 rule 9): the power clean trains at the weight itself. */
 export function trainingFractionFor(rules, exerciseId, ex) {
   return isExcluded(rules, exerciseId, ex) ? 1 : rules.baseline.trainingFraction;
@@ -183,6 +204,8 @@ export function mainLiftNext(target, sets, o) {
   // rules.mainLiftTest.weekly steps up after every session whose sets all made the reps at Solid or easier, and the
   // reps stay at weekly.reps (the bottom of the range in the heavy weeks) instead of climbing 4, 5, 6 first.
   const weekly = o.weekly || null;
+  // v1.18.11: a goal he set adds this much to a clean session's step (goalPushFor); only on the weekly rule
+  const push = weekly && okNum(o.push) && o.push > 0 ? o.push : 0;
   const st = o.stall || {};
   const resetAfter = st.sessionsBeforeDrop, resetFraction = st.dropFraction, resetReps = st.resetReps || 'keep';
   const flatAtRpe = st.flatAtRpe == null ? null : st.flatAtRpe;
@@ -215,16 +238,17 @@ export function mainLiftNext(target, sets, o) {
   };
   if (S.kind === 'heavier') {                                                                         // rule 2
     const up = !week2 && allDone && S.reps >= want && clean;
-    if (up) { cur.weight = stepUp(S.weight, inc); cur.reps = weekly ? want : lo; } else { cur.weight = S.weight; cur.reps = Math.min(S.reps, hi); }
+    const extra = up && weekly ? push : 0;
+    if (up) { cur.weight = stepUp(S.weight, inc) + extra; cur.reps = weekly ? want : lo; } else { cur.weight = S.weight; cur.reps = Math.min(S.reps, hi); }
     cur.stall = 0;
-    return out('up', up ? (weekly ? 'heavierWeekly' : 'heavierTop') : 'heavier', base);
+    return out('up', up ? (weekly ? 'heavierWeekly' : 'heavierTop') : 'heavier', { ...base, ...(extra ? { pushed: extra } : {}) });
   }
   if (S.kind === 'lighter') return S.missed ? flat('miss') : out('hold', 'lighter', base);            // rule 2, lighter
   if (S.missed) return flat('miss');                                                                  // 3d
   if (!allDone) return out('hold', 'notAll', base);                                                   // 3e
   if (weekly && clean) {                                                                              // R5: 3a and 3b for a weekly lift
     cur.stall = 0;
-    if (S.reps >= want) { cur.weight = stepUp(W, inc); cur.reps = want; return out('up', 'weekly', base); }
+    if (S.reps >= want) { cur.weight = stepUp(W, inc) + push; cur.reps = want; return out('up', 'weekly', { ...base, ...(push ? { pushed: push } : {}) }); }
     cur.reps = Math.min(S.reps + 1, want);
     return out('up', 'oneMore', base);
   }
@@ -480,7 +504,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     const opts = { phase, range, planned: planned.length, inc, maxRpe: rules.mainLiftTest.maxRpe, weekly: weeklyFor(rules, id) };
     let outcome;
     if (isExcluded(rules, id, ex)) outcome = cleanNext(target, judged, opts);                                      // rule 9
-    else if (ex.mainLift) outcome = mainLiftNext(target, judged, { ...opts, add: isBw ? bodyweightOf(settings) : 0, floor: ex.equipment === 'barbell' ? rules.rampUp.barWeightLb : 0, stall: stallRules });
+    else if (ex.mainLift) outcome = mainLiftNext(target, judged, { ...opts, add: isBw ? bodyweightOf(settings) : 0, floor: ex.equipment === 'barbell' ? rules.rampUp.barWeightLb : 0, stall: stallRules, push: goalPushFor(rules, id, ex, settings, target) });
     else outcome = accessoryNext(target, judged, { ...opts, lastSet: lastRule });                                   // rule 10
     // R4 rule 13: the v1.19 all-out check goes here, on `outcome`, after these rules and before the target is written.
 
@@ -502,6 +526,7 @@ function lineFor(o, { name, detail, stall }) {
   const lb = w => `${fmtWeight(w)} lb`;
   const nextTime = `Next time ${o.weight != null ? `${lb(o.weight)} x ` : ''}${o.reps}.`;
   const flatCount = n => ` Flat sessions in a row: ${n} of ${stall.sessionsBeforeDrop}.`;
+  const pushed = o.pushed ? ` That includes ${lb(o.pushed)} extra toward your goal.` : '';
   switch (o.key) {
     case 'nothing': return { text: `${name}: no sets with a weight and reps, target unchanged.`, reason: 'nothing logged' };
     case 'light': return { text: `${name}: ${detail}. Lighter week, same weight next time.`, reason: 'lighter week' };
@@ -510,8 +535,8 @@ function lineFor(o, { name, detail, stall }) {
     case 'heavier': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target. ${nextTime}`, reason: 'lifted more than the target' };
     case 'lighter': return { text: `${name}: ${detail}, lighter than the ${lb(o.W)} target or ended early. Same target next time.`, reason: 'lighter day: target holds' };
     case 'notAll': return { text: `${name}: ${detail}, a set was skipped or done lighter. Same target next time.`, reason: 'a set was skipped or done lighter' };
-    case 'weekly': return { text: `${name}: ${detail}, every set made at Solid effort or easier. ${nextTime}`, reason: 'all sets made, Solid or easier' };
-    case 'heavierWeekly': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target with every set made, Solid or easier. ${nextTime}`, reason: 'lifted more, every set made' };
+    case 'weekly': return { text: `${name}: ${detail}, every set made at Solid effort or easier. ${nextTime}${pushed}`, reason: o.pushed ? 'all sets made: a bigger step toward your goal' : 'all sets made, Solid or easier' };
+    case 'heavierWeekly': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target with every set made, Solid or easier. ${nextTime}${pushed}`, reason: o.pushed ? 'lifted more: a bigger step toward your goal' : 'lifted more, every set made' };
     case 'easyUp': return { text: `${name}: ${detail}, last set Easy. ${nextTime}`, reason: 'last set Easy: more weight' };
     case 'solidMore': return { text: `${name}: ${detail}, last set Solid. ${o.weight > o.W ? `Next time ${lb(o.weight)}, the weight you used` : 'Same weight'}, aim for ${o.reps} next time.`, reason: `last set Solid: aim for ${o.reps} reps` };
     case 'top': return { text: `${name}: ${detail}, every set at ${o.hi}${o.R != null ? ' at Solid effort or easier' : ''}. ${nextTime}`, reason: `all sets at ${o.hi}${o.R != null ? ', Solid or easier' : ''}` };

@@ -48,7 +48,11 @@ export function scenarios(weekly) {
     : { well: { rpe: () => SOLID, short: () => false }, steady: { rpe: () => HARD, short: () => false }, struggle: { rpe: () => HARD, short: i => i % 2 === 1 } };
 }
 
-/** One run of the rules over the sessions left. sc = { rpe(i), short(i) }. Returns { week: { weight, reps } }. */
+/**
+ * One run of the rules over the sessions left. sc = { rpe(i), short(i) }. Returns { byWeek, lifted }: byWeek[week] is
+ * the target after that week's session; lifted[week] (v1.18.11) is what that week's first session asks for, the weight
+ * on the bar (a heavier week's start included).
+ */
 function run({ plan, rules, settings, exerciseId, target, occ, sc }) {
   const ex = plan.exercises[exerciseId];
   // no line runs past rules.projection.maxGain over today's estimated max: straight-line steps never last 12 weeks
@@ -56,7 +60,7 @@ function run({ plan, rules, settings, exerciseId, target, occ, sc }) {
   const e0 = e1rmOf(ex, target, settings);
   const cap = gain != null && e0 ? e0 * (1 + gain) : Infinity;
   let targets = { [exerciseId]: { ...target } };
-  const byWeek = {};
+  const byWeek = {}, lifted = {};
   occ.forEach((o, i) => {
     const ph = phaseForWeek(plan, o.week);
     if (ph.id === 'retest' && ex.mainLift) return;                     // week 12 is the retest, not a training session
@@ -64,6 +68,8 @@ function run({ plan, rules, settings, exerciseId, target, occ, sc }) {
     const t = effectiveTarget({ rules, plan, settings, exerciseId, target: targets[exerciseId], phaseId: ph.id }) || {};
     let reps = t.reps != null ? t.reps : (range ? range[0] : null);
     if (range && reps != null) reps = Math.min(Math.max(reps, range[0]), range[1]);
+    // a lift done twice a week shows the week's first session, so the first column is the next time it comes round
+    if (!lifted[o.week]) lifted[o.week] = { weight: t.weight != null ? t.weight : null, reps: reps != null ? reps : null };
     let n = o.item.sets || o.block.rounds || 3;
     if (ph.id === 'light') n = Math.max(1, Math.round(n * rules.phases.light.setFactor));
     const sets = Array.from({ length: n }, (_, k) => ({
@@ -78,7 +84,7 @@ function run({ plan, rules, settings, exerciseId, target, occ, sc }) {
     const nt = targets[exerciseId] || {};
     byWeek[o.week] = { weight: nt.weight != null ? nt.weight : null, reps: nt.reps != null ? nt.reps : null };
   });
-  return byWeek;
+  return { byWeek, lifted };
 }
 
 /** An estimated 1RM for a target (bodyweight in for the pull-up), or null for a lift with no weight. */
@@ -97,6 +103,8 @@ export const CASES = ['well', 'steady', 'struggle'];
  * as the lift is loaded (added weight on the pull-up), the number the chart draws; fiveRep is the weight that max
  * gives for 5 reps (the week-12 retest), rounded to the lift's step.
  * `weeks` holds the current week and every week after it; a week with no session repeats the one before.
+ * v1.18.11: each week also carries lift: { well, steady, struggle }, what that week's session asks for (the Plan
+ * chart's "weight that week"); well/steady/struggle stay the target after it.
  */
 export function projectExercise({ plan, rules, settings, sessions, targets, exerciseId, today }) {
   const ex = plan.exercises[exerciseId];
@@ -122,9 +130,13 @@ export function projectExercise({ plan, rules, settings, sessions, targets, exer
   const now = withE({ weight: target.weight != null ? target.weight : null, reps: target.reps });
   const weeks = [];
   const last = { well: now, steady: now, struggle: now };
+  const lift = { well: now, steady: now, struggle: now };
   for (let w = occ[0].week; w <= 12; w++) {
-    for (const c of CASES) if (runs[c][w]) last[c] = withE(runs[c][w]);
-    weeks.push({ week: w, phase: phaseForWeek(plan, w).id, ...last });
+    for (const c of CASES) {
+      if (runs[c].byWeek[w]) last[c] = withE(runs[c].byWeek[w]);
+      if (runs[c].lifted[w]) lift[c] = withE(runs[c].lifted[w]);
+    }
+    weeks.push({ week: w, phase: phaseForWeek(plan, w).id, ...last, lift: { ...lift } });
   }
   return { kind, now, weeks, end: { ...last }, sessionsLeft: occ.length, mainLift: !!ex.mainLift, weekly, oldBest: ex.oldBest && ex.oldBest.lb ? roundEst(ex.oldBest.lb, rules) : null, standard: ex.standard && ex.standard.lb ? { lb: roundEst(ex.standard.lb, rules), label: ex.standard.label || 'Benchmark' } : null };
 }

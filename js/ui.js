@@ -105,10 +105,11 @@ export function dropBack(key) {
   if (!layers.length) disarm();
 }
 
-export function showModal(content) {
+/** opts.className (v1.18.11): extra classes on the sheet ('sheet-page' fills the phone screen like a page). */
+export function showModal(content, opts = {}) {
   const m = document.getElementById('modal');
   m.innerHTML = '';
-  const sheet = el('div', { class: 'sheet' }, content);
+  const sheet = el('div', { class: 'sheet' + (opts.className ? ` ${opts.className}` : '') }, content);
   m.appendChild(sheet);
   m.hidden = false;
   m.onclick = e => { if (e.target === m) closeModal(); };

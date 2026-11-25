@@ -1148,9 +1148,8 @@ async function renderProgressTab() {
 }
 
 // ---- Plan and coach check-ins (v1.9) ----
-async function renderPlanTab() {
+async function planData() {
   const [settings, targets, sessions, runs, checkins, coachFile, cfg] = await Promise.all([getSettings(), getTargets(), getSessions(), getRuns(), getCheckins(), kvGet('coach'), getSync()]);
-  if (currentTab !== 'plan') return;
   const canWrite = !(cfg && cfg.role === 'viewer');
   // v1.18.8: a computer set to Only views shows the phone's last upload, so a coach target the phone has not applied
   // yet was missing from Plan (Cameron's sheet started at 185 x 6 after 195 x 5 was set). Show it here, marked pending.
@@ -1160,7 +1159,43 @@ async function renderPlanTab() {
       targets[a.exerciseId] = { ...(targets[a.exerciseId] || {}), ...(a.weight != null ? { weight: snapLoad(D.rules, D.plan.exercises[a.exerciseId], Number(a.weight)) } : {}), ...(a.reps != null ? { reps: Number(a.reps) } : {}), source: 'coach', pendingCoach: true };
     }
   }
-  renderPlan(view, { plan: D.plan, rules: D.rules, goals: D.goals, settings, targets, sessions, runs, checkins, coachFile, today: new Date() }, { canWrite, onSend: sendCheckin });
+  return { canWrite, data: { plan: D.plan, rules: D.rules, goals: D.goals, settings, targets, sessions, runs, checkins, coachFile, today: new Date() } };
+}
+const planOpts = canWrite => ({ canWrite, onSend: sendCheckin, ...(canWrite ? { saveTarget: saveLiftTarget, saveGoal: saveLiftGoal } : {}) });
+async function renderPlanTab() {
+  const { canWrite, data } = await planData();
+  if (currentTab !== 'plan') return data;
+  renderPlan(view, data, planOpts(canWrite));
+  return data;
+}
+
+// v1.18.11 (Cameron, Nov 25: "Allow me to edit and override as an option if I want to push towards a goal"): the lift
+// page in Plan sets a lift's next target or its week-12 goal. Both come back with an undo for the toast.
+async function saveLiftTarget(id, { weight, reps, week }) {
+  const before = (await getTargets())[id];
+  const moved = !before || before.weight !== weight;
+  // typed in for a heavier week whose 5% start has not been applied yet: it is that week's target, so it is not
+  // raised 5% again when the session opens
+  const ex = D.plan.exercises[id];
+  const heavyNow = week && phaseForWeek(D.plan, week).id === 'heavy' && before && heavyStartDue(D.rules, id, ex, before, 'heavy');
+  await setTarget(id, { weight, reps, source: 'you', updated: new Date().toISOString(), ...(moved ? { stall: 0 } : {}), ...(heavyNow ? { heavyStart: { week, from: { weight: before.weight, reps: before.reps } } } : {}) });
+  return {
+    data: await renderPlanTab(),
+    undo: async () => {
+      const all = await getTargets();
+      if (before) all[id] = before; else delete all[id];
+      await setTargets(all);
+      return renderPlanTab();
+    }
+  };
+}
+async function saveLiftGoal(id, goal) {
+  const before = ((await getSettings()).liftGoals || {})[id] || null;
+  await saveSettings({ liftGoals: { [id]: goal } });
+  return {
+    data: await renderPlanTab(),
+    undo: async () => { await saveSettings({ liftGoals: { [id]: before } }); return renderPlanTab(); }
+  };
 }
 async function sendCheckin(input) {
   const settings = await getSettings();

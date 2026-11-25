@@ -494,9 +494,6 @@ body.computer .modal .sheet { max-width: 860px; border-radius: 22px; max-height:
 .day-status { font-size: var(--t-small); color: var(--muted); }
 .day-status.done { color: var(--good); font-weight: 700; }
 .day-status.missed { color: var(--bad); }
-.plan-table { margin-top: 10px; }
-.plan-table tr.blk td { padding-top: 14px; font-size: var(--t-label); color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 0; }
-.plan-table .small { font-size: var(--t-label); }
 /* coach check-ins */
 .chat { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; margin-bottom: 12px; }
 .msg { max-width: 88%; padding: 9px 12px; border-radius: 14px; background: var(--surface-2); font-size: var(--t-small); }
