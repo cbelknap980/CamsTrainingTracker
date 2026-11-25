@@ -10,6 +10,11 @@ import { fmtWeight, dumbbellOk, snapLoad, weekNumber } from './data.js';
 
 /** A goal more than this far over today's estimated max (on the load moved) reads as a typo and can't be saved. */
 export const GOAL_TYPO = 0.5;
+/**
+ * A hand-set target more than this far over the current one (estimated max, on the load moved) is flagged: four or more
+ * of the lift's usual steps at once, which one session rarely adds.
+ */
+export const TARGET_JUMP = 0.1;
 /** Reps a goal can be set for: past 12 an estimated max says little. */
 export const GOAL_REPS = [1, 12];
 
@@ -117,7 +122,7 @@ export function checkGoal({ rules, plan, settings, exerciseId, goal, now }) {
  * The same tests as a logged set (sanity.js numberFlag) against the target it replaces, plus reps outside the plan's
  * range and a barbell weight that isn't a 5 lb step.
  */
-export function checkTarget({ rules, plan, exerciseId, current, weight, reps, range }) {
+export function checkTarget({ rules, plan, settings, exerciseId, current, weight, reps, range }) {
   const ex = plan.exercises[exerciseId];
   const w = num(weight), r = num(reps);
   const needsWeight = current && current.weight != null;
@@ -128,6 +133,14 @@ export function checkTarget({ rules, plan, exerciseId, current, weight, reps, ra
   const flag = numberFlag({ weight: w, reps: r, target: { weight: current ? current.weight : null }, repRange: range || null, done: true }, ex, rules);
   if (flag && ['under-bar', 'negative'].includes(flag.code)) return { level: 'block', text: `${flag.text}.` };
   if (flag) return { level: 'flag', text: `${flag.text}. Is that right?` };
+  if (w != null && current && current.weight != null && current.reps && ex && ex.equipment !== 'bodyweight') {
+    const add = addOf(ex, settings || {});
+    const m0 = epley(current.weight + add, current.reps), m = epley(w + add, r);
+    if (m0 > 0 && m / m0 - 1 > TARGET_JUMP + 1e-9) {
+      const unit = ex.equipment === 'weighted_bw' ? ' added' : '';
+      return { level: 'flag', text: `${fmtWeight(w)} × ${r} works out to an estimated max of ${fmtWeight(Math.round(m - add))} lb${unit}, ${pct(m / m0 - 1)} over the ${fmtWeight(current.weight)} × ${current.reps} it replaces (${fmtWeight(Math.round(m0 - add))}). That's a big jump for one session. Is that right?` };
+    }
+  }
   if (range && (r < range[0] || r > range[1])) return { level: 'flag', text: `The plan has ${range[0]} to ${range[1]} reps here. Keep ${r}?` };
   if (w != null && ex && ex.equipment === 'barbell' && Math.abs(w / 5 - Math.round(w / 5)) > 1e-9) return { level: 'flag', text: `${fmtWeight(w)} lb isn't a 5 lb step. Keep it?` };
   if (w != null && !dumbbellOk(rules, ex, w)) return { level: 'flag', text: 'Your gym has no dumbbell that size. Keep it?' };

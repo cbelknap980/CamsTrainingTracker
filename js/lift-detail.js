@@ -84,7 +84,7 @@ function build(root, st, exerciseId, opts, draw) {
   // what the chart runs on: the stored target and goal, or the ones being typed (drafts that pass their checks)
   let targets = d.targets, sets = settings;
   if (st.edit === 'target' && st.draftT) {
-    const c = checkTarget({ rules, plan, exerciseId, current: stored, weight: st.draftT.weight, reps: st.draftT.reps, range: place && place.item.reps });
+    const c = checkTarget({ rules, plan, settings, exerciseId, current: stored, weight: st.draftT.weight, reps: st.draftT.reps, range: place && place.item.reps });
     if (c.level !== 'block') targets = { ...d.targets, [exerciseId]: { ...(stored || {}), weight: num(st.draftT.weight), reps: num(st.draftT.reps), stall: 0 } };
   }
   let shownGoal = goal;
@@ -162,7 +162,7 @@ function nextCard(st, { ex, exerciseId, stored, place, canWrite, opts, draw, set
     const r = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '1', id: 'lift-t-reps', value: st.draftT.reps, 'aria-label': 'Reps' });
     const msg = el('div', { class: 'lift-check', id: 'lift-t-check' });
     const save = el('button', { type: 'button', class: 'btn primary', id: 'lift-t-save' }, 'Save');
-    const verdict = () => checkTarget({ rules, plan, exerciseId, current: stored, weight: st.draftT.weight, reps: st.draftT.reps, range });
+    const verdict = () => checkTarget({ rules, plan, settings, exerciseId, current: stored, weight: st.draftT.weight, reps: st.draftT.reps, range });
     const paint = () => {
       const c = verdict();
       msg.className = `lift-check ${c.level}`;

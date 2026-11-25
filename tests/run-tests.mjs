@@ -1234,6 +1234,9 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('override 197: flagged (not a 5 lb step)', ct('back_squat', 197, 5, sqNow, [4, 6]).level === 'flag');
   check('override 8 reps on a 4-6 lift: flagged', ct('back_squat', 195, 8, sqNow, [4, 6]).level === 'flag');
   check('override 55 on a curl pair (2 x 27.5): flagged, no such dumbbell', ct('curl', 55, 10, { weight: 50, reps: 10 }, [10, 12]).level === 'flag');
+  check('override 235 x 5 on 195 x 5: flagged, a big jump for one session (est. max 275, 20% over)', (() => { const c = ct('back_squat', 235, 5, sqNow, [4, 6]); return c.level === 'flag' && /20% over/.test(c.text) && /big jump/.test(c.text); })(), ct('back_squat', 235, 5, sqNow, [4, 6]));
+  check('override 210 x 5 on 195 x 5 (8% over): fine', ct('back_squat', 210, 5, sqNow, [4, 6]).level === 'ok');
+  check('override on the pull-up counts bodyweight: +40 x 5 on +30 x 5 is fine (5% over, not 33%)', checkTarget({ rules, plan, settings, exerciseId: 'weighted_pullup', current: { weight: 30, reps: 5 }, weight: 40, reps: 5, range: [4, 6] }).level === 'ok');
   check('override with no reps: refused', ct('back_squat', 195, '', sqNow, [4, 6]).level === 'block');
   check('override reps on a bodyweight lift (ab wheel 12): fine', ct('ab_wheel', null, 12, { weight: null, reps: 10 }, [10, 12]).level === 'ok');
 
