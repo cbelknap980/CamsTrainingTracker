@@ -3,7 +3,7 @@
 // the rest of the log, and read by a scheduled coach review that answers in coach.json in his private repo.
 // The helpers at the top are pure (tested in node).
 
-import { roundTo, fmtWeight } from './data.js';
+import { roundTo, fmtWeight, snapLoad } from './data.js';
 import { incrementFor } from './progression.js';
 
 /** Quick tags. `needs`: 'exercise' (weight tags), 'any' (an exercise or a whole session). */
@@ -49,7 +49,7 @@ export function changesFor(checkin, { plan, rules, targets, restAdjust }) {
     if (t && t.weight != null) {
       const inc = incrementFor(rules, id, ex);
       const dir = tags.includes('too_heavy') ? -1 : 1;
-      const to = Math.max(0, roundTo(t.weight + dir * inc, inc));
+      const to = Math.max(0, snapLoad(rules, ex, roundTo(t.weight + dir * inc, inc)));
       if (to !== t.weight) out.push({ kind: 'weight', exerciseId: id, from: t.weight, to, reps: t.reps });
     }
   }

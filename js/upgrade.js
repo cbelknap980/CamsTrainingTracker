@@ -3,7 +3,7 @@
 // appVersion as dataVersion, and every change for a newer version runs once.
 
 import { getTargets, setTargets, getRuns, putRun, kvGet, kvSet } from './store.js';
-import { APP_VERSION, getData } from './data.js';
+import { APP_VERSION, getData, snapLoad } from './data.js';
 import { settleRun } from './runs.js';
 
 /** a < b for versions like 1.9 and 1.18.1. */
@@ -34,7 +34,24 @@ export function upgrade1181({ targets, runs, rules }) {
   return { targets: next, zeroed, runs: changed };
 }
 
-const UPGRADES = [{ version: '1.18.1', run: upgrade1181 }];
+/**
+ * v1.18.5 (Cameron, Nov 24: the gym has no 27.5 lb dumbbells): a stored dumbbell target the rack can't make moves to
+ * the nearest weight it can (the lighter one on a tie), so Home, Plan and the next workout agree. Reps stay.
+ * Returns { targets, zeroed (targets changed), runs: [] }.
+ */
+export function upgrade1185({ targets, rules, plan }) {
+  const next = JSON.parse(JSON.stringify(targets || {}));
+  let moved = 0;
+  for (const [id, t] of Object.entries(next)) {
+    const ex = plan && plan.exercises ? plan.exercises[id] : null;
+    if (!t || t.weight == null || !ex) continue;
+    const w = snapLoad(rules, ex, t.weight);
+    if (w !== t.weight) { t.rackFrom = t.weight; t.weight = w; moved += 1; }
+  }
+  return { targets: next, zeroed: moved, runs: [] };
+}
+
+const UPGRADES = [{ version: '1.18.1', run: upgrade1181 }, { version: '1.18.5', run: upgrade1185 }];
 
 /**
  * Run each upgrade newer than the data on this device, once. Returns { zeroed, runs } (counts) when something ran,
@@ -47,11 +64,11 @@ export async function runUpgrades() {
     if (olderThan(from, APP_VERSION)) await kvSet('dataVersion', APP_VERSION);
     return null;
   }
-  const { rules } = getData();
+  const { rules, plan } = getData();
   let zeroed = 0, runsChanged = 0;
   for (const u of due) {
     const [targets, runs] = await Promise.all([getTargets(), getRuns()]);
-    const out = u.run({ targets, runs, rules });
+    const out = u.run({ targets, runs, rules, plan });
     if (out.zeroed) await setTargets(out.targets);
     for (const r of out.runs) await putRun(r);
     zeroed += out.zeroed; runsChanged += out.runs.length;

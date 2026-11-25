@@ -4,7 +4,8 @@
 // with one session shown at a time (Cameron, Nov 22: "too busy and requires too much scrolling", picked option B).
 // A computer keeps every card on one page in two columns. Nothing here changes the plan or a target.
 
-import { el } from './ui.js';
+import { el, showModal, closeModal } from './ui.js';
+import { projectExercise } from './projection.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
 import { TAGS, thread } from './coach.js';
 import { countsFor } from './runs.js';
@@ -61,7 +62,7 @@ function thisWeekCard(plan, settings, sessions, runs, today, week, onPick) {
   return el('div', { class: 'card', id: 'plan-week' }, [el('h3', {}, `Week ${week}, day by day`), ...rows]);
 }
 
-function sessionCard(plan, s, targets, restAdjust) {
+function sessionCard(plan, s, targets, restAdjust, onEx) {
   const adj = restAdjust || {};
   const whole = adj[`session:${s.id}`] || 0;
   const rows = [];
@@ -85,7 +86,8 @@ function sessionCard(plan, s, targets, restAdjust) {
       const baseRest = it.restSeconds || b.roundRestSeconds || 0;
       const d = (adj[it.exercise] || 0) + whole;
       const rest = baseRest ? `${baseRest + d} s rest${d ? ` (${d > 0 ? '+' : ''}${d} from check-ins)` : ''}` : '';
-      rows.push(el('tr', { 'data-ex': it.exercise }, [
+      const tap = onEx ? () => onEx(it.exercise) : null;
+      rows.push(el('tr', { 'data-ex': it.exercise, ...(tap ? { class: 'tappable', role: 'button', tabindex: '0', onclick: tap, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tap(); } } } : {}) }, [
         el('td', {}, [el('div', {}, ex.name), rest ? el('div', { class: 'muted small' }, rest) : null]),
         el('td', { class: 'num' }, `${it.sets ? it.sets + ' × ' : ''}${it.reps ? repsText(it.reps) : (ex.timed ? 'hold' : '')}`),
         el('td', { class: 'num' }, t && t.weight != null ? [`${fmtWeight(t.weight)} lb`, t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : null] : el('span', { class: 'muted' }, '–'))
@@ -95,7 +97,8 @@ function sessionCard(plan, s, targets, restAdjust) {
   return el('div', { class: 'card plan-session', 'data-session': s.id }, [
     el('div', { class: 'row' }, [el('h2', { style: 'margin:0' }, s.name), el('span', { class: 'muted' }, `${s.day} · about ${s.plannedMinutes} min`)]),
     s.goal ? el('p', { class: 'muted', style: 'margin:6px 0 0' }, s.goal) : null,
-    el('table', { class: 'plan-table' }, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Sets × reps'), el('th', { class: 'num' }, 'Next')]), ...rows])
+    el('table', { class: 'plan-table' }, [el('tr', {}, [el('th', {}, 'Exercise'), el('th', { class: 'num' }, 'Sets × reps'), el('th', { class: 'num' }, 'Next')]), ...rows]),
+    onEx ? el('p', { class: 'muted small', style: 'margin:8px 0 0' }, 'Tap an exercise to see where it could be by week 12.') : null
   ]);
 }
 
@@ -214,7 +217,7 @@ export function renderPlan(view, data, opts = {}) {
     weeksCard(plan, weekNumber(today, settings.startDate)),
     el('div', { class: 'plan-pair' }, [thisWeekCard(plan, settings, sessions, runs, today, week), goalsCard(goals)]),
     el('h2', { class: 'section-title' }, 'Sessions'),
-    ...plan.sessions.map(s => sessionCard(plan, s, targets, settings.restAdjust)),
+    ...plan.sessions.map(s => sessionCard(plan, s, targets, settings.restAdjust, id => openProjection(data, id))),
     runsCard(plan)
   ]);
   const side = el('div', { class: 'plan-side' }, [checkinCard(data, opts)]);
@@ -254,7 +257,7 @@ function renderPhone(view, data, opts) {
       return el('button', { type: 'button', class: 'plan-chip' + (id === pick ? ' on' : ''), 'data-pick': id, 'aria-pressed': String(id === pick), onclick: () => go('sessions', id) }, s ? s.name.split(':')[0] : 'Runs');
     })));
     const s = plan.sessions.find(x => x.id === pick);
-    pane.append(s ? sessionCard(plan, s, targets, settings.restAdjust) : runsCard(plan));
+    pane.append(s ? sessionCard(plan, s, targets, settings.restAdjust, id => openProjection(data, id)) : runsCard(plan));
   } else if (ui.pane === 'goals') {
     pane.append(goalsCard(goals), weeksCard(plan, week));
   } else {
@@ -263,4 +266,88 @@ function renderPhone(view, data, opts) {
   view.appendChild(pane);
   const chat = document.getElementById('chat-list');
   if (chat) chat.scrollTop = chat.scrollHeight;
+}
+
+// ---- v1.18.5: tap an exercise for its 12-week projection (Cameron, Nov 24) ----
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs, kids) => {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, String(v));
+  for (const k of kids || []) if (k) n.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
+  return n;
+};
+const COLORS = { plan: '#c97f0a', slower: '#5b8fe0' };   // checked for colour-blind separation on the sheet's surface
+
+const tText = (p, t) => (!t ? '–' : (p.kind === 'reps' ? `${t.reps} reps` : `${fmtWeight(t.weight)} × ${t.reps}`));
+
+/** The line chart: the target weight (or reps) by week, on plan and slower, with the value at each end labelled. */
+function projChart(p) {
+  const val = t => (p.kind === 'reps' ? t.reps : t.weight);
+  const pts = [{ week: p.weeks[0].week - 1, plan: p.now, slower: p.now }, ...p.weeks];
+  const all = pts.flatMap(x => [val(x.plan), val(x.slower)]).filter(v => v != null);
+  if (!all.length) return null;
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const pad = Math.max(2, (hi - lo) * 0.12); lo -= pad; hi += pad;
+  const W = 340, H = 150, L = 8, R = 46, T = 10, B = 22;
+  const x = w => L + (w - pts[0].week) / (12 - pts[0].week) * (W - L - R);
+  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const line = k => pts.filter(q => val(q[k]) != null).map((q, i) => `${i ? 'L' : 'M'}${x(q.week).toFixed(1)},${y(val(q[k])).toFixed(1)}`).join(' ');
+  const g = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': p.kind === 'reps' ? 'Reps by week' : 'Target weight by week' });
+  for (const w of [pts[0].week, 7, 12].filter((w, i, a) => a.indexOf(w) === i && w >= pts[0].week)) {
+    g.appendChild(svgEl('line', { x1: x(w), x2: x(w), y1: T, y2: H - B, stroke: 'rgba(255,255,255,0.08)', 'stroke-width': 1 }));
+    g.appendChild(svgEl('text', { x: x(w), y: H - 6, 'text-anchor': w === pts[0].week ? 'start' : 'middle', fill: '#9aa1ad', 'font-size': 11 }, [w === pts[0].week ? 'now' : `wk ${w}`]));
+  }
+  const endP = val(p.end.plan), endS = val(p.end.slower);
+  for (const k of ['slower', 'plan']) {
+    g.appendChild(svgEl('path', { d: line(k), fill: 'none', stroke: COLORS[k], 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+    const v = val(p.end[k]);
+    g.appendChild(svgEl('circle', { cx: x(12), cy: y(v), r: 4, fill: COLORS[k], stroke: '#23272f', 'stroke-width': 2 }));
+  }
+  const yP = y(endP), yS = y(endS);
+  const apart = Math.abs(yP - yS) >= 13;
+  g.appendChild(svgEl('text', { x: x(12) + 8, y: (apart ? yP : Math.min(yP, yS) - 2) + 4, fill: '#f3f4f6', 'font-size': 12, 'font-weight': 700 }, [fmtWeight(endP)]));
+  if (apart) g.appendChild(svgEl('text', { x: x(12) + 8, y: yS + 4, fill: '#9aa1ad', 'font-size': 12 }, [fmtWeight(endS)]));
+  const v0 = val(p.now);
+  g.appendChild(svgEl('circle', { cx: x(pts[0].week), cy: y(v0), r: 4, fill: '#f3f4f6', stroke: '#23272f', 'stroke-width': 2 }));
+  return g;
+}
+
+function openProjection(data, exerciseId) {
+  const { plan, rules, settings, sessions, targets } = data;
+  const ex = plan.exercises[exerciseId] || { name: exerciseId };
+  const p = rules ? projectExercise({ plan, rules, settings, sessions, targets, exerciseId, today: data.today || new Date() }) : null;
+  const close = el('button', { class: 'btn', style: 'margin-top:12px', onclick: () => closeModal() }, 'Close');
+  if (!p || p.kind === 'self') {
+    const why = p && p.kind === 'self'
+      ? `The power clean moves when you go heavier on your doubles; the app does not raise it by itself, so there is nothing to project. Now: ${tText({ kind: 'weight' }, p.now)}.`
+      : 'No target yet, so there is nothing to project. It starts from the first session you log.';
+    showModal(el('div', { class: 'proj', id: 'proj-sheet' }, [el('h2', {}, ex.name), el('p', {}, why), close]));
+    return;
+  }
+  const e1 = t => (p.kind === 'weight' && t && t.e1rm ? `est. 1RM ${t.e1rm}` : '');
+  const bw = ex.equipment === 'weighted_bw' ? ' (bodyweight in)' : '';
+  const box = (label, t, sub) => el('div', {}, [el('small', {}, label), el('b', {}, tText(p, t)), el('div', { class: 'sub' }, sub)]);
+  const rows = p.weeks.filter(w => w.week === p.weeks[0].week || w.week % 2 === 0 || w.week === 7 || w.week === 12).filter((w, i, a) => a.findIndex(z => z.week === w.week) === i);
+  const chart = projChart(p);
+  showModal(el('div', { class: 'proj', id: 'proj-sheet' }, [
+    el('h2', {}, ex.name),
+    el('div', { class: 'muted small' }, `${p.sessionsLeft} sessions left in the 12 weeks`),
+    el('div', { class: 'proj-now' }, [
+      box('Now', p.now, e1(p.now) + (e1(p.now) ? bw : '')),
+      box('Week 12, on plan', p.end.plan, e1(p.end.plan))
+    ]),
+    chart,
+    chart ? el('div', { class: 'proj-key' }, [
+      el('span', {}, [el('i', { style: `background:${COLORS.plan}` }), 'On plan']),
+      el('span', {}, [el('i', { style: `background:${COLORS.slower}` }), 'Slower']),
+      el('span', {}, p.kind === 'reps' ? 'reps' : (ex.equipment === 'weighted_bw' ? 'lb added' : (ex.pair ? 'lb, both dumbbells' : 'lb')))
+    ]) : null,
+    el('table', { id: 'proj-table' }, [
+      el('tr', {}, [el('th', {}, 'Target after week'), el('th', {}, 'On plan'), el('th', {}, 'Slower')]),
+      ...rows.map(w => el('tr', {}, [el('td', {}, `${w.week}${w.phase === 'light' ? ' (lighter)' : (w.phase === 'heavy' && p.mainLift ? ' (heavier)' : '')}`), el('td', {}, tText(p, w.plan)), el('td', {}, tText(p, w.slower))]))
+    ]),
+    el('p', {}, `On plan: every set makes its reps at Solid or easier. Slower: every other session falls a rep short, so it moves about half as often. Both use the app's own rules, the same ones that set your targets after each session${p.mainLift ? ' (week 7 holds, weeks 8-11 start 5% heavier at 3-5 reps, week 12 is the retest)' : ''}. Real progress usually lands between the two${p.mainLift ? '' : ', and small lifts tend to slow down before the end'}.`),
+    close
+  ]));
 }

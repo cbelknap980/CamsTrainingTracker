@@ -1,7 +1,7 @@
 // builder.js - Session Builder: expands a plan session into a flat timeline of timed steps.
 // Pure functions, no DOM, no storage. Tested in tests/builder.test.mjs.
 
-import { effortText, effortToRpe, roundTo, equipmentFor } from './data.js';
+import { effortText, effortToRpe, roundTo, equipmentFor, easyLoad, snapLoad } from './data.js';
 import { effectiveTarget } from './progression.js';
 
 /**
@@ -134,7 +134,8 @@ function repRangeFor(ctx, item, ex) {
 function targetFor(ctx, exerciseId, repRange) {
   // v1.18.1 (rules R4 rule 7): a main lift's first heavy-week session shows its heavy start (5% over, 3 reps)
   const t = effectiveTarget({ rules: ctx.rules, plan: ctx.plan, settings: ctx.settings, exerciseId, target: ctx.targets[exerciseId], phaseId: ctx.phase.id });
-  let weight = t && t.weight != null ? t.weight : null;
+  // v1.18.5: a dumbbell weight the rack can't make (2 x 27.5) shows as the nearest one it can
+  let weight = t && t.weight != null ? snapLoad(ctx.rules, ctx.plan.exercises[exerciseId], t.weight) : null;
   let reps = t && t.reps != null ? t.reps : (repRange ? repRange[0] : null);
   if (repRange && reps != null) reps = Math.min(Math.max(reps, repRange[0]), repRange[1]);
   return { weight, reps };
@@ -267,12 +268,18 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
   }
   if (item.rampUp && target.weight != null && target.weight >= r.rampUp.skipBelowLb) {
     const bar = r.rampUp.barWeightLb;
-    r.rampUp.steps.forEach((rs, i) => {
-      const w = rs.fraction === 0 ? bar : Math.max(bar, roundTo(target.weight * rs.fraction, 5));
+    // v1.18.5: easy plate loads (135 = bar + a 45 a side, not 130); a step that lands on the one before it is left out
+    const steps = [];
+    for (const rs of r.rampUp.steps) {
+      const w = rs.fraction === 0 ? bar : easyLoad(r, target.weight * rs.fraction, target.weight);
+      if (!steps.length || steps[steps.length - 1].w !== w) steps.push({ ...rs, w });
+    }
+    steps.forEach((rs, i) => {
+      const w = rs.w;
       push(ctx, { kind: 'set', blockId: block.id, blockName: block.name, blockType: block.type, name: ex.name,
         exerciseId: item.exercise, setIndex: null, setCount: null, ramp: true,
         target: { weight: w, reps: rs.reps }, repRange: [rs.reps, rs.reps], effort: null,
-        effortText: rs.label ? `Ramp-up: ${rs.label.toLowerCase()}` : `Ramp-up ${i} of ${r.rampUp.steps.length - 1}`, rpeDefault: null,
+        effortText: rs.label ? `Ramp-up: ${rs.label.toLowerCase()}` : `Ramp-up ${i} of ${steps.length - 1}`, rpeDefault: null,
         cue: '', ...timedSet(ctx, ex, rs.reps, false, null), tips: [] });
       push(ctx, { kind: 'rest', blockId: block.id, blockName: block.name, blockType: block.type, name: 'Rest',
         seconds: r.rampUp.restSeconds, countdown: true, trimKind: 'rest' });

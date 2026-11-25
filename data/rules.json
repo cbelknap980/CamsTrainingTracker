@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.9.1",
+  "rulesVersion": "1.9.2",
   "increments": {
     "default": 5,
     "byExercise": {
@@ -75,7 +75,7 @@
     }
   },
   "rampUp": {
-    "description": "Ramp-up sets before a main lift. Fractions of the target weight; empty bar first.",
+    "description": "Ramp-up sets before a main lift. Fractions of the target weight; empty bar first. v1.18.5 (Cameron, Nov 24: \"Instead of 130 just do 135 (2x 45 plates)... for warmup it's needlessly too much set-up\"): each ramp-up weight is the nearest easy load, the bar plus 45s and at most one of easyPlatesLb a side (15 is 10 + 5, 35 is 25 + 10). A ramp-up that would reach the work weight takes the next easy load below it, and one that repeats the weight before it is left out. Work sets keep the lift's own steps.",
     "steps": [
       {
         "fraction": 0,
@@ -97,7 +97,9 @@
     ],
     "restSeconds": 60,
     "skipBelowLb": 95,
-    "barWeightLb": 45
+    "barWeightLb": 45,
+    "bigPlateLb": 45,
+    "easyPlatesLb": [5, 10, 15, 25, 35]
   },
   "trim": {
     "description": "Trim to fit, applied in order when the projected finish is past the cap. Cameron confirms before it applies.",
@@ -288,6 +290,11 @@
         "fraction": 0.26
       }
     }
+  },
+  "dumbbells": {
+    "description": "v1.18.5 (Cameron, Nov 24: \"gym does not have 27.5lb dumbells\"): a size in notAvailableLb is never asked for: a dumbbell target of that size (a two-dumbbell total counts per hand) moves to the nearest perHandStepLb step the gym has, the lighter one on a tie, and a logged set at that size is flagged for him to check.",
+    "perHandStepLb": 5,
+    "notAvailableLb": [27.5]
   },
   "dumbbellPairs": {
     "description": "Exercises marked pair in plan.json use two dumbbells. Their weights are stored, shown and logged as the total of both; the weight jump is this many times the dumbbell jump so each hand moves one step.",

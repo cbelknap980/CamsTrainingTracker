@@ -5,7 +5,7 @@
 // read against its planned sets; a flat session is a miss at the target weight, or a Hard or Maxed set when
 // rules.stall.flatAtRpe says so; rules.stall.sessionsBeforeDrop flat sessions in a row take dropFraction off.
 
-import { roundTo, fmtWeight } from './data.js';
+import { roundTo, fmtWeight, snapLoad } from './data.js';
 
 /** data/settings.json's bodyweight: the pull-up's percentages use it when Settings has none (R4 rule 8, never 0). */
 const DEFAULT_BODYWEIGHT = 165;
@@ -315,6 +315,8 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     const t0 = targets && targets[id];
     before[id] = t0 ? { weight: t0.weight != null ? t0.weight : null, reps: t0.reps != null ? t0.reps : null, stall: t0.stall || 0, ...(t0.heavyStart ? { heavyStart: { ...t0.heavyStart } } : {}) } : null;
     const inc = incrementFor(rules, id, ex);
+    // v1.18.5: a dumbbell target the rack can't make (2 x 27.5) is read, and kept, as the nearest one it can
+    if (cur.weight != null) cur.weight = snapLoad(rules, ex, cur.weight);
     const isBw = ex && ex.equipment === 'weighted_bw';
     const loadOf = s => (s.weight || 0) + (isBw ? bodyweight : 0);
 
@@ -442,7 +444,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
 
     const text = lineFor(outcome, { name, detail, stall: stallRules });
     say(`${text.text}${heavyNote}`, outcome.verdict, text.reason);
-    cur.weight = outcome.weight;
+    cur.weight = snapLoad(rules, ex, outcome.weight);
     cur.reps = outcome.reps;
     if (ex.mainLift) cur.stall = outcome.stall;
     if (outcome.key !== 'nothing') { cur.source = 'engine'; cur.updated = session.endedAt; cur.sessionId = session.id; }
@@ -534,5 +536,5 @@ export function estimateStart(rules, exerciseId, targets, settings, ex) {
   const step = se.roundTo || 5;
   const one = Math.max(step, roundTo(base * r.fraction, step));
   // v1.5: the fraction is per dumbbell; a two-dumbbell lift shows the total
-  return ex && ex.pair ? one * pairCount(rules) : one;
+  return snapLoad(rules, ex, ex && ex.pair ? one * pairCount(rules) : one);
 }
