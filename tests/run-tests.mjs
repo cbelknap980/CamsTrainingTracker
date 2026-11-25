@@ -17,6 +17,8 @@ import { pacingConfig, setObservation, setupObservation, learnRep, learnSetup, l
 import { runAdherence, runSummary } from '../js/progress.js';
 import { gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from '../js/logger.js';
 import { Player, fmtGym, speakable } from '../js/player.js';
+// v1.20
+import { entryG, dayEntries, dayTotal, lastDays, addDays, fmtQty, amountText, makeEntry, checkProtein, checkFood, recentRepeat, applyFoodEdit, foodsList, foodId, progressOf } from '../js/nutrition.js';
 // v1.18.1
 import { upgrade1181, upgrade1185, upgrade11810, olderThan } from '../js/upgrade.js';
 
@@ -1448,6 +1450,54 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   const off = JSON.parse(JSON.stringify(rules)); delete off.mainLiftTest.weekly.bigStep;
   const o = applyProgression({ session: mkSession(3, [1, 2, 3].map(() => ws('back_squat', 195, 5, 6, R))), targets: { back_squat: { ...SQ, stall: 0 } }, rules: off, plan, settings }).targets.back_squat;
   check('without bigStep: one step as before (200)', o.weight === 200, o);
+}
+
+{
+  console.log('\nv1.20: Nutrition tab (protein)');
+  const foods = JSON.parse(readFileSync(new URL('../data/foods.json', import.meta.url)));
+  const C = foods.check;
+  check('settings goal is 160 g (Cameron, Nov 25)', settings.proteinGoalG === 160, settings.proteinGoalG);
+  const byId = Object.fromEntries(foods.foods.map(f => [f.id, f]));
+  check('starting buttons from his photo and message: whey 24, Oikos 15, Pure Protein 20, think! 20, FitCrunch 16, Chomps 10',
+    byId.whey.g === 24 && byId.oikos.g === 15 && byId.pure_protein.g === 20 && byId.think_bar.g === 20 && byId.fitcrunch.g === 16 && byId.chomps.g === 10);
+  check('chicken and turkey are a serving of ½ lb (half his 1 lb pack), canned chicken and rice listed, all est. ones flagged as estimates',
+    byId.chicken.qty === 0.5 && byId.turkey.qty === 0.5 && byId.canned_chicken && byId.rice && ['chicken', 'turkey', 'canned_chicken', 'rice'].every(id => byId[id].source === 'estimate'));
+  check('every starting button passes its own number check', foods.foods.every(f => checkFood(f, C).ok), foods.foods.filter(f => !checkFood(f, C).ok).map(f => f.id));
+  check('ids are unique', new Set(foods.foods.map(f => f.id)).size === foods.foods.length);
+  const e = (id, date, at, servings = 1) => makeEntry(byId[id], { id: `${id}-${at}`, date, at, servings });
+  const log = [
+    e('whey', '2026-11-25', '2026-11-25T14:00:00.000Z', 2),
+    e('chicken', '2026-11-25', '2026-11-25T19:00:00.000Z', 1),
+    e('oikos', '2026-11-25', '2026-11-25T16:00:00.000Z', 1),
+    e('chomps', '2026-11-24', '2026-11-24T20:00:00.000Z', 1.5),
+    makeEntry({ name: 'Eggs', g: 18 }, { id: 'o1', date: '2026-11-23', at: '2026-11-23T13:00:00.000Z', servings: 1 })
+  ];
+  check('an entry is protein x servings: 2 scoops = 48 g, 1.5 sticks = 15 g', entryG(log[0]) === 48 && entryG(log[3]) === 15);
+  check('day total Nov 25 = 48 + 50 + 15 = 113', dayTotal(log, '2026-11-25') === 113, dayTotal(log, '2026-11-25'));
+  check('day list is in time order', dayEntries(log, '2026-11-25').map(x => x.foodId).join() === 'whey,oikos,chicken');
+  check('Other entry keeps its name and has no food id', log[4].foodId === null && log[4].name === 'Eggs' && dayTotal(log, '2026-11-23') === 18);
+  const days = lastDays(log, '2026-11-25', 160, 7);
+  check('last 7 days end today, oldest first, with totals and logged days', days.length === 7 && days[0].date === '2026-11-19' && days[6].date === '2026-11-25' && days[6].total === 113 && days[5].total === 15 && days.filter(d => d.logged).length === 3, days);
+  check('a day at the goal counts as hit, under it does not', lastDays([e('chicken', '2026-11-25', 'a', 3.2)], '2026-11-25', 160, 1)[0].hit === true && days[6].hit === false);
+  check('addDays crosses months (Dec 1 - 1 = Nov 30)', addDays('2026-12-01', -1) === '2026-11-30' && addDays('2026-11-30', 1) === '2026-12-01');
+  check('amounts in words: ½ lb, 1 lb, 1½ bars, 1 scoop, 3 sticks',
+    amountText(byId.chicken, 1) === '½ lb' && amountText(byId.chicken, 2) === '1 lb' && amountText(byId.pure_protein, 1.5) === '1½ bars' && amountText(byId.whey, 1) === '1 scoop' && amountText(byId.chomps, 3) === '3 sticks',
+    [amountText(byId.chicken, 1), amountText(byId.chicken, 2), amountText(byId.pure_protein, 1.5)]);
+  check('fmtQty: ¼ ½ ¾ 1½ 2', ['¼', '½', '¾', '1½', '2'].join() === [0.25, 0.5, 0.75, 1.5, 2].map(fmtQty).join(), [0.25, 0.5, 0.75, 1.5, 2].map(fmtQty));
+  // Cameron's rule (Nov 19): a number that looks wrong is held for a look
+  check('protein check refuses blank, text, 0, below 0 and over 300 g', ['', 'abc', 0, -5, 301].every(v => checkProtein(v, C).refuse));
+  check('protein check asks Save anyway over 120 g at once, over 80 g for one serving', checkProtein(130, C).warn && checkProtein(90, C, 'serving').warn && checkProtein(90, C).ok && checkProtein(40, C, 'serving').ok);
+  check('a food needs a name and a serving above 0', checkFood({ name: '', g: 20, qty: 1 }, C).refuse && checkFood({ name: 'Bar', g: 20, qty: 0 }, C).refuse && checkFood({ name: 'Bar', g: 20, qty: 1 }, C).ok);
+  const tap = e('whey', '2026-11-25', '2026-11-25T20:00:00.000Z');
+  check('the same food again inside a minute is a likely double tap', !!recentRepeat([tap], 'whey', '2026-11-25T20:00:40.000Z', C) && !recentRepeat([tap], 'whey', '2026-11-25T20:01:30.000Z', C) && !recentRepeat([tap], 'oikos', '2026-11-25T20:00:10.000Z', C));
+  const fixed = applyFoodEdit(log, { ...byId.whey, g: 25 }, '2026-11-25');
+  check('a fixed label changes today\'s entries of that food only (48 -> 50), other foods and days unchanged', entryG(fixed[0]) === 50 && entryG(fixed[1]) === 50 && fixed[3] === log[3]);
+  const mine = foodsList(null, foods);
+  check('no saved buttons: the starting list (a copy)', mine.length === foods.foods.length && mine[0] !== foods.foods[0]);
+  check('saved buttons win over the starting list', foodsList([{ id: 'x', name: 'X', g: 5 }], foods).length === 1);
+  check('a new button gets a unique id', foodId('Cottage cheese', mine) === 'cottage_cheese' && foodId('Whey', [{ id: 'whey' }]) === 'whey_2');
+  const pr = progressOf(113, 160);
+  check('progress: 113 of 160 = 71%, 47 to go; 170 is hit, 100% wide', pr.pct === 71 && pr.left === 47 && !pr.hit && progressOf(170, 160).hit && progressOf(170, 160).pct === 100, pr);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');

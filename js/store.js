@@ -95,6 +95,12 @@ export async function getRuns() {
 }
 
 // ---- v1.9: coach check-ins ----
+// ---- v1.20: the Nutrition tab. foodLog: every food he logged ({ id, date, at, foodId, name, g, qty, unit, units,
+// servings }, see nutrition.js); foods: his own buttons once he edits them (until then data/foods.json) ----
+export async function getFoodLog() { return (await kvGet('foodLog')) || []; }
+export async function setFoodLog(log) { return kvSet('foodLog', log).then(changed); }
+export async function getFoods() { return (await kvGet('foods')) || null; }
+export async function setFoods(list) { return kvSet('foods', list).then(changed); }
 export async function getCheckins() { return (await kvGet('checkins')) || []; }
 export async function addCheckin(c) { const all = await getCheckins(); all.push(c); await kvSet('checkins', all); changed(); return all; }
 export async function getCoachApplied() { return (await kvGet('coachApplied')) || []; }
@@ -201,7 +207,10 @@ export async function exportAll(appVersion, planVersion) {
     checkins: (await kvGet('checkins')) || [],
     coachApplied: (await kvGet('coachApplied')) || [],
     // v1.10: Garmin activities Cameron deleted from the log, so they are not added again
-    garminIgnored: (await kvGet('garminIgnored')) || []
+    garminIgnored: (await kvGet('garminIgnored')) || [],
+    // v1.20: the Nutrition tab's log and his own food buttons (null until he edits them)
+    foodLog: (await kvGet('foodLog')) || [],
+    foods: (await kvGet('foods')) || null
   };
 }
 
@@ -224,6 +233,9 @@ export async function importAll(backup, opts = {}) {
     if (backup.checkins) t.objectStore('kv').put(backup.checkins, 'checkins');
     if (backup.coachApplied) t.objectStore('kv').put(backup.coachApplied, 'coachApplied');
     if (backup.garminIgnored) t.objectStore('kv').put(backup.garminIgnored, 'garminIgnored');
+    // v1.20: a backup from before the Nutrition tab leaves the food log as it is
+    if (backup.foodLog) t.objectStore('kv').put(backup.foodLog, 'foodLog');
+    if ('foods' in backup) { if (backup.foods) t.objectStore('kv').put(backup.foods, 'foods'); else t.objectStore('kv').delete('foods'); }
     // a backup from before v1.5 has per-dumbbell numbers: clear the flag so the app asks again
     if (backup.pairTotals) t.objectStore('kv').put(backup.pairTotals, 'pairTotals'); else t.objectStore('kv').delete('pairTotals');
     t.oncomplete = resolve;

@@ -111,7 +111,7 @@ with sync_playwright() as p:
     check('v1.15 Targets today: every weighted lift of the day, dumbbell totals shown', all(page.locator(f'#targets-today tr[data-ex={x}]').count() == 1 for x in ('rdl', 'calf_raise', 'bss', 'leg_curl', 'curl', 'oh_tri_ext')) and '50 lb × 10' in page.locator('#targets-today tr[data-ex=curl]').inner_text() and 'two 25s' in page.locator('#targets-today tr[data-ex=curl]').inner_text() and page.locator('#targets-today tr[data-ex=ab_wheel]').count() == 0, tt.inner_text()[:400])
     page.screenshot(path=f'{SHOTS}/v115-targets-today.png')
     m = json.load(open(os.path.join(ROOT, 'manifest.webmanifest')))
-    check('manifest offers three long-press shortcuts', [s['url'] for s in m.get('shortcuts', [])] == ['./?go=today', './?go=runs', './?go=progress'])
+    check('manifest offers four long-press shortcuts (v1.20 adds Log protein)', [s['url'] for s in m.get('shortcuts', [])] == ['./?go=today', './?go=runs', './?go=progress', './?go=nutrition'])
 
     print('Workout')
     page.click('#start-workout'); page.wait_for_selector('.player')

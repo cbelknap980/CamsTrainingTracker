@@ -939,3 +939,74 @@ body.computer .modal .sheet.sheet-page { height: auto; max-height: 92vh; border-
 .plan-about h3:first-child { margin-top: 2px; }
 .plan-about p, .plan-about .lines li { font-size: var(--t-small); margin: 0 0 8px; }
 @media (prefers-reduced-motion: reduce) { .rw-chev svg, .plan-about summary::after { transition: none; } }
+
+/* v1.20 Nutrition tab: one big protein number, a grid of food buttons, the day's list, the last 7 days */
+.nut-day { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -4px -6px 4px; }
+.nut-day .nut-date { margin: 0; flex: 1; text-align: center; color: var(--text); display: flex; align-items: center; justify-content: center; gap: 4px; }
+.nut-arrow { width: 44px; height: 44px; flex: none; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 1.5rem; line-height: 1; cursor: pointer; }
+.nut-arrow.ghost { background: none; }
+.nut-arrow:active { background: var(--surface-3); }
+.nut-total { display: flex; align-items: baseline; gap: 6px; margin-top: 4px; }
+.nut-big { font-size: 3.4rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+.nut-unit { font-size: 1.4rem; font-weight: 700; }
+.nut-goal { border: 0; background: none; color: var(--muted); font: inherit; font-size: var(--t-small); padding: 6px 0; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+span.nut-goal { text-decoration: none; cursor: default; }
+.nut-bar { display: block; height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 10px 0 6px; }
+.nut-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--accent-grad); transition: width 0.35s var(--ease); }
+.nut-bar.hit > span { background: var(--good); }
+.nut-bar.small { height: 6px; margin: 8px 0 0; }
+.nut-left { margin: 0; font-weight: 650; font-size: var(--t-small); }
+.nut-left.hit { color: var(--good); }
+.nut-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.nut-head h3 { margin: 0; }
+.nut-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.nut-food { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 80px; padding: 10px 6px; border: 0; border-radius: 14px; background: var(--surface-2); color: var(--text); font: inherit; text-align: center; cursor: pointer; box-shadow: 0 0 0 1px var(--edge) inset; transition: transform 0.12s var(--ease), background 0.15s; }
+.nut-food:active { transform: scale(0.95); background: var(--surface-3); }
+.nut-food b { font-size: 0.84rem; font-weight: 650; line-height: 1.15; }
+.nut-food .nut-g { font-size: 1.05rem; font-weight: 800; color: var(--accent); }
+.nut-food small { font-size: 0.7rem; line-height: 1.1; }
+.nut-food.other { background: none; box-shadow: 0 0 0 1.5px var(--line) inset; color: var(--muted); }
+.nut-food.other .ico svg { width: 22px; height: 22px; }
+.nut-est-note { font-size: var(--t-label); margin: 10px 0 0; }
+.nut-list .swipe-wrap, .nut-list > .nut-row { border-top: 1px solid var(--line); }
+.nut-list .swipe-wrap:first-child, .nut-list > .nut-row:first-child { border-top: 0; }
+.nut-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 0; background: var(--surface-1); }
+.nut-row.tappable { cursor: pointer; }
+.nut-time { width: 62px; flex: none; color: var(--muted); font-size: var(--t-label); }
+.nut-name { flex: 1; min-width: 0; font-weight: 600; font-size: var(--t-small); }
+.nut-name small { display: block; font-weight: 500; font-size: var(--t-label); }
+.nut-row-g { font-size: 1rem; white-space: nowrap; }
+.nut-week-sum { font-size: var(--t-small); margin: -4px 0 10px; }
+.nut-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.nut-daycol { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 0; background: none; color: var(--text); font: inherit; padding: 4px 0; border-radius: 10px; cursor: pointer; min-height: 44px; }
+.nut-daycol.on { background: var(--surface-2); }
+.nut-daynum { font-size: 0.7rem; font-weight: 650; color: var(--muted); }
+.nut-daycol.hit .nut-daynum { color: var(--good); }
+.nut-daybar { position: relative; width: 100%; max-width: 30px; height: 70px; border-radius: 7px; background: var(--surface-2); overflow: hidden; }
+.nut-daycol.on .nut-daybar { background: var(--surface-3); }
+.nut-daybar > span { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(245, 165, 36, 0.55); }
+.nut-daycol.hit .nut-daybar > span { background: var(--good); }
+.nut-daybar::after { content: ""; position: absolute; left: 0; right: 0; bottom: var(--goal); border-top: 1.5px dashed rgba(255, 255, 255, 0.45); }
+.nut-dayname { font-size: var(--t-label); color: var(--muted); font-weight: 650; }
+.nut-daycol.on .nut-dayname { color: var(--accent); }
+.nut-home { display: block; width: 100%; text-align: left; border: 0; color: var(--text); font: inherit; cursor: pointer; padding: 12px 16px; }
+.nut-home-row { display: flex; align-items: baseline; gap: 8px; }
+.nut-home-label { flex: 1; font-weight: 650; color: var(--muted); font-size: var(--t-small); }
+.nut-home-num { font-size: var(--t-small); color: var(--muted); }
+.nut-home-num b { font-size: 1.15rem; color: var(--text); }
+.nut-home.hit .nut-home-num b { color: var(--good); }
+.nut-home-go { color: var(--muted); font-size: 1.2rem; }
+.nut-amounts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.nut-amounts button { flex: 1 0 auto; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--t-small); font-weight: 650; cursor: pointer; }
+.nut-amounts button.on { background: var(--accent); color: var(--accent-ink); }
+.nut-sheet-sum { font-weight: 700; margin: 4px 0 12px; }
+.nut-msg { color: var(--accent); font-weight: 650; font-size: var(--t-small); margin: 4px 0 10px; }
+.nut-sheet input[type="text"] { text-align: left; }
+.nut-sheet .btn + .btn { margin-top: 8px; }
+.nut-serving { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.nut-keep { display: flex; align-items: center; text-transform: none; letter-spacing: 0; font-size: var(--t-small); color: var(--text); font-weight: 500; margin: 0 0 8px; cursor: pointer; }
+.nut-foods-list { margin-bottom: 12px; }
+.nut-foods-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 52px; padding: 8px 0; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.nut-foods-row small { display: block; color: var(--muted); font-size: var(--t-label); }
+body.computer .nut-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.nut-row.swipeable { position: relative; transition: transform 0.22s var(--ease); }
