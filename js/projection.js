@@ -7,7 +7,7 @@
 // Solid, two reps a session), "steady" (last set Hard, one rep) and "struggle" (every other session a rep short).
 // Pure functions, no DOM, no storage.
 
-import { applyProgression, effectiveTarget, epley, bodyweightOf, isExcluded, weeklyFor, incrementFor } from './progression.js';
+import { applyProgression, targetRepBounds, effectiveTarget, epley, bodyweightOf, isExcluded, weeklyFor, incrementFor } from './progression.js';
 import { weekNumber, phaseForWeek, parseISODate, toISODate, snapLoad, roundEst } from './data.js';
 
 const SOLID = 8;
@@ -67,7 +67,8 @@ function run({ plan, rules, settings, exerciseId, target, occ, sc }) {
     const range = rangeFor(rules, ex, o.item, ph.id);
     const t = effectiveTarget({ rules, plan, settings, exerciseId, target: targets[exerciseId], phaseId: ph.id }) || {};
     let reps = t.reps != null ? t.reps : (range ? range[0] : null);
-    if (range && reps != null) reps = Math.min(Math.max(reps, range[0]), range[1]);
+    const b = targetRepBounds(rules, ex, range, t);                       // v1.18.15: an accessory may run past its range
+    if (b && reps != null) reps = Math.min(Math.max(reps, b[0]), b[1]);
     // a lift done twice a week shows the week's first session, so the first column is the next time it comes round
     if (!lifted[o.week]) lifted[o.week] = { weight: t.weight != null ? t.weight : null, reps: reps != null ? reps : null };
     let n = o.item.sets || o.block.rounds || 3;

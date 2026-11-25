@@ -108,6 +108,17 @@ export function keepsOwnTarget(target, sessions, exerciseId) {
   return String(target.updated) >= last;
 }
 
+/**
+ * v1.18.15 (audit Nov 25, approved by Cameron): an adjustment that says which data it was worked out from (basedOn, the
+ * end of the latest session of that lift it saw) is out of date once a later session of the lift is saved: its weight
+ * and reps are left out so an old coach file can't undo a newer result. Adjustments with no basedOn apply as before.
+ */
+export function staleAdjustment(a, sessions) {
+  if (!a || !a.exerciseId || !a.basedOn) return false;
+  const since = String(a.basedOn);
+  return (sessions || []).some(s => String(s.endedAt || s.startedAt || '') > since && (s.sets || []).some(st => st.exerciseId === a.exerciseId && st.done && !st.skipped && !st.ramp));
+}
+
 /** Coach file adjustments not applied yet, valid ones only. */
 export function pendingAdjustments(coachFile, appliedIds, plan) {
   const done = new Set(appliedIds || []);

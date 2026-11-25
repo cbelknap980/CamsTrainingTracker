@@ -79,4 +79,4 @@ The coach review writes `coach.json` to the same private repo as `tracker-data.j
 }
 ```
 
-`weight` and `reps` set the next target. `restDelta` sets that lift's (or the whole session's) rest offset from the plan in seconds, held to ±45. Adjustments only nudge; changes to exercises, sets or sessions go through a plan revision in `data/plan.json`.
+`weight` and `reps` set the next target. v1.18.15: an adjustment may carry `basedOn`, the end time of the latest session of that lift the review read; once a later session of that lift is saved, its weight and reps are left out, so an old coach file can't undo a newer result. `restDelta` sets that lift's (or the whole session's) rest offset from the plan in seconds, held to ±45. Adjustments only nudge; changes to exercises, sets or sessions go through a plan revision in `data/plan.json`.

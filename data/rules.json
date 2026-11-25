@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.13",
+  "rulesVersion": "1.14",
   "increments": {
     "description": "v1.18.10 (Cameron, Nov 25: \"Smallest increment for these types of weights should be 5lb\"): every step is 5 lb or more. The strict press stepped 2.5 lb (92.5 needs 1.25 lb plates); it now steps 5 like everything else.",
     "default": 5,
@@ -34,7 +34,8 @@
     "maxGain": { "main": 0.2, "accessory": 0.35 }
   },
   "lastSetRating": {
-    "description": "v1.18.7 (Cameron, Nov 24: \"What about other lifts too. You should be taking into account how i rates the... Last set\"): the effort picked on the last work set of a lift stands for the lift. Earlier sets the timer logged with no effort picked no longer hold the target (their guessed effort is ignored); an unrated last set still holds it. Accessories move by that rating: Easy (up to easyUpTo) adds a weight step now with reps at the bottom of the range, Solid (up to solidUpTo) adds solidReps reps, Hard or Maxed adds one rep as before, and a missed rep adds at most one. The top of the range still steps the weight. Week 2 no longer holds accessory weights. Main lifts keep rules R5, judged on the sets he rated.",
+    "description": "v1.18.7 (Cameron, Nov 24: \"What about other lifts too. You should be taking into account how i rates the... Last set\"): the effort picked on the last work set of a lift stands for the lift. Earlier sets the timer logged with no effort picked no longer hold the target (their guessed effort is ignored); an unrated last set still holds it. Accessories move by that rating: Easy (up to easyUpTo) adds a weight step now with reps at the bottom of the range, Solid (up to solidUpTo) adds solidReps reps, Hard or Maxed adds one rep as before, and a missed rep adds at most one. The top of the range still steps the weight. Week 2 no longer holds accessory weights. Main lifts keep rules R5, judged on the sets he rated. v1.18.15 (audit Nov 25, approved by Cameron): unratedHeavierFollows: with the last set unrated, every planned set done heavier than the target at the target reps or more moves the target to the weight he used, reps unchanged.",
+    "unratedHeavierFollows": true,
     "decides": true,
     "easyUpTo": 6.9,
     "solidUpTo": 8.7,
@@ -43,6 +44,19 @@
   "accessoryRule": {
     "description": "Add reps up to the top of the range first, then the smallest weight jump for that equipment.",
     "repsFirst": true
+  },
+  "stallNote": {
+    "description": "v1.18.15 (audit Nov 25, approved by Cameron): a weekly main lift that asked for the same weight and reps this many sessions in a row (light week not counted) gets a note on Home: keep going, or one rep fewer (one step lighter when the range has no room), which the weekly rule builds back. The weight never drops on its own.",
+    "sessions": 3
+  },
+  "accessoryJump": {
+    "description": "v1.18.15 (audit Nov 25, approved by Cameron): with 5 lb per dumbbell a jump can be 20-33% on small lifts (lateral raise 15 to 20 a hand), more than the bottom of the range can absorb. A weighted accessory steps its weight only when its sets predict (same effort, Epley) at least the bottom of the range minus minBelowBottom reps at the next weight, or when reps reach the top + extraTopReps; it then asks for the bottom of the range or the predicted reps, whichever is fewer. Until then reps keep climbing past the top. An Easy last set counts easyBonusReps more reps in the prediction. shortBy or more reps short at the target weight, or a session done lighter, backOffAfter sessions in a row: back one step at the reps made (or to the weight used). Growth is similar from about 6 to 30 reps taken close to failure (Schoenfeld et al. 2017, Lopez et al. 2021). on false restores the old rule.",
+    "on": true,
+    "minBelowBottom": 2,
+    "extraTopReps": 5,
+    "easyBonusReps": 2,
+    "shortBy": 2,
+    "backOffAfter": 2
   },
   "stall": {
     "description": "v1.18.1 (rules R4, approved by Cameron Nov 20 2026): a flat session falls short of the target reps at the target weight, or makes them with a set rated flatAtRpe or higher (9 = Hard or Maxed, 10 = Maxed only, null = only missed reps count). sessionsBeforeDrop flat sessions in a row take dropFraction off, rounded to the grid and at least one step, never below the empty bar (+0 on the pull-up); resetReps keep = same reps, bottom = bottom of the range. Only a target that moves clears the count. Was 2 sessions and 10% until v1.18.1. v1.18.2: flatAtRpe null, Cameron's pick on Nov 21 (\"Only missed reps\"): a Hard or Maxed day that made its reps holds the weight and does not count.",

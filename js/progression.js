@@ -294,8 +294,12 @@ export function cleanNext(target, sets, o) {
 export function accessoryNext(target, sets, o) {
   const { phase, range, planned, inc, maxRpe = 8 } = o;
   const [lo, hi] = range;
-  const cur = { weight: target.weight == null ? null : target.weight, reps: target.reps == null ? lo : target.reps };
-  const out = (verdict, key, extra) => ({ ...cur, reps: clampTo(cur.reps, range), verdict, key, ...(extra || {}) });
+  // v1.18.15 (audit Nov 25, approved by Cameron): rules.accessoryJump. A weighted accessory's reps may run past the top
+  // of the range (to hi + extraTopReps) until the next weight is reachable, and sit under the bottom just after a jump.
+  const J = o.jump || null;
+  const bounds = o.bounds || range;
+  const cur = { weight: target.weight == null ? null : target.weight, reps: target.reps == null ? lo : target.reps, short: target.short || 0 };
+  const out = (verdict, key, extra) => ({ ...cur, reps: clampTo(cur.reps, cur.weight == null || !inc ? range : bounds), verdict, key, lo0: lo, ...(extra || {}) });
   const bw = cur.weight == null || !inc;
   const good = sets.filter(s => s && okNum(s.reps) && (bw || okNum(s.weight)));
   if (!good.length) return out('hold', 'nothing');
@@ -317,14 +321,111 @@ export function accessoryNext(target, sets, o) {
     return out(cur.reps > (target.reps || 0) ? 'up' : 'hold', 'bodyweight', { allTop, lo, hi });
   }
   const W = cur.weight;
-  const S = readSession(good, planned, W, clampTo(cur.reps, range), range);
-  if (S.kind === 'lighter') return out('hold', 'lighter', { W });
+  const R = clampTo(cur.reps, bounds);                                // under the bottom only just after a jump (bounds)
+  const S = readSession(good, planned, W, R, [Math.min(lo, bounds[0]), Math.max(hi, bounds[1])]);
+  if (S.kind === 'lighter') {
+    // v1.18.15: two sessions in a row done lighter than the target: the target comes down to the weight he used
+    const used = good.filter(s => s.weight < W).map(s => s.weight).sort((a, b) => a - b);
+    if (J && used.length) {
+      cur.short += 1;
+      if (cur.short >= (J.backOffAfter || 2)) {
+        cur.weight = used[Math.floor((used.length - 1) / 2)];
+        cur.reps = Math.min(...good.filter(s => s.weight === cur.weight).map(s => s.reps));
+        cur.short = 0;
+        return out('drop', 'backOffLighter', { W });
+      }
+      return out('hold', 'lighter', { W, short: cur.short });
+    }
+    return out('hold', 'lighter', { W });
+  }
   cur.weight = S.weight;
   if (week2) { cur.reps = Math.min(S.reps + (clean ? 1 : 0), hi); return out(cur.weight > W ? 'up' : 'hold', 'week2', { W }); }
-  if (S.full >= planned && S.reps >= hi) { cur.weight = stepUp(cur.weight, inc); cur.reps = lo; return out('up', 'top', { W, lo, hi }); }
-  if (easy && S.full >= planned && !S.missed) { cur.weight = stepUp(cur.weight, inc); cur.reps = lo; return out('up', 'easyUp', { W, lo, hi }); }
-  cur.reps = Math.min(S.reps + (S.missed ? 1 : more), hi);
+  // v1.18.15: 2+ reps short of the target at the target weight, two sessions in a row: back one step, at the reps made
+  const atW = good.filter(s => s.weight === W);
+  const farShort = J && S.kind === 'target' && atW.length && Math.min(...atW.map(s => s.reps)) <= R - (J.shortBy || 2);
+  if (farShort) {
+    cur.short += 1;
+    if (cur.short >= (J.backOffAfter || 2)) {
+      cur.weight = Math.max(inc, stepDown(W, inc));
+      cur.reps = Math.min(...atW.map(s => s.reps));
+      cur.short = 0;
+      return out('drop', 'backOff', { W, R });
+    }
+    cur.reps = R;
+    return out('hold', 'farShort', { W, R, short: cur.short });
+  }
+  cur.short = 0;
+  // the next weight: only when the sets just done say he can make at least (bottom - minBelowBottom) reps there; the
+  // reps it asks for are the bottom of the range, or fewer when that is what the numbers predict (lateral raises 15 -> 20)
+  const jumpTo = (reps, bonus) => {
+    const N = stepUp(cur.weight, inc);
+    if (!J) return { ok: true, weight: N, reps: lo };
+    const p = Math.floor((cur.weight * (30 + reps + (bonus || 0))) / N - 30 + EPS);
+    const top = hi + (J.extraTopReps || 0);
+    const ok = p >= lo - (J.minBelowBottom || 0) || reps >= top;
+    return { ok, weight: N, reps: Math.max(1, Math.min(lo, p)), top };
+  };
+  const full = S.full >= planned;
+  if (full && S.reps >= hi) {
+    const j = jumpTo(S.reps, easy ? (J && J.easyBonusReps) || 0 : 0);
+    if (j.ok) { cur.weight = j.weight; cur.reps = j.reps; return { ...out('up', 'top', { W, lo, hi, after: j.reps }), reps: j.reps, jumped: !!J && j.reps < lo, lo0: lo }; }
+    cur.reps = Math.min(S.reps + more, j.top);
+    return out('hold', 'pastTop', { W, lo, hi, next: j.weight });
+  }
+  if (easy && full && !S.missed) {
+    const j = jumpTo(S.reps, (J && J.easyBonusReps) || 0);
+    if (j.ok) { cur.weight = j.weight; cur.reps = j.reps; return { ...out('up', 'easyUp', { W, lo, hi, after: j.reps }), reps: j.reps, jumped: !!J && j.reps < lo, lo0: lo }; }
+  }
+  // an Easy last set whose weight can't move yet adds solidReps + 1 reps (never fewer than Solid)
+  const add = S.missed ? 1 : (easy && J ? (L.solidReps || 2) + 1 : more);
+  cur.reps = Math.min(S.reps + add, J ? hi + (J.extraTopReps || 0) : hi);
   return out(cur.weight > W ? 'up' : 'hold', more > 1 && !S.missed ? 'solidMore' : 'oneMore', { W });
+}
+
+/**
+ * v1.18.15 (audit Nov 25, approved by Cameron): a weekly main lift that has asked for the same weight and reps for
+ * rules.stallNote.sessions sessions in a row (Hard days hold without counting toward a reset, so nothing else would
+ * say so). Returns [{ exerciseId, name, weight, reps, sessions, offer: { weight, reps } }]: the offer is one rep fewer
+ * when the range allows it, else one step lighter. A lift he answered at this target (settings.stallNoteSeen[id] ===
+ * 'WxR') is left out. Light-week sessions are skipped, not counted.
+ */
+export function stalledLifts({ sessions, targets, plan, rules, settings }) {
+  const cfg = rules && rules.stallNote;
+  const w = rules && rules.mainLiftTest && rules.mainLiftTest.weekly;
+  if (!cfg || !cfg.sessions || !w || !Array.isArray(w.exercises)) return [];
+  const seen = (settings && settings.stallNoteSeen) || {};
+  const out = [];
+  for (const id of w.exercises) {
+    const t = targets && targets[id];
+    const ex = plan.exercises[id];
+    if (!ex || !t || t.weight == null || t.reps == null || isExcluded(rules, id, ex)) continue;
+    if (seen[id] === `${t.weight}x${t.reps}`) continue;
+    const runs = (sessions || [])
+      .filter(s => !(s.phase && s.phase.id === 'light'))
+      .map(s => ({ s, work: (s.sets || []).filter(st => st.exerciseId === id && st.done && !st.skipped && !st.ramp && !st.baseline && !st.retest && st.target) }))
+      .filter(x => x.work.length)
+      .sort((a, b) => String(b.s.endedAt || b.s.startedAt).localeCompare(String(a.s.endedAt || a.s.startedAt)))
+      .slice(0, cfg.sessions);
+    if (runs.length < cfg.sessions) continue;
+    if (!runs.every(x => x.work[0].target.weight === t.weight && x.work[0].target.reps === t.reps)) continue;
+    const range = runs[0].work[0].repRange || [t.reps, t.reps];
+    const inc = incrementFor(rules, id, ex);
+    const offer = t.reps - 1 >= range[0] ? { weight: t.weight, reps: t.reps - 1 } : { weight: Math.max(0, stepDown(t.weight, inc)), reps: t.reps };
+    out.push({ exerciseId: id, name: ex.name, weight: t.weight, reps: t.reps, sessions: runs.length, offer });
+  }
+  return out;
+}
+
+/**
+ * v1.18.15: the reps a target may ask for on this lift: the plan's range, or for a weighted accessory under
+ * rules.accessoryJump, from half the bottom (just after a big dumbbell jump) to the top + extraTopReps.
+ */
+export function targetRepBounds(rules, ex, range, target) {
+  const J = rules && rules.accessoryJump;
+  if (!range || !J || !J.on || !ex || ex.mainLift || ex.timed || ex.equipment === 'bodyweight') return range;
+  // under the bottom only at the weight a jump just set (another session's lighter range still shows its own bottom)
+  const low = target && target.jumpedTo != null && target.jumpedTo === target.weight ? Math.max(1, Math.ceil(range[0] / 2)) : range[0];
+  return [low, range[1] + (J.extraTopReps || 0)];
 }
 
 /**
@@ -372,7 +473,7 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     const cur = next[id] || {};
     // null: the lift had no target going in (a re-run then starts it from what was logged, as the save did)
     const t0 = targets && targets[id];
-    before[id] = t0 ? { weight: t0.weight != null ? t0.weight : null, reps: t0.reps != null ? t0.reps : null, stall: t0.stall || 0, ...(t0.heavyStart ? { heavyStart: { ...t0.heavyStart } } : {}) } : null;
+    before[id] = t0 ? { weight: t0.weight != null ? t0.weight : null, reps: t0.reps != null ? t0.reps : null, stall: t0.stall || 0, ...(t0.short ? { short: t0.short } : {}), ...(t0.jumpedTo != null ? { jumpedTo: t0.jumpedTo } : {}), ...(t0.heavyStart ? { heavyStart: { ...t0.heavyStart } } : {}) } : null;
     const inc = incrementFor(rules, id, ex);
     // v1.18.5: a dumbbell target the rack can't make (2 x 27.5) is read, and kept, as the nearest one it can
     if (cur.weight != null) cur.weight = snapLoad(rules, ex, cur.weight);
@@ -493,6 +594,25 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     let judged = done;
     if (lastRule && lastWork && !lastWork.unconfirmed && done.some(s => s.unconfirmed)) judged = done.map(s => (s.unconfirmed ? { ...s, unconfirmed: false, rpe: null } : s));
     const unrated = judged.filter(s => s.unconfirmed).length;
+    // v1.18.15 (audit Nov 25, approved by Cameron: his curl held at 50 after 60 x 10 on every set): with the last set
+    // unrated, a lift done heavier than its target on every planned set, with the target reps or more, takes the weight
+    // he used and keeps the reps. Nothing is added on a guessed effort.
+    if (unrated && lastRule && lastRule.unratedHeavierFollows && cur.weight != null && !ex.timed) {
+      const R0 = clampTo(cur.reps != null ? cur.reps : 0, targetRepBounds(rules, ex, (planned.find(s => s.repRange) || {}).repRange || [0, Infinity], cur) || [0, Infinity]);
+      const all = judged.filter(usable);
+      const heavier = all.length >= planned.length && all.length > 0 && all.every(s => s.weight > cur.weight && s.reps >= R0);
+      if (heavier) {
+        const ws = all.map(s => s.weight).sort((a, b) => a - b);
+        const w = snapLoad(rules, ex, ws[Math.floor((ws.length - 1) / 2)]);
+        const from = cur.weight;
+        cur.weight = w;
+        if (ex.mainLift) cur.stall = 0;
+        cur.source = 'engine'; cur.updated = session.endedAt; cur.sessionId = session.id;
+        say(`${name}: ${detail}, heavier than the ${fmtWeight(from)} lb target on every set. The last set has no effort picked, so the weight follows what you used and the reps stay: next time ${fmtWeight(w)} lb x ${cur.reps}.${heavyNote}`, 'up', 'did more: weight follows, rate it to add reps');
+        next[id] = cur;
+        continue;
+      }
+    }
     if (unrated) {
       say(`${name}: ${detail}. ${unrated === 1 ? 'One set had' : `${unrated} sets had`} no effort picked, so the target stays the same next time.${heavyNote}`, 'hold', 'effort not rated');
       if (heavyNote) { cur.source = 'engine'; cur.updated = session.endedAt; cur.sessionId = session.id; }
@@ -505,7 +625,10 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     let outcome;
     if (isExcluded(rules, id, ex)) outcome = cleanNext(target, judged, opts);                                      // rule 9
     else if (ex.mainLift) outcome = mainLiftNext(target, judged, { ...opts, add: isBw ? bodyweightOf(settings) : 0, floor: ex.equipment === 'barbell' ? rules.rampUp.barWeightLb : 0, stall: stallRules, push: goalPushFor(rules, id, ex, settings, target) });
-    else outcome = accessoryNext(target, judged, { ...opts, lastSet: lastRule });                                   // rule 10
+    else {
+      const jr = rules.accessoryJump && rules.accessoryJump.on ? rules.accessoryJump : null;
+      outcome = accessoryNext({ ...target, short: cur.short || 0 }, judged, { ...opts, lastSet: lastRule, jump: jr, bounds: targetRepBounds(rules, ex, range, cur) });   // rule 10
+    }
     // R4 rule 13: the v1.19 all-out check goes here, on `outcome`, after these rules and before the target is written.
 
     const text = lineFor(outcome, { name, detail, stall: stallRules });
@@ -513,6 +636,8 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     cur.weight = snapLoad(rules, ex, outcome.weight);
     cur.reps = outcome.reps;
     if (ex.mainLift) cur.stall = outcome.stall;
+    else if (outcome.short != null) { if (outcome.short) cur.short = outcome.short; else delete cur.short; }
+    if (!ex.mainLift) { if (outcome.jumped) cur.jumpedTo = cur.weight; else if (cur.jumpedTo != null && (cur.weight !== cur.jumpedTo || cur.reps >= outcome.lo0)) delete cur.jumpedTo; }
     if (outcome.key !== 'nothing') { cur.source = 'engine'; cur.updated = session.endedAt; cur.sessionId = session.id; }
     next[id] = cur;
   }
@@ -533,7 +658,7 @@ function lineFor(o, { name, detail, stall }) {
     case 'unrated': return { text: `${name}: ${detail}. A set had no effort picked, so the target stays the same next time.`, reason: 'effort not rated' };
     case 'heavierTop': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target with every set at ${o.hi}, Solid or easier. ${nextTime}`, reason: 'lifted more, every set at the top' };
     case 'heavier': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target. ${nextTime}`, reason: 'lifted more than the target' };
-    case 'lighter': return { text: `${name}: ${detail}, lighter than the ${lb(o.W)} target or ended early. Same target next time.`, reason: 'lighter day: target holds' };
+    case 'lighter': return { text: `${name}: ${detail}, lighter than the ${lb(o.W)} target or ended early. Same target next time${o.short ? '; if the next one is lighter too, it comes down to what you used' : ''}.`, reason: 'lighter day: target holds' };
     case 'notAll': return { text: `${name}: ${detail}, a set was skipped or done lighter. Same target next time.`, reason: 'a set was skipped or done lighter' };
     case 'weekly': return { text: `${name}: ${detail}, every set made at Solid effort or easier. ${nextTime}${pushed}`, reason: o.pushed ? 'all sets made: a bigger step toward your goal' : 'all sets made, Solid or easier' };
     case 'heavierWeekly': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target with every set made, Solid or easier. ${nextTime}${pushed}`, reason: o.pushed ? 'lifted more: a bigger step toward your goal' : 'lifted more, every set made' };
@@ -554,6 +679,10 @@ function lineFor(o, { name, detail, stall }) {
     case 'reset': return o.atFloor
       ? { text: `${name}: ${detail}. ${o.resetAfter} flat sessions in a row, already at the lightest weight. ${stall.message || ''} Next time ${lb(o.weight)} x ${o.reps}.`.replace(/\s+/g, ' '), reason: 'flat sessions reached the limit' }
       : { text: `${name}: ${detail}. ${o.resetAfter} flat sessions in a row. ${stall.message || ''} Next time ${lb(o.weight)} x ${o.reps} (down from ${lb(o.W)}) and build back up.`.replace(/\s+/g, ' '), reason: 'flat sessions reached the limit' };
+    case 'pastTop': return { text: `${name}: ${detail}, at the top of the range. ${lb(o.next)} is too big a jump from here yet, so the reps keep climbing first. ${nextTime}`, reason: `reps first: ${lb(o.next)} is a big jump` };
+    case 'farShort': return { text: `${name}: ${detail}, 2 or more reps short of ${o.R} at ${lb(o.W)}. Same target next time; if it happens again it comes down a step.`, reason: 'well short of the reps' };
+    case 'backOff': return { text: `${name}: ${detail}, well short of ${o.R} at ${lb(o.W)} two sessions running. ${nextTime}`, reason: 'well short twice: one step down' };
+    case 'backOffLighter': return { text: `${name}: ${detail}, lighter than the ${lb(o.W)} target two sessions running, so the target comes down to what you used. ${nextTime}`, reason: 'done lighter twice: follows you' };
     case 'cleanFollows': return { text: `${name}: ${detail}. The target follows the weight you used: ${lb(o.weight)} next time.`, reason: 'follows the weight used' };
     case 'cleanHold': return { text: `${name}: ${detail}. The app never raises the clean; add weight yourself when every double is fast.`, reason: 'your call: raise when crisp' };
     case 'bodyweight': return o.allTop
