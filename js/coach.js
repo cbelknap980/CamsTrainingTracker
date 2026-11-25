@@ -92,6 +92,22 @@ export function replyFor(checkin, changes, plan) {
   return lines.join(' ');
 }
 
+/**
+ * v1.18.12: a target he set by hand since his last logged session of the lift (on the lift page, Home, the start page
+ * or Review) stays when the coach file has a new weight or reps for that lift, unless he saved it past a warning
+ * (flagged). True when the coach's weight and reps are left out; a rest change in the same adjustment still applies.
+ */
+export function keepsOwnTarget(target, sessions, exerciseId) {
+  if (!target || target.source !== 'you' || target.flagged || !target.updated) return false;
+  let last = '';
+  for (const s of sessions || []) {
+    if (!(s.sets || []).some(st => st.exerciseId === exerciseId && st.done && !st.skipped && !st.ramp)) continue;
+    const t = String(s.endedAt || s.startedAt || '');
+    if (t > last) last = t;
+  }
+  return String(target.updated) >= last;
+}
+
 /** Coach file adjustments not applied yet, valid ones only. */
 export function pendingAdjustments(coachFile, appliedIds, plan) {
   const done = new Set(appliedIds || []);

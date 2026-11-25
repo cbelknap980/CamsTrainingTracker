@@ -177,7 +177,7 @@ function nextCard(st, { ex, exerciseId, stored, place, canWrite, opts, draw, set
       const c = verdict();
       if (c.level === 'block') return;
       save.disabled = true;
-      const res = await opts.saveTarget(exerciseId, { weight: num(st.draftT.weight), reps: num(st.draftT.reps), week: nextWeek });
+      const res = await opts.saveTarget(exerciseId, { weight: num(st.draftT.weight), reps: num(st.draftT.reps), week: nextWeek, flagged: c.level === 'flag' });
       st.data = res.data; st.edit = null; st.draftT = null; draw(); haptic('done');
       const nt = st.data.targets[exerciseId] || {};
       toast(`${ex.name}: next time ${nt.weight != null ? `${wTxt(ex, nt.weight)} × ` : ''}${nt.reps}`, 5000, { action: 'Undo', onAction: async () => { const back = await res.undo(); if (st.root.isConnected) { st.data = back; draw(); } } });

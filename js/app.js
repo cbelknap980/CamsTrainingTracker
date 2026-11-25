@@ -18,7 +18,8 @@ import { importFromGarmin } from './garmin.js';
 import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
 import { renderPlan } from './plan-view.js';
 import { runUpgrades } from './upgrade.js';
-import { changesFor, replyFor, pendingAdjustments, withRest } from './coach.js';
+import { changesFor, replyFor, pendingAdjustments, withRest, keepsOwnTarget } from './coach.js';
+import { ownTargetFlagged } from './lift-goal.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp, effortChips } from './ui.js';
 import { weekRings, ringsCard } from './rings.js';
 import { flaggedGroups, applyNumberFix, rateSavedSet, impossibleNumber } from './sanity.js';
@@ -158,8 +159,13 @@ async function syncCoach(rerender) {
     if (r.file && (!cfg || cfg.role !== 'viewer')) {
       const done = await getCoachApplied();
       const todo = pendingAdjustments(r.file, done, D.plan);
+      const sessions = todo.length ? await getSessions() : [];
+      const kept = [];
       for (const a of todo) {
-        if (a.exerciseId && (a.weight != null || a.reps != null)) {
+        // v1.18.12: a target he set himself since his last session of the lift stays (unless he saved it past a warning)
+        const own = a.exerciseId && (a.weight != null || a.reps != null) && keepsOwnTarget((await getTargets())[a.exerciseId], sessions, a.exerciseId);
+        if (own) kept.push(a.exerciseId);
+        if (a.exerciseId && (a.weight != null || a.reps != null) && !own) {
           const patch = { source: 'coach', updated: new Date().toISOString() };
           // v1.18.10: a coach weight lands on a weight he can load too (92.5 -> 90)
           if (a.weight != null) patch.weight = snapLoad(D.rules, D.plan.exercises[a.exerciseId], Number(a.weight));
@@ -173,7 +179,12 @@ async function syncCoach(rerender) {
         }
         done.push(a.id); applied++;
       }
-      if (applied) { await setCoachApplied(done); toast(`Coach updated ${applied} ${applied === 1 ? 'thing' : 'things'}. See Plan.`, 3500); }
+      if (applied) {
+        await setCoachApplied(done);
+        const n = applied - kept.length;
+        const names = [...new Set(kept)].map(id => (D.plan.exercises[id] || { name: id }).name);
+        toast([n > 0 ? `Coach updated ${n} ${n === 1 ? 'thing' : 'things'}.` : '', names.length ? `Kept the target you set on ${names.join(', ')}.` : '', 'See Plan.'].filter(Boolean).join(' '), names.length ? 5000 : 3500);
+      }
     }
     if ((rerender || applied) && (currentTab === 'plan' || currentTab === 'home')) showTab(currentTab);
   } catch (e) { /* the coach file never stops the app */ }
@@ -726,7 +737,8 @@ function editTarget(id, ex, t, settings) {
     el('div', { class: 'btn-row' }, [
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Cancel'),
       el('button', { class: 'btn primary', onclick: async () => {
-        await setTarget(id, { weight: w.value === '' ? null : Number(w.value), reps: r.value === '' ? null : Number(r.value), source: 'you', updated: new Date().toISOString() });
+        const nw = w.value === '' ? null : Number(w.value), nr = r.value === '' ? null : Number(r.value);
+        await setTarget(id, { weight: nw, reps: nr, source: 'you', flagged: ownTargetFlagged({ rules: D.rules, plan: D.plan, settings, exerciseId: id, before: t, weight: nw, reps: nr }), updated: new Date().toISOString() });
         closeModal(); toast('Target updated'); renderHome();
       } }, 'Save')
     ])
@@ -838,7 +850,7 @@ async function previewSession(sessionRef, week) {
         for (const [id, w] of Object.entries(weights)) {
           if (w == null || estimated[id]) continue;
           const t = targets[id];
-          if (t && t.weight != null && t.weight !== w) await setTarget(id, { weight: w, source: 'you', updated: new Date().toISOString() });
+          if (t && t.weight != null && t.weight !== w) await setTarget(id, { weight: w, source: 'you', flagged: ownTargetFlagged({ rules: D.rules, plan: D.plan, settings: await getSettings(), exerciseId: id, before: t, weight: w, reps: t.reps }), updated: new Date().toISOString() });
         }
         startSession(session, week, withWeights());
       } }, 'Start workout'),
@@ -1156,6 +1168,7 @@ async function planData() {
   if (!canWrite && coachFile) {
     for (const a of pendingAdjustments(coachFile, await getCoachApplied(), D.plan)) {
       if (!a.exerciseId || (a.weight == null && a.reps == null)) continue;
+      if (keepsOwnTarget(targets[a.exerciseId], sessions, a.exerciseId)) continue; // v1.18.12: the phone keeps it too
       targets[a.exerciseId] = { ...(targets[a.exerciseId] || {}), ...(a.weight != null ? { weight: snapLoad(D.rules, D.plan.exercises[a.exerciseId], Number(a.weight)) } : {}), ...(a.reps != null ? { reps: Number(a.reps) } : {}), source: 'coach', pendingCoach: true };
     }
   }
@@ -1171,14 +1184,14 @@ async function renderPlanTab() {
 
 // v1.18.11 (Cameron, Nov 25: "Allow me to edit and override as an option if I want to push towards a goal"): the lift
 // page in Plan sets a lift's next target or its week-12 goal. Both come back with an undo for the toast.
-async function saveLiftTarget(id, { weight, reps, week }) {
+async function saveLiftTarget(id, { weight, reps, week, flagged }) {
   const before = (await getTargets())[id];
   const moved = !before || before.weight !== weight;
   // typed in for a heavier week whose 5% start has not been applied yet: it is that week's target, so it is not
   // raised 5% again when the session opens
   const ex = D.plan.exercises[id];
   const heavyNow = week && phaseForWeek(D.plan, week).id === 'heavy' && before && heavyStartDue(D.rules, id, ex, before, 'heavy');
-  await setTarget(id, { weight, reps, source: 'you', updated: new Date().toISOString(), ...(moved ? { stall: 0 } : {}), ...(heavyNow ? { heavyStart: { week, from: { weight: before.weight, reps: before.reps } } } : {}) });
+  await setTarget(id, { weight, reps, source: 'you', flagged: !!flagged, updated: new Date().toISOString(), ...(moved ? { stall: 0 } : {}), ...(heavyNow ? { heavyStart: { week, from: { weight: before.weight, reps: before.reps } } } : {}) });
   return {
     data: await renderPlanTab(),
     undo: async () => {
