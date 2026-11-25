@@ -5,7 +5,7 @@
 // Pure functions, no DOM, no storage.
 
 import { applyProgression, epley } from './progression.js';
-import { fmtWeight } from './data.js';
+import { fmtWeight, dumbbellOk } from './data.js';
 
 /**
  * v1.18: a number that cannot be right, refused where it is typed (the workout's Edit and fix sheets, Review): reps
@@ -36,6 +36,12 @@ export function numberFlag(st, ex, rules) {
   const minLoad = c.minLoadLb != null ? c.minLoadLb : 2.5;
   if (w != null && w < minLoad && ['dumbbell', 'machine', 'cable'].includes(ex.equipment)) {
     return { code: 'light', short: 'too light', text: w === 0 ? '0 lb on a lift that uses weight' : `${fmtWeight(w)} lb is lighter than any ${ex.equipment === 'dumbbell' ? 'dumbbell' : 'stack setting'}` };
+  }
+  // v1.18.5 (Cameron, Nov 24): a dumbbell weight no rack dumbbells make (55 on a curl is 2 x 27.5, and his gym has no
+  // 27.5s): he used something else, so it waits for him to say what
+  if (w != null && w > 0 && !dumbbellOk(rules, ex, w)) {
+    const per = ex.pair ? w / 2 : w;
+    return { code: 'dumbbell', short: 'no such dumbbell', text: ex.pair ? `${fmtWeight(w)} lb is 2 × ${fmtWeight(per)} lb, and the gym has no ${fmtWeight(per)} lb dumbbells` : `The gym has no ${fmtWeight(w)} lb dumbbell` };
   }
   if (st.reps != null && st.reps < 0) return { code: 'reps', short: 'below 0', text: `${st.reps} reps is below 0` };
   if (st.reps != null && !Number.isInteger(st.reps)) return { code: 'reps', short: 'part of a rep', text: `${st.reps} reps is not a whole number` };

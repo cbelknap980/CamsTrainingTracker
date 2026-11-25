@@ -1151,7 +1151,7 @@ async function renderPlanTab() {
   const [settings, targets, sessions, runs, checkins, coachFile, cfg] = await Promise.all([getSettings(), getTargets(), getSessions(), getRuns(), getCheckins(), kvGet('coach'), getSync()]);
   if (currentTab !== 'plan') return;
   const canWrite = !(cfg && cfg.role === 'viewer');
-  renderPlan(view, { plan: D.plan, goals: D.goals, settings, targets, sessions, runs, checkins, coachFile, today: new Date() }, { canWrite, onSend: sendCheckin });
+  renderPlan(view, { plan: D.plan, rules: D.rules, goals: D.goals, settings, targets, sessions, runs, checkins, coachFile, today: new Date() }, { canWrite, onSend: sendCheckin });
 }
 async function sendCheckin(input) {
   const settings = await getSettings();

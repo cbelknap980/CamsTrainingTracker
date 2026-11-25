@@ -1,6 +1,6 @@
 // data.js - loads the data files and provides plan helpers (week number, phase, today's session).
 
-export const APP_VERSION = '1.18.4';
+export const APP_VERSION = '1.18.5';
 
 let cache = null;
 
@@ -162,6 +162,52 @@ export function weightWithPair(ex, w) {
   if (w == null || w === '') return '';
   const p = pairText(ex, w);
   return `${fmtWeight(w)} lb${p ? ' (' + p + ')' : ''}`;
+}
+
+// ---- v1.18.5: weights he can load (Cameron, Nov 24) ----
+
+const perHandOf = (rules, ex, w) => (ex && ex.pair ? w / ((rules.dumbbellPairs && rules.dumbbellPairs.count) || 2) : w);
+const near = (a, b) => Math.abs(a - b) < 1e-6;
+
+/** False for a size his gym does not have (rules.dumbbells.notAvailableLb; a two-dumbbell total is checked per hand). */
+export function dumbbellOk(rules, ex, w) {
+  const d = rules && rules.dumbbells;
+  if (!d || !ex || ex.equipment !== 'dumbbell' || w == null || w <= 0) return true;
+  const per = perHandOf(rules, ex, w);
+  return !(d.notAvailableLb || []).some(x => near(x, per));
+}
+
+/** A dumbbell size the gym does not have moved to the nearest one on the rack's steps (the lighter on a tie). Anything else is left as it is. */
+export function snapLoad(rules, ex, w) {
+  if (w == null || dumbbellOk(rules, ex, w)) return w;
+  const d = rules.dumbbells;
+  const step = d.perHandStepLb || 5;
+  const per = perHandOf(rules, ex, w);
+  const count = ex.pair ? w / per : 1;
+  const ok = x => x > 0 && !(d.notAvailableLb || []).some(n => near(n, x));
+  let best = null;
+  for (let k = Math.max(1, Math.floor(per / step) - 3); k <= Math.ceil(per / step) + 3; k++) {
+    const x = k * step;
+    if (!ok(x)) continue;
+    const gap = Math.abs(x - per);
+    if (best == null || gap < Math.abs(best - per) - 1e-6) best = x;
+  }
+  return best == null ? w : best * count;
+}
+
+/**
+ * A ramp-up weight as an easy load: the bar plus 45s and at most one more plate a side (rules.rampUp.easyPlatesLb).
+ * `below`: the load has to stay under this weight (the work sets).
+ */
+export function easyLoad(rules, w, below) {
+  const r = rules.rampUp;
+  const bar = r.barWeightLb, big = r.bigPlateLb || 45;
+  const extra = [0, ...(r.easyPlatesLb || [])];
+  const loads = [];
+  for (let n = 0; bar + 2 * n * big <= Math.max(w, below || 0) + 2 * big; n++) for (const e of extra) loads.push(bar + 2 * (n * big + e));
+  const ok = [...new Set(loads)].filter(x => below == null || x < below - 1e-6).sort((a, b) => a - b);
+  if (!ok.length) return bar;
+  return ok.reduce((b, x) => (Math.abs(x - w) < Math.abs(b - w) - 1e-6 ? x : b), ok[0]);
 }
 
 export function roundTo(value, step) {

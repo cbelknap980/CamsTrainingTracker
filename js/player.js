@@ -1398,6 +1398,7 @@ export class Player {
           ])
         ]),
         // v1.14: Done by mistake: back to that set as it was
+        slim ? null : this.missedRating(idx),
         canUndo ? el('button', { type: 'button', class: 'jd-undo', id: 'jd-undo', onclick: () => this.undoLast() }, 'Undo') : null
       ]),
       slim ? null : el('div', { class: `jd-steps fit-${fold}` + (hasWeight ? '' : ' one') }, [
@@ -1411,6 +1412,48 @@ export class Player {
       p.holdSeconds || slim ? null : effortChips(this.rules, rec.unconfirmed ? null : rec.rpe, lvl => change({ rpe: lvl.rpe }))
     ]);
   }
+  /**
+   * v1.18.5 (Cameron, Nov 24: "make sure you're accounting for my immediate post set assessment"): in a superset or a
+   * finisher the next exercise's card replaced a set before he could rate it, and an unrated set holds its lift for a
+   * session (rules R4 rule 1). On Nov 24 that held 6 of 8 lifts. The last set's card now also asks for the newest set
+   * of this block still not rated, one at a time, until none is left.
+   */
+  missedRating(idx) {
+    const j = this.missedIdx(idx);
+    if (j < 0) return null;
+    const o = this.steps[j];
+    const ex = this.plan.exercises[o.exerciseId];
+    const name = (ex && (ex.short || ex.name)) || o.name;
+    return el('button', { type: 'button', class: 'jd-missed', id: 'jd-missed', 'data-idx': String(j), 'aria-label': `Rate ${o.name}, an earlier set`, onclick: () => this.openRateMissed(j) },
+      [el('b', {}, 'Rate'), el('span', {}, name)]);
+  }
+  /** The newest set of this block before idx that the timer logged with no effort picked, or -1. */
+  missedIdx(idx) {
+    const p = this.steps[idx];
+    for (let i = idx - 1; i >= 0; i--) {
+      const o = this.steps[i];
+      if (o.blockId !== p.blockId) break;
+      if (o.kind === 'set' && o.done && !o.ramp && !o.holdSeconds && o.record && o.record.unconfirmed && !o.record.skipped) return i;
+    }
+    return -1;
+  }
+  openRateMissed(j) {
+    const o = this.steps[j]; if (!o || !o.record) return;
+    const ex = this.plan.exercises[o.exerciseId];
+    const where = o.round ? `round ${o.round}` : (o.setIndex ? `set ${o.setIndex}` : '');
+    const r = o.record;
+    const nums = `${r.weight != null ? `${fmtWeight(r.weight)} lb${isPair(ex) ? ` (${pairText(ex, r.weight)})` : ''} × ` : ''}${r.reps != null ? r.reps : '?'}${o.perSide ? ' / side' : ' reps'}`;
+    showModal(el('div', { class: 'rate-missed', id: 'rate-missed' }, [
+      el('h2', {}, `${o.name}${where ? ', ' + where : ''}`),
+      el('p', { class: 'muted', style: 'margin:2px 0 10px' }, `${nums}. The timer logged it before you picked how hard it was; until you do, this lift keeps its target next time.`),
+      effortChips(this.rules, null, lvl => { this.fixRecord(j, { rpe: lvl.rpe }); closeModal(); this.renderStep(); }),
+      el('div', { class: 'btn-row', style: 'margin-top:12px' }, [
+        el('button', { class: 'btn', onclick: () => { closeModal(); this.openFix(j); } }, 'Fix weight or reps'),
+        el('button', { class: 'btn', onclick: () => closeModal() }, 'Later')
+      ])
+    ]));
+  }
+
   openFix(idx) {
     const p = this.steps[idx]; if (!p || !p.record) return;
     const ex = this.plan.exercises[p.exerciseId];

@@ -759,3 +759,28 @@ body.in-session .toast-msg { white-space: normal; overflow: visible; max-width: 
 .run-lines { display: flex; flex-direction: column; gap: 3px; margin: 0 0 8px; color: var(--muted); font-size: var(--t-small); }
 .run-lines p { margin: 0 !important; }
 .run-lines b { color: var(--text); font-weight: 700; }
+
+/* v1.18.5: a set in a superset or finisher that went by before it was rated: an amber chip beside Undo opens it */
+.player .jd-missed { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 44px; min-width: 64px; max-width: 96px; padding: 3px 9px; margin-left: 6px; border: 1.5px solid #fbbf24; border-radius: 12px; background: rgba(251, 191, 36, 0.12); color: var(--text); line-height: 1.1; cursor: pointer; }
+.player .jd-missed b { color: #fbbf24; font-size: 0.82rem; font-weight: 800; }
+.player .jd-missed span { font-size: 0.72rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rate-missed h2 { margin: 0; }
+
+/* v1.18.5: Plan, tap an exercise for its 12-week projection */
+.plan-table tr.tappable { cursor: pointer; }
+.plan-table tr.tappable td:first-child > div:first-child::after { content: ' ›'; color: var(--muted); }
+.proj { min-width: 0; }
+.proj h2 { margin: 0 0 2px; }
+.proj .proj-now { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+.proj .proj-now > div { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.proj .proj-now small { display: block; color: var(--muted); font-size: var(--t-small, 0.8rem); }
+.proj .proj-now b { font-size: 1.3rem; }
+.proj .proj-now .sub { color: var(--muted); font-size: var(--t-small, 0.8rem); }
+.proj svg { display: block; width: 100%; height: auto; margin: 4px 0 6px; }
+.proj .proj-key { display: flex; gap: 14px; font-size: var(--t-small, 0.8rem); color: var(--muted); flex-wrap: wrap; }
+.proj .proj-key i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.proj table { width: 100%; border-collapse: collapse; font-size: var(--t-small, 0.85rem); margin-top: 8px; }
+.proj td, .proj th { padding: 4px 2px; text-align: right; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.proj td:first-child, .proj th:first-child { text-align: left; }
+.proj th { color: var(--muted); font-weight: 600; }
+.proj p { color: var(--muted); font-size: var(--t-small, 0.85rem); margin: 8px 0 0; }

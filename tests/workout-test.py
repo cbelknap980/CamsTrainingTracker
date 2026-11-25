@@ -242,7 +242,7 @@ with sync_playwright() as p:
         if s['confirm'] and nm == 'Power clean' and k == 'set up' and 'pc_setup' not in seen:
             seen['pc_setup'] = 1
             check('voice (Cameron: "say reps"): the set-up line names the set with its reps and weight', 'Set up for Power clean, ramp-up, 5 reps at 45 pounds. 1 minute.' in w.said, w.said[-4:])
-            check('set-up screen (Cameron: "for upcoming sets, show reps and weight"): the next set, then the ramp-ups and work sets to come', page.locator('#up-next .tile-weight b').inner_text().strip() == '45' and page.locator('#up-next .un-reps b').inner_text().strip() == '5' and 'Then ramp-up | 95 × 5, 130 × 3, 155 × 2' in s['upNext'] and 'Then 4 work sets | 185 lb × 2' in s['upNext'], s['upNext'])
+            check('set-up screen (Cameron: "for upcoming sets, show reps and weight"): the next set, then the ramp-ups and work sets to come', page.locator('#up-next .tile-weight b').inner_text().strip() == '45' and page.locator('#up-next .un-reps b').inner_text().strip() == '5' and 'Then ramp-up | 95 × 5, 135 × 3, 155 × 2' in s['upNext'] and 'Then 4 work sets | 185 lb × 2' in s['upNext'], s['upNext'])
             check('set-up screen: the main button is Set-up done, Equipment taken is offered', s['confirmText'] == 'Set-up done' and s['swap'] and s['where'] == 'Block A · Power clean', (s['confirmText'], s['where']))
             w.run(70)
             h = w.state(); w.look(h, 'holding')
@@ -265,7 +265,7 @@ with sync_playwright() as p:
                 jd = page.locator('#just-done')
                 check('bar change after a ramp-up: that set is one line with nothing to rate (Cameron: "too busy"), so the plates to add and the sets to come all show',
                       'slim' in jd.get_attribute('class').split() and jd.locator('.effort-chip').count() == 0 and jd.locator('.jd-steps').count() == 0 and 'ramp-up · 45 lb × 5' in jd.locator('.jd-sub').inner_text() and jd.locator('#jd-undo').count() == 1
-                      and 'Then ramp-up | 130 × 3, 155 × 2' in s['upNext'] and 'Then 4 work sets | 185 lb × 2' in s['upNext'] and page.locator('#change-side').is_visible() and s['fit'] == '0', (jd.inner_text(), s['upNext'], s['fit']))
+                      and 'Then ramp-up | 135 × 3, 155 × 2' in s['upNext'] and 'Then 4 work sets | 185 lb × 2' in s['upNext'] and page.locator('#change-side').is_visible() and s['fit'] == '0', (jd.inner_text(), s['upNext'], s['fit']))
                 before = clock_secs(s['timer'])
                 w.confirm()
                 r = w.state(); w.look(r, 'tap during the rest')

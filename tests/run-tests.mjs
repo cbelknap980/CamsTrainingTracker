@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { buildTimeline, trimToFit, remainingSeconds, lastResults, setTiming } from '../js/builder.js';
 import { applyProgression, epley, checkPR, estimateStart, effectiveTarget, flatWords } from '../js/progression.js';
-import { effortPlain, effortLevel, spokenDuration } from '../js/data.js';
+import { effortPlain, effortLevel, spokenDuration, easyLoad, snapLoad, dumbbellOk } from '../js/data.js';
 import { weekOwed, owedSetsFor, owedLines, buildCatchUpSession, slackDays, plannedDay } from '../js/catchup.js';
 import { parseRepo, toBase64, fromBase64, setupLink, readSetupLink, explainStatus } from '../js/sync.js';
 import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks, muscleSets } from '../js/progress.js';
@@ -18,7 +18,7 @@ import { runAdherence, runSummary } from '../js/progress.js';
 import { gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from '../js/logger.js';
 import { Player, fmtGym, speakable } from '../js/player.js';
 // v1.18.1
-import { upgrade1181, olderThan } from '../js/upgrade.js';
+import { upgrade1181, upgrade1185, olderThan } from '../js/upgrade.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -86,11 +86,11 @@ console.log('Builder, week 3 with targets');
 const targets = { back_squat: { weight: 185, reps: 4 }, rdl: { weight: 155, reps: 6 }, strict_press: { weight: 95, reps: 4 }, weighted_pullup: { weight: 25, reps: 4 }, power_clean: { weight: 135, reps: 2 }, front_squat: { weight: 155, reps: 5 }, push_press: { weight: 115, reps: 3 } };
 const w3 = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, targets });
 const ramps = w3.steps.filter(s => s.ramp);
-check('week 3 lift1: 4 ramp-up sets (45, 95, 130, 155)', ramps.map(s => s.target.weight).join(',') === '45,95,130,155', ramps.map(s => s.target.weight));
+check('week 3 lift1: 4 ramp-up sets on easy plate loads (v1.18.5: 45, 95, 135, 155; 135 not 130)', ramps.map(s => s.target.weight).join(',') === '45,95,135,155', ramps.map(s => s.target.weight));
 check('week 3 lift1: work sets pre-filled 185 x 4', w3.steps.filter(s => s.exerciseId === 'back_squat' && !s.ramp).every(s => s.target.weight === 185 && s.target.reps === 4));
 check('week 3 lift1: planned within 61 min', w3.plannedSeconds / 60 <= 61, { min: w3.plannedSeconds / 60 });
 const w3l2 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 3, targets });
-check('week 3 lift2: press ramps (95 lb target: 45, 50, 65, 80)', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight).join(',') === '45,50,65,80', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight));
+check('week 3 lift2: press ramps on easy loads (95 lb target, v1.18.5: 45, 65, 75; 50 % lands on the bar and is left out)', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight).join(',') === '45,65,75', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight));
 check('week 3 lift2: planned within 62 min', w3l2.plannedSeconds / 60 <= 62, { min: w3l2.plannedSeconds / 60 });
 const w3l3 = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 3, targets });
 check('week 3 lift3: planned within 65 min without if-time (v1.11: calf raise in the finisher; v1.18: the row is timed per arm)', w3l3.steps.filter(s => !s.iftime).reduce((a, s) => a + s.seconds, 0) / 60 <= 65, { min: w3l3.steps.filter(s => !s.iftime).reduce((a, s) => a + s.seconds, 0) / 60 });
@@ -998,6 +998,27 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('v1.18 a set the timer logged counts as unchecked until it is confirmed', isUnchecked({ unconfirmed: true, done: true }) && !isUnchecked({ done: true }) && !isUnchecked({ unconfirmed: true, done: false, skipped: true }) && !isUnchecked({ unconfirmed: true, done: true, ramp: true }) && !isUnchecked(null));
   check('v1.18 exercise names written for the eye are speakable', speakable('Min 3 of 9: Kettlebell swings x 12') === 'Minute 3 of 9. Kettlebell swings, 12 reps' && speakable('Empty-bar clean + front squat complex x2') === 'Empty-bar clean and front squat complex, 2 times'
     && speakable('Bike or ski erg, 12-15 cal') === 'Bike or ski erg, 12 to 15 calories' && speakable('90/90 hip hold') === '90 90 hip hold', [speakable('Min 3 of 9: Kettlebell swings x 12'), speakable('90/90 hip hold')]);
+}
+
+{
+  console.log('\nv1.18.5: easy ramp-up loads, no 27.5 lb dumbbells');
+  const ramp = t => rules.rampUp.steps.slice(1).map(rs => easyLoad(rules, t * rs.fraction, t));
+  check('v1.18.5 ramp-ups: squat 185 is 95, 135, 155 (his Nov 24 screen asked 130)', ramp(185).join() === '95,135,155', ramp(185));
+  check('v1.18.5 ramp-ups: every ramp-up load is the bar, 45s and at most one more plate a side, and under the work weight', [95, 120, 155, 185, 200, 225, 250, 275, 300, 315].every(t => ramp(t).every(w => w < t && [0, 5, 10, 15, 25, 35].includes(((w - 45) / 2) % 45))), [200, 250, 300].map(ramp));
+  check('v1.18.5 ramp-ups: heavier targets keep a real spread (315: 155, 225, 275)', ramp(315).join() === '155,225,275', ramp(315));
+  const curl = plan.exercises.curl, row = plan.exercises.db_row;
+  check('v1.18.5 dumbbells: 55 on a two-dumbbell curl is 2 x 27.5, which the gym does not have', !dumbbellOk(rules, curl, 55) && dumbbellOk(rules, curl, 50) && dumbbellOk(rules, curl, 60) && dumbbellOk(rules, curl, 35));
+  check('v1.18.5 dumbbells: 55 -> 50 (lighter on a tie), 27.5 on a single dumbbell -> 25; good sizes and barbells stay', snapLoad(rules, curl, 55) === 50 && snapLoad(rules, row, 27.5) === 25 && snapLoad(rules, curl, 60) === 60 && snapLoad(rules, plan.exercises.back_squat, 137.5) === 137.5);
+  const f = numberFlag({ weight: 55, reps: 10, target: { weight: 55, reps: 10 }, repRange: [10, 12], done: true }, curl, rules);
+  check('v1.18.5 flag: a logged 55 lb curl asks what he really used', f && f.code === 'dumbbell' && /27\.5/.test(f.text), f);
+  check('v1.18.5 flag: a 50 or 60 lb curl is fine', !numberFlag({ weight: 50, reps: 10, target: { weight: 55, reps: 10 }, repRange: [10, 12], done: true }, curl, rules) && !numberFlag({ weight: 60, reps: 10, target: { weight: 55, reps: 10 }, repRange: [10, 12], done: true }, curl, rules));
+  const up = upgrade1185({ targets: { curl: { weight: 55, reps: 10 }, oh_tri_ext: { weight: 80, reps: 8 }, back_squat: { weight: 185, reps: 6 } }, rules, plan });
+  check('v1.18.5 upgrade: his stored 55 lb curl target becomes 50 (2 x 25), reps and other lifts stay', up.zeroed === 1 && up.targets.curl.weight === 50 && up.targets.curl.reps === 10 && up.targets.oh_tri_ext.weight === 80 && up.targets.back_squat.weight === 185, up.targets);
+  const sess = { id: 's', week: 3, phase: { id: 'build' }, endedAt: '2026-11-30T20:00:00Z', sets: [1, 2, 3].map(i => ({ exerciseId: 'curl', setIndex: i, weight: 50, reps: 12, rpe: 8, done: true })) };
+  const pr = applyProgression({ session: sess, targets: { curl: { weight: 55, reps: 10 } }, rules, plan, settings });
+  check('v1.18.5 progression: a 55 target reads as 50; 3 x 12 at 50 moves to 60 (2 x 30), never 65', pr.targets.curl.weight === 60, pr.targets.curl);
+  const hold = applyProgression({ session: { ...sess, sets: sess.sets.map(x => ({ ...x, unconfirmed: true })) }, targets: { curl: { weight: 55, reps: 10 } }, rules, plan, settings });
+  check('v1.18.5 progression: an unrated session holds at 50, not 55', hold.targets.curl.weight === 50, hold.targets.curl);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
