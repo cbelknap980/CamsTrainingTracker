@@ -54,7 +54,7 @@ try:
     check('v1.18.11 list: the squat row is sets x reps and weight, with a chevron', '3 × 6' in row and '185 lb' in row and pg.locator('.ex-row[data-ex="back_squat"] .ex-go').count() == 1, row)
     pg.click('.ex-row[data-ex="back_squat"]'); pg.wait_for_selector('#lift-sheet')
     sh = pg.locator('#lift-sheet').inner_text()
-    check('back squat: next 185 x 6, three cases, a chart and every week, the benchmark and his best', '185' in pg.locator('#lift-next').inner_text() and '3 × 6' in pg.locator('#lift-next').inner_text() and all(c in sh for c in ('Doing well', 'Steady', 'Struggling')) and pg.locator('#lift-sheet .lc-case').count() == 3 and pg.locator('#lift-sheet svg path.lc-line').count() == 3 and 'Intermediate at 165 lb: 274 lb' in sh and 'Your best single: 245' in sh and pg.locator('#lift-weeks tr[data-week]').count() >= 10, sh[:300])
+    check('back squat: next 185 x 6, three cases, a chart and every week, the benchmark and his best', '185' in pg.locator('#lift-next').inner_text() and '3 × 6' in pg.locator('#lift-next').inner_text() and all(c in sh for c in ('Doing well', 'Steady', 'Struggling')) and pg.locator('#lift-sheet .lc-case').count() == 3 and pg.locator('#lift-sheet svg path.lc-line').count() == 3 and 'Intermediate at 165 lb: 275 lb' in sh and 'Your best single: 245' in sh and pg.locator('#lift-weeks tr[data-week]').count() >= 10, sh[:300])
     pg.click('#lift-chart [data-mode="max"]'); pg.wait_for_timeout(100)
     pg.click('#lift-weeks tr[data-week="12"]', force=True); pg.wait_for_timeout(100)
     tiles = [int(t) for t in pg.locator('#lift-sheet .lcc-v').all_inner_texts()]

@@ -1,6 +1,6 @@
 // app.js - app shell: boot, tabs, Home, Progress (with the log since v1.9), Plan, Runs, Settings, and the start/resume/summary flow.
 
-import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentFor, isPair, pairText, weightWithPair } from './data.js';
+import { loadData, APP_VERSION, weekNumber, phaseForWeek, todaysSessionId, sessionById, fmtWeight, fmtDate, fmtMinutes, fmtTime, toISODate, repsText, effortPlain, effortLabel, equipmentFor, isPair, pairText, weightWithPair, roundEst, snapLoad } from './data.js';
 import { buildTimeline, lastResults } from './builder.js';
 import { icon } from './icons.js';
 import { Player, playTones } from './player.js';
@@ -161,7 +161,8 @@ async function syncCoach(rerender) {
       for (const a of todo) {
         if (a.exerciseId && (a.weight != null || a.reps != null)) {
           const patch = { source: 'coach', updated: new Date().toISOString() };
-          if (a.weight != null) patch.weight = Number(a.weight);
+          // v1.18.10: a coach weight lands on a weight he can load too (92.5 -> 90)
+          if (a.weight != null) patch.weight = snapLoad(D.rules, D.plan.exercises[a.exerciseId], Number(a.weight));
           if (a.reps != null) patch.reps = Number(a.reps);
           await setTarget(a.exerciseId, patch);
         }
@@ -552,7 +553,7 @@ function repRangeFor(exerciseId) {
 function mainLiftsCard(targets, settings, flags = [], sessions = []) {
   const rows = Object.entries(D.plan.exercises).filter(([, ex]) => ex.benchmark).map(([id, ex]) => {
     const t = targets[id] || {};
-    const e1 = t.e1rm != null ? t.e1rm : t.bestE1rm;
+    const e1 = roundEst(t.e1rm != null ? t.e1rm : t.bestE1rm, D.rules);   // v1.18.10: shown to the nearest 5 lb
     const badge = t.source === 'you' ? el('span', { class: 'badge you' }, 'set by you') : (t.source === 'coach' ? el('span', { class: 'badge coach' }, 'coach') : (t.source === 'benchmark' ? el('span', { class: 'badge you' }, 'bench') : null));
     const has = t.weight != null;
     // v1.16: a lift whose numbers are waiting for a look shows that instead of a target built on them
@@ -1155,7 +1156,7 @@ async function planData() {
   if (!canWrite && coachFile) {
     for (const a of pendingAdjustments(coachFile, await getCoachApplied(), D.plan)) {
       if (!a.exerciseId || (a.weight == null && a.reps == null)) continue;
-      targets[a.exerciseId] = { ...(targets[a.exerciseId] || {}), ...(a.weight != null ? { weight: Number(a.weight) } : {}), ...(a.reps != null ? { reps: Number(a.reps) } : {}), source: 'coach', pendingCoach: true };
+      targets[a.exerciseId] = { ...(targets[a.exerciseId] || {}), ...(a.weight != null ? { weight: snapLoad(D.rules, D.plan.exercises[a.exerciseId], Number(a.weight)) } : {}), ...(a.reps != null ? { reps: Number(a.reps) } : {}), source: 'coach', pendingCoach: true };
     }
   }
   return { canWrite, data: { plan: D.plan, rules: D.rules, goals: D.goals, settings, targets, sessions, runs, checkins, coachFile, today: new Date() } };
@@ -1170,10 +1171,14 @@ async function renderPlanTab() {
 
 // v1.18.11 (Cameron, Nov 25: "Allow me to edit and override as an option if I want to push towards a goal"): the lift
 // page in Plan sets a lift's next target or its week-12 goal. Both come back with an undo for the toast.
-async function saveLiftTarget(id, { weight, reps }) {
+async function saveLiftTarget(id, { weight, reps, week }) {
   const before = (await getTargets())[id];
   const moved = !before || before.weight !== weight;
-  await setTarget(id, { weight, reps, source: 'you', updated: new Date().toISOString(), ...(moved ? { stall: 0 } : {}) });
+  // typed in for a heavier week whose 5% start has not been applied yet: it is that week's target, so it is not
+  // raised 5% again when the session opens
+  const ex = D.plan.exercises[id];
+  const heavyNow = week && phaseForWeek(D.plan, week).id === 'heavy' && before && heavyStartDue(D.rules, id, ex, before, 'heavy');
+  await setTarget(id, { weight, reps, source: 'you', updated: new Date().toISOString(), ...(moved ? { stall: 0 } : {}), ...(heavyNow ? { heavyStart: { week, from: { weight: before.weight, reps: before.reps } } } : {}) });
   return {
     data: await renderPlanTab(),
     undo: async () => {

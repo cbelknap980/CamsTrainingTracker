@@ -4,14 +4,49 @@
 // look at, and it can't change the plan until he says it is right.
 // Pure functions, no DOM, no storage.
 
-import { epley, goalMax, incrementFor, isExcluded, weeklyFor, bodyweightOf } from './progression.js';
+import { epley, goalMax, incrementFor, isExcluded, weeklyFor, bodyweightOf, effectiveTarget } from './progression.js';
 import { numberFlag, impossibleNumber } from './sanity.js';
-import { fmtWeight, dumbbellOk } from './data.js';
+import { fmtWeight, dumbbellOk, snapLoad, weekNumber } from './data.js';
 
 /** A goal more than this far over today's estimated max (on the load moved) reads as a typo and can't be saved. */
 export const GOAL_TYPO = 0.5;
 /** Reps a goal can be set for: past 12 an estimated max says little. */
 export const GOAL_REPS = [1, 12];
+
+/** The week the session next comes round from today (not logged yet), for its phase: lighter week, heavier weeks. */
+export function nextWeekOf(plan, settings, sessions, sessionId, today) {
+  for (let i = 0; i < 7 * 13; i++) {
+    const d = new Date(today); d.setDate(d.getDate() + i);
+    if (plan.calendar[String(d.getDay())] !== sessionId) continue;
+    const w = weekNumber(d, settings.startDate);
+    if (w > 12) break;
+    if (w >= 1 && !(sessions || []).some(x => x.sessionId === sessionId && x.week === w)) return w;
+  }
+  return Math.max(1, Math.min(12, weekNumber(today, settings.startDate)));
+}
+
+/**
+ * What a plan item asks for the next time its session comes round, the way the workout builds it (builder.js setsFor,
+ * repRangeFor, targetFor): sets cut on the lighter week, reps held inside the item's range (3 to 5 on a main lift in
+ * the heavier weeks), the heavier weeks' start, and a weight the rack can make.
+ * Returns { sets, reps, range, weight, hold } (hold: seconds on a timed item).
+ */
+export function nextNumbers({ plan, rules, settings }, it, b, t, phaseId) {
+  const ex = plan.exercises[it.exercise] || { name: it.exercise };
+  const light = rules && rules.phases && rules.phases.light;
+  const cut = n => (n && phaseId === 'light' && light ? Math.max(1, Math.ceil(n * light.setFactor)) : n);
+  let sets;
+  if (b.type === 'finisher') { const rounds = cut(b.rounds); sets = it.rounds ? it.rounds.filter(r => r <= rounds).length : rounds; }
+  else sets = cut(it.sets || null);
+  const heavy = phaseId === 'heavy' && ex.mainLift && ex.autoProgress !== false && it.reps && rules ? rules.phases.heavy.mainLiftReps : null;
+  const range = heavy ? [...heavy] : (it.reps ? [...it.reps] : null);
+  if (it.seconds) return { sets, reps: null, range, weight: null, hold: it.seconds };
+  const eff = t && rules ? (effectiveTarget({ rules, plan, settings, exerciseId: it.exercise, target: t, phaseId }) || t) : t;
+  const weight = eff && eff.weight != null ? snapLoad(rules, ex, eff.weight) : null;
+  let reps = eff && eff.reps != null ? eff.reps : null;
+  if (range && reps != null) reps = Math.min(Math.max(reps, range[0]), range[1]);
+  return { sets, reps, range, weight, hold: null };
+}
 
 const num = x => (x === '' || x == null ? null : Number(x));
 const pct = x => `${Math.round(x * 100)}%`;
@@ -100,20 +135,20 @@ export function checkTarget({ rules, plan, exerciseId, current, weight, reps, ra
 }
 
 /**
- * The points the Plan chart draws, from projection.js projectExercise. mode 'weight': the target for the week (the bar
- * weight, or reps on a bodyweight lift); mode 'max': the estimated max. One entry per column: the "now" column, then
- * every week to 12. A main lift's week 12 is the retest: in weight mode it is the 5-rep weight its max gives, drawn on
- * its own (retest: true).
- * Returns [{ week, now, phase, retest, v: { well, steady, struggle }, t: { well, steady, struggle } }].
+ * The points the Plan chart draws, from projection.js projectExercise: one column per week from the next session's
+ * week to 12, each with what that week's session asks for (week.lift), so week 3 is the target he has now.
+ * mode 'weight': the weight on the bar (reps on a bodyweight lift); mode 'max': its estimated max. A main lift's week
+ * 12 is the retest: the strength the block built (the target after week 11), shown as the 5-rep weight it gives
+ * (retest: true).
+ * Returns [{ week, phase, retest, v: { well, steady, struggle }, t: { well, steady, struggle } }].
  */
 export function chartColumns(p, mode) {
   const C = ['well', 'steady', 'struggle'];
   const reps = p.kind === 'reps';
-  const cols = [{ week: p.weeks[0].week - 1, now: true, phase: null, retest: false, t: { well: p.now, steady: p.now, struggle: p.now } }];
-  for (const w of p.weeks) {
+  const cols = p.weeks.map(w => {
     const retest = !!(p.mainLift && !reps && w.phase === 'retest');
-    cols.push({ week: w.week, now: false, phase: w.phase, retest, t: { well: w.well, steady: w.steady, struggle: w.struggle } });
-  }
+    return { week: w.week, phase: w.phase, retest, t: retest ? { well: p.end.well, steady: p.end.steady, struggle: p.end.struggle } : { ...(w.lift || { well: w.well, steady: w.steady, struggle: w.struggle }) } };
+  });
   const seen = {};
   for (const col of cols) {
     col.v = {};
@@ -135,9 +170,12 @@ export function chartColumns(p, mode) {
   return cols;
 }
 
-/** The first week whose estimated max reaches `max` in case c, or null. */
+/**
+ * The first week whose session works out to `max` or more in case c (estimated max of what that week asks for), or
+ * null. A main lift's week 12 counts the retest: the strength the block built.
+ */
 export function weekReaching(p, c, max) {
   if (max == null || p.kind !== 'weight') return null;
-  const w = p.weeks.find(x => x[c] && x[c].max != null && x[c].max >= max);
-  return w ? w.week : null;
+  const col = chartColumns(p, 'max').find(x => x.t[c] && x.t[c].max != null && x.t[c].max >= max);
+  return col ? col.week : null;
 }

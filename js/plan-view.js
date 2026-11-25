@@ -7,7 +7,7 @@
 // (lift-detail.js), which can set the next target or a week-12 goal through opts.saveTarget and opts.saveGoal.
 
 import { el, infoBtn } from './ui.js';
-import { effectiveTarget } from './progression.js';
+import { nextNumbers, nextWeekOf } from './lift-goal.js';
 import { openLiftDetail } from './lift-detail.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
 import { TAGS, thread } from './coach.js';
@@ -80,33 +80,16 @@ const chevron = () => {
   return g;
 };
 
-/** The week the session next comes round from today (not logged yet), for its phase: lighter week, heavier weeks. */
-export function nextWeekOf(plan, settings, sessions, sessionId, today) {
-  for (let i = 0; i < 7 * 13; i++) {
-    const d = new Date(today); d.setDate(d.getDate() + i);
-    if (plan.calendar[String(d.getDay())] !== sessionId) continue;
-    const w = weekNumber(d, settings.startDate);
-    if (w > 12) break;
-    if (w >= 1 && !(sessions || []).some(x => x.sessionId === sessionId && x.week === w)) return w;
-  }
-  return Math.max(1, Math.min(12, weekNumber(today, settings.startDate)));
-}
-
-/** What one row shows: { sets, reps, weight } as text for the next time, from the plan item and the stored target. */
-export function rowNumbers({ plan, rules, settings }, it, b, t, phaseId) {
-  const ex = plan.exercises[it.exercise] || { name: it.exercise };
-  const light = rules && rules.phases && rules.phases.light;
-  let sets = it.sets || (b.type === 'finisher' ? (it.rounds ? it.rounds.length : b.rounds) : null);
-  if (sets && phaseId === 'light' && light) sets = Math.max(1, Math.ceil(sets * light.setFactor));
-  const eff = t && rules ? (effectiveTarget({ rules, plan, settings, exerciseId: it.exercise, target: t, phaseId }) || t) : t;
-  const heavy = phaseId === 'heavy' && ex.mainLift && ex.autoProgress !== false && it.reps && rules ? rules.phases.heavy.mainLiftReps : null;
-  const range = heavy || it.reps || null;
+/** What one row shows: { sets, weight } as text for the next time, from the plan item and the stored target. */
+export function rowNumbers(data, it, b, t, phaseId) {
+  const ex = data.plan.exercises[it.exercise] || { name: it.exercise };
+  const n = nextNumbers(data, it, b, t, phaseId);
   let reps = '';
-  if (ex.timed) reps = 'hold';
-  else if (eff && eff.reps != null) reps = String(range ? Math.min(Math.max(eff.reps, range[0]), range[1]) : eff.reps);
-  else if (range) reps = repsText(range);
-  const weight = eff && eff.weight != null ? `${ex.equipment === 'weighted_bw' ? '+' : ''}${fmtWeight(eff.weight)} lb` : (ex.equipment === 'bodyweight' || ex.timed ? 'bw' : '');
-  return { sets: sets ? `${sets} × ${reps}` : reps, weight };
+  if (ex.timed || n.hold) reps = 'hold';
+  else if (n.reps != null) reps = String(n.reps);
+  else if (n.range) reps = repsText(n.range);
+  const weight = n.weight != null ? `${ex.equipment === 'weighted_bw' ? '+' : ''}${fmtWeight(n.weight)} lb` : (ex.equipment === 'bodyweight' || ex.timed || n.hold ? 'bw' : '');
+  return { sets: n.sets ? `${n.sets} × ${reps}` : reps, weight };
 }
 
 function sessionCard(data, s, onEx) {
@@ -131,7 +114,7 @@ function sessionCard(data, s, onEx) {
       if (!it.exercise) continue;
       const ex = plan.exercises[it.exercise] || { name: it.exercise };
       const n = rowNumbers(data, it, b, targets[it.exercise], phaseId);
-      const tap = onEx ? () => onEx(it.exercise) : null;
+      const tap = onEx ? () => onEx(it.exercise, s.id) : null;
       rows.push(el(tap ? 'button' : 'div', { class: 'ex-row', 'data-ex': it.exercise, ...(tap ? { type: 'button', onclick: tap, 'aria-label': `${ex.name}, ${n.sets}${n.weight ? `, ${n.weight}` : ''}. Open for the plan and chart.` } : {}) }, [
         el('span', { class: 'ex-name' }, ex.name),
         el('span', { class: 'ex-sets' }, n.sets),
@@ -267,7 +250,7 @@ export function renderPlan(view, data, opts = {}) {
     weeksCard(plan, weekNumber(today, settings.startDate)),
     el('div', { class: 'plan-pair' }, [thisWeekCard(plan, settings, sessions, runs, today, week), goalsCard(goals)]),
     el('h2', { class: 'section-title' }, 'Sessions'),
-    ...plan.sessions.map(s => sessionCard(data, s, id => openLiftDetail(data, id, opts))),
+    ...plan.sessions.map(s => sessionCard(data, s, (id, sessionId) => openLiftDetail(data, id, { ...opts, sessionId }))),
     runsCard(plan)
   ]);
   const side = el('div', { class: 'plan-side' }, [checkinCard(data, opts)]);
@@ -307,7 +290,7 @@ function renderPhone(view, data, opts) {
       return el('button', { type: 'button', class: 'plan-chip' + (id === pick ? ' on' : ''), 'data-pick': id, 'aria-pressed': String(id === pick), onclick: () => go('sessions', id) }, s ? s.name.split(':')[0] : 'Runs');
     })));
     const s = plan.sessions.find(x => x.id === pick);
-    pane.append(s ? sessionCard(data, s, id => openLiftDetail(data, id, opts)) : runsCard(plan));
+    pane.append(s ? sessionCard(data, s, (id, sessionId) => openLiftDetail(data, id, { ...opts, sessionId })) : runsCard(plan));
   } else if (ui.pane === 'goals') {
     pane.append(goalsCard(goals), weeksCard(plan, week));
   } else {

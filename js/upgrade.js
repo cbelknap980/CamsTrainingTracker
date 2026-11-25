@@ -3,7 +3,7 @@
 // appVersion as dataVersion, and every change for a newer version runs once.
 
 import { getTargets, setTargets, getRuns, putRun, kvGet, kvSet } from './store.js';
-import { APP_VERSION, getData, snapLoad } from './data.js';
+import { APP_VERSION, getData, snapLoad, roundEst } from './data.js';
 import { settleRun } from './runs.js';
 
 /** a < b for versions like 1.9 and 1.18.1. */
@@ -51,7 +51,27 @@ export function upgrade1185({ targets, rules, plan }) {
   return { targets: next, zeroed: moved, runs: [] };
 }
 
-const UPGRADES = [{ version: '1.18.1', run: upgrade1181 }, { version: '1.18.5', run: upgrade1185 }];
+/**
+ * v1.18.10 (Cameron, Nov 25: "Smallest increment for these types of weights should be 5lb"): every stored target lands
+ * on a weight he can load (a strict press at 92.5 goes to 90), and the estimated maxes kept with it go to the nearest
+ * 5 lb, so Home, Plan and the PR checks read the same numbers. Returns { targets, zeroed (targets changed), runs: [] }.
+ */
+export function upgrade11810({ targets, rules, plan }) {
+  const before = targets || {};
+  const out = upgrade1185({ targets, rules, plan });
+  let changed = 0;
+  for (const [id, t] of Object.entries(out.targets)) {
+    if (!t) continue;
+    let touched = before[id] && t.weight !== before[id].weight;
+    for (const k of ['e1rm', 'bestE1rm', 'baselineE1rm', 'retestE1rm']) {
+      if (typeof t[k] === 'number') { const r = roundEst(t[k], rules); if (r !== t[k]) { t[k] = r; touched = true; } }
+    }
+    if (touched) changed += 1;                                        // each lift counted once
+  }
+  return { targets: out.targets, zeroed: changed, runs: [] };
+}
+
+const UPGRADES = [{ version: '1.18.1', run: upgrade1181 }, { version: '1.18.5', run: upgrade1185 }, { version: '1.18.10', run: upgrade11810 }];
 
 /**
  * Run each upgrade newer than the data on this device, once. Returns { zeroed, runs } (counts) when something ran,

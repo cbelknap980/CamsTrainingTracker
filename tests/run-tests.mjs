@@ -1,7 +1,7 @@
 // Node tests for the Session Builder and Progression Engine. Run: node tests/run-tests.mjs
 import { readFileSync } from 'node:fs';
 import { buildTimeline, trimToFit, remainingSeconds, lastResults, setTiming } from '../js/builder.js';
-import { applyProgression, epley, checkPR, estimateStart, effectiveTarget, flatWords } from '../js/progression.js';
+import { applyProgression, epley, checkPR, estimateStart, effectiveTarget, flatWords, incrementFor } from '../js/progression.js';
 import { effortPlain, effortLevel, spokenDuration, easyLoad, snapLoad, dumbbellOk } from '../js/data.js';
 import { weekOwed, owedSetsFor, owedLines, buildCatchUpSession, slackDays, plannedDay } from '../js/catchup.js';
 import { parseRepo, toBase64, fromBase64, setupLink, readSetupLink, explainStatus } from '../js/sync.js';
@@ -18,7 +18,7 @@ import { runAdherence, runSummary } from '../js/progress.js';
 import { gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from '../js/logger.js';
 import { Player, fmtGym, speakable } from '../js/player.js';
 // v1.18.1
-import { upgrade1181, upgrade1185, olderThan } from '../js/upgrade.js';
+import { upgrade1181, upgrade1185, upgrade11810, olderThan } from '../js/upgrade.js';
 
 const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
 const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
@@ -128,14 +128,14 @@ const ws = (exerciseId, weight, reps, rpe, repRange, extra) => ({ exerciseId, we
 // baseline
 let r = applyProgression({ session: mkSession(1, [ws('back_squat', 185, 5, 8, [5, 5], { baseline: true }), ws('back_squat', 165, 4, 7, [4, 6]), ws('back_squat', 165, 4, 7, [4, 6]), ws('back_squat', 165, 4, 7, [4, 6])]), targets: {}, rules, plan, settings });
 check('baseline 185x5 -> training 165, reps 4', r.targets.back_squat.weight === 165 && r.targets.back_squat.reps === 4, r.targets.back_squat);
-check('baseline e1RM recorded (216)', r.e1rms.back_squat === 216, r.e1rms);
+check('baseline e1RM recorded (216, shown to 5 lb since v1.18.10: 215)', r.e1rms.back_squat === 215, r.e1rms);
 
 // main lift pass
 r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 7, [4, 6])]), targets: { back_squat: { weight: 185, reps: 6, stall: 0 } }, rules, plan, settings });
 check('main lift pass -> +5 lb, reps settle at 5 (v1.18.6, rules R5: was reps to the bottom, 4)', r.targets.back_squat.weight === 190 && r.targets.back_squat.reps === 5, r.targets.back_squat);
 // press increments 2.5
 r = applyProgression({ session: mkSession(3, [ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6]), ws('strict_press', 95, 6, 8, [4, 6])]), targets: { strict_press: { weight: 95, reps: 6 } }, rules, plan, settings });
-check('press pass -> +2.5 lb', r.targets.strict_press.weight === 97.5, r.targets.strict_press);
+check('press pass -> +5 lb (v1.18.10: 5 lb is the smallest step)', r.targets.strict_press.weight === 100, r.targets.strict_press);
 // v1.18.1 (rules R4): every set made the target's 4 reps, short of the top: same weight, one more rep, not a flat session
 r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 5, 8, [4, 6]), ws('back_squat', 185, 4, 8, [4, 6]), ws('back_squat', 185, 4, 8, [4, 6])]), targets: { back_squat: { weight: 185, reps: 4, stall: 0 } }, rules, plan, settings });
 check('v1.18.1 R4: target reps made short of the top -> same weight, reps 5, flat count 0', r.targets.back_squat.weight === 185 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 0, r.targets.back_squat);
@@ -210,8 +210,8 @@ check('v1.18.1 R4 rule 9: a clean baseline of 155 is the target itself (no 90%)'
 }
 // weighted pull-up e1RM includes bodyweight
 r = applyProgression({ session: mkSession(3, [ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6]), ws('weighted_pullup', 25, 6, 8, [4, 6])]), targets: { weighted_pullup: { weight: 25, reps: 6 } }, rules, plan, settings });
-check('pull-up e1RM uses bodyweight (165+25)x1.2 = 228; v1.5 jump is 5 lb', r.e1rms.weighted_pullup === 228 && r.targets.weighted_pullup.weight === 30, { e: r.e1rms, t: r.targets.weighted_pullup });
-check('epley 185x5 = 216', epley(185, 5) === 216);
+check('pull-up e1RM uses bodyweight (165+25)x1.2 = 228 -> 230 to 5 lb; v1.5 jump is 5 lb', r.e1rms.weighted_pullup === 230 && r.targets.weighted_pullup.weight === 30, { e: r.e1rms, t: r.targets.weighted_pullup });
+check('epley 185x5 = 216 -> 215 (v1.18.10: estimates to the nearest 5 lb); 185x6 = 222 -> 220; 248 -> 250 never shows', epley(185, 5) === 215 && epley(185, 6) === 220 && [epley(225, 3), epley(212.5, 5), epley(100, 7)].every(v => v % 5 === 0));
 
 // ---- v1.1: last-time data and PRs ----
 console.log('v1.1: last time + PRs');
@@ -227,10 +227,10 @@ check('work set carries last-time data', sq.last && sq.last.sets[0].weight === 1
 check('ramp-up sets do not show last time', tlH.steps.filter(s => s.ramp).every(s => !s.last));
 // engine PR tracking
 r = applyProgression({ session: mkSession(3, [ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 8, [4, 6]), ws('back_squat', 185, 6, 7, [4, 6])]), targets: { back_squat: { weight: 185, reps: 6, stall: 0, bestE1rm: 200, bestWeight: 175 } }, rules, plan, settings });
-check('engine reports e1RM and weight PRs', r.prs.length === 2 && r.prs.some(p => p.kind === 'e1rm' && p.value === 222) && r.prs.some(p => p.kind === 'weight' && p.value === 185), r.prs);
-check('engine stores new bests', r.targets.back_squat.bestE1rm === 222 && r.targets.back_squat.bestWeight === 185, r.targets.back_squat);
+check('engine reports e1RM and weight PRs', r.prs.length === 2 && r.prs.some(p => p.kind === 'e1rm' && p.value === 220) && r.prs.some(p => p.kind === 'weight' && p.value === 185), r.prs);
+check('engine stores new bests', r.targets.back_squat.bestE1rm === 220 && r.targets.back_squat.bestWeight === 185, r.targets.back_squat);
 r = applyProgression({ session: mkSession(1, [ws('back_squat', 185, 5, 8, [5, 5], { baseline: true }), ws('back_squat', 165, 4, 7, [4, 6])]), targets: {}, rules, plan, settings });
-check('no PR reported when there was no previous best', r.prs.length === 0 && r.targets.back_squat.bestE1rm === 216, { prs: r.prs, t: r.targets.back_squat });
+check('no PR reported when there was no previous best', r.prs.length === 0 && r.targets.back_squat.bestE1rm === 215, { prs: r.prs, t: r.targets.back_squat });
 check('checkPR live: 190x5 beats e1RM 216', checkPR({ bestE1rm: 216, bestWeight: 185 }, 190, 5, 0).join(',') === 'e1rm,weight');
 check('checkPR live: nothing without prior bests', checkPR({}, 190, 5, 0).length === 0);
 check('checkPR live: pull-up adds bodyweight', checkPR({ bestE1rm: 228 }, 27.5, 6, 165).join(',') === 'e1rm');
@@ -1008,7 +1008,7 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('v1.18.5 ramp-ups: heavier targets keep a real spread (315: 155, 225, 275)', ramp(315).join() === '155,225,275', ramp(315));
   const curl = plan.exercises.curl, row = plan.exercises.db_row;
   check('v1.18.5 dumbbells: 55 on a two-dumbbell curl is 2 x 27.5, which the gym does not have', !dumbbellOk(rules, curl, 55) && dumbbellOk(rules, curl, 50) && dumbbellOk(rules, curl, 60) && dumbbellOk(rules, curl, 35));
-  check('v1.18.5 dumbbells: 55 -> 50 (lighter on a tie), 27.5 on a single dumbbell -> 25; good sizes and barbells stay', snapLoad(rules, curl, 55) === 50 && snapLoad(rules, row, 27.5) === 25 && snapLoad(rules, curl, 60) === 60 && snapLoad(rules, plan.exercises.back_squat, 137.5) === 137.5);
+  check('v1.18.5 dumbbells: 55 -> 50 (lighter on a tie), 27.5 on a single dumbbell -> 25; good sizes stay; v1.18.10: a barbell lands on 5 lb (137.5 -> 135, 92.5 -> 90, 98 -> 100)', snapLoad(rules, curl, 55) === 50 && snapLoad(rules, row, 27.5) === 25 && snapLoad(rules, curl, 60) === 60 && snapLoad(rules, plan.exercises.back_squat, 137.5) === 135 && snapLoad(rules, plan.exercises.strict_press, 92.5) === 90 && snapLoad(rules, plan.exercises.strict_press, 98) === 100);
   const f = numberFlag({ weight: 55, reps: 10, target: { weight: 55, reps: 10 }, repRange: [10, 12], done: true }, curl, rules);
   check('v1.18.5 flag: a logged 55 lb curl asks what he really used', f && f.code === 'dumbbell' && /27\.5/.test(f.text), f);
   check('v1.18.5 flag: a 50 or 60 lb curl is fine', !numberFlag({ weight: 50, reps: 10, target: { weight: 55, reps: 10 }, repRange: [10, 12], done: true }, curl, rules) && !numberFlag({ weight: 60, reps: 10, target: { weight: 55, reps: 10 }, repRange: [10, 12], done: true }, curl, rules));
@@ -1047,7 +1047,7 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   t = go('back_squat', 3, { weight: 195, reps: 5 }, [[205, 4, 9], [205, 4, 9], [205, 4, 9]], [4, 6]);
   check('R5 squat: 205 x 4 at Hard against 195 x 5 -> the target follows to 205 x 4, no extra step', t.weight === 205 && t.reps === 4, t);
   t = go('strict_press', 2, { weight: 90, reps: 5 }, [[90, 5, 8], [90, 5, 8], [90, 5, 8], [90, 5, 8]], [4, 6]);
-  check('R5 press: week 2 no longer blocks a step (90 x 5 -> 92.5 x 5)', t.weight === 92.5 && t.reps === 5, t);
+  check('R5 press: week 2 no longer blocks a step (90 x 5 -> 95 x 5; 5 lb steps since v1.18.10)', t.weight === 95 && t.reps === 5, t);
   t = go('weighted_pullup', 3, { weight: 30, reps: 5 }, [[30, 5, 8], [30, 5, 8], [30, 5, 8], [30, 5, 8]], [4, 6]);
   check('R5 pull-up: +30 x 5 -> +35 x 5', t.weight === 35 && t.reps === 5, t);
   t = go('push_press', 3, { weight: 95, reps: 5 }, [[95, 5, 8], [95, 5, 8], [95, 5, 8]], [3, 5]);
@@ -1111,12 +1111,12 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   const proj = (id, t) => projectExercise({ plan, rules, settings: { ...settings, startDate: '2026-11-16' }, sessions: [], targets: { [id]: t }, exerciseId: id, today });
   const sq = proj('back_squat', { weight: 195, reps: 5, stall: 0 });
   check('squat from 195 x 5: doing well 245 x 3, steady 225 x 3, struggling 220 x 3 by week 11', sq.end.well.weight === 245 && sq.end.well.reps === 3 && sq.end.steady.weight === 225 && sq.end.struggle.weight === 220, sq.end);
-  check('squat: estimated max 228 now; 270, 248, 242 at the end; retest 5-rep weights 230, 210, 205', sq.now.max === 228 && sq.end.well.max === 270 && sq.end.steady.max === 248 && sq.end.struggle.max === 242 && sq.end.well.fiveRep === 230 && sq.end.steady.fiveRep === 210 && sq.end.struggle.fiveRep === 205, [sq.now, sq.end]);
+  check('squat: estimated max 230 now; 270, 250, 240 at the end (v1.18.10: to 5 lb, was 228, 248, 242); retest 5-rep weights 230, 210, 205', sq.now.max === 230 && sq.end.well.max === 270 && sq.end.steady.max === 250 && sq.end.struggle.max === 240 && sq.end.well.fiveRep === 230 && sq.end.steady.fiveRep === 210 && sq.end.struggle.fiveRep === 205, [sq.now, sq.end]);
   check('squat: the struggling case never resets (a rep short two weeks in three, the third clears the count)', sq.weeks.every((w, i, a) => !i || w.struggle.weight >= a[i - 1].struggle.weight - 0), sq.weeks.map(w => w.struggle.weight));
   check('squat: his old best (245) comes from plan.json', sq.oldBest === 245 && sq.weekly === true);
-  check('v1.18.9 squat: the benchmark (Intermediate at 165 lb, 274) comes from plan.json; accessories have none', sq.standard.lb === 274 && /165/.test(sq.standard.label) && proj('curl', { weight: 50, reps: 10 }).standard === null);
+  check('v1.18.9 squat: the benchmark (Intermediate at 165 lb, 274, shown as 275) comes from plan.json; accessories have none', sq.standard.lb === 275 && /165/.test(sq.standard.label) && proj('curl', { weight: 50, reps: 10 }).standard === null);
   const pu = proj('weighted_pullup', { weight: 30, reps: 5, stall: 0 });
-  check('pull-up: max is added weight (63 now) and no case passes 20% over today on bodyweight + load', pu.now.max === 63 && pu.end.well.e1rm <= Math.round(228 * 1.2) && pu.end.well.max > pu.end.steady.max && pu.end.steady.max > pu.end.struggle.max, [pu.now, pu.end]);
+  check('pull-up: max is added weight (65 now, was 63 before 5 lb rounding) and no case passes 20% over today on bodyweight + load', pu.now.max === 65 && pu.end.well.e1rm <= Math.round(230 * 1.2) && pu.end.well.max > pu.end.steady.max && pu.end.steady.max > pu.end.struggle.max, [pu.now, pu.end]);
   const cu = proj('curl', { weight: 50, reps: 10 });
   check('curl: every case stays within 35% of today and on dumbbells the gym has', ['well', 'steady', 'struggle'].every(c => cu.end[c].e1rm <= 67 * 1.35 + 1 && cu.end[c].weight % 10 === 0) && cu.weekly === false, cu.end);
   const lr = proj('lateral_raise', { weight: 30, reps: 12 });
@@ -1126,6 +1126,52 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   const noCap = JSON.parse(JSON.stringify(rules)); delete noCap.projection;
   const free = projectExercise({ plan, rules: noCap, settings: { ...settings, startDate: '2026-11-16' }, sessions: [], targets: { lateral_raise: { weight: 30, reps: 12 } }, exerciseId: 'lateral_raise', today });
   check('without rules.projection the lines run free (the cap is what holds them)', free.end.well.weight > 40, free.end.well);
+}
+
+// ---- v1.18.10: every weight the app asks for or shows is a friendly one (Cameron, Nov 25) ----
+{
+  console.log('\nv1.18.10: 5 lb steps everywhere');
+  const { projectExercise, CASES } = await import('../js/projection.js');
+  const today = new Date('2026-11-25T12:00:00');
+  const st = { ...settings, startDate: '2026-11-16', bodyweightLb: 165 };
+  // his targets on Nov 25 (strict press put on a 2.5 step to check it comes back to the grid)
+  const T = { back_squat: { weight: 195, reps: 5 }, rdl: { weight: 195, reps: 7 }, calf_raise: { weight: 105, reps: 12 }, bss: { weight: 70, reps: 8 }, leg_curl: { weight: 100, reps: 11 },
+    curl: { weight: 60, reps: 10 }, oh_tri_ext: { weight: 80, reps: 8 }, strict_press: { weight: 92.5, reps: 5 }, weighted_pullup: { weight: 30, reps: 5 }, incline_db_press: { weight: 120, reps: 7 },
+    cs_row: { weight: 55, reps: 8 }, lateral_raise: { weight: 30, reps: 12 }, incline_curl: { weight: 40, reps: 8 }, front_squat: { weight: 140, reps: 5 }, push_press: { weight: 95, reps: 5 },
+    db_row: { weight: 55, reps: 8 }, preacher_curl: { weight: 25, reps: 8 }, rope_pushdown: { weight: 90, reps: 10 }, ab_wheel: { reps: 10 } };
+  const loadable = (id, w) => { const ex = plan.exercises[id]; if (w == null) return true; const per = ex.equipment === 'dumbbell' && ex.pair ? w / 2 : w; return per % 5 === 0 && !(ex.equipment === 'dumbbell' && per === 27.5); };
+  const bad = [], badMax = [];
+  for (const id of Object.keys(T)) {
+    const p = projectExercise({ plan, rules, settings: st, sessions: [], targets: T, exerciseId: id, today });
+    if (!p || p.kind === 'self') continue;
+    for (const w of [{ now: p.now }, ...p.weeks].flatMap(r => Object.values(r).filter(v => v && typeof v === 'object'))) {
+      if (!loadable(id, w.weight)) bad.push(`${id} ${w.weight}`);
+      if (w.max != null && w.max % 5) badMax.push(`${id} ${w.max}`);
+      if (w.fiveRep != null && w.fiveRep % 5) bad.push(`${id} 5RM ${w.fiveRep}`);
+    }
+    if (p.standard && p.standard.lb % 5) badMax.push(`${id} standard ${p.standard.lb}`);
+  }
+  check('v1.18.10 Plan sheet: every target in every case, every week, on every lift is a weight he can load (5 lb steps, dumbbells per hand, no 27.5s)', !bad.length, bad.slice(0, 8));
+  check('v1.18.10 Plan sheet: every estimated max and benchmark shown is on 5 lb (no 248, 242, 274)', !badMax.length, badMax.slice(0, 8));
+  // the engine itself, a session at a time, from off-grid starting points
+  const offs = [];
+  for (const [id, w] of [['strict_press', 92.5], ['push_press', 97.5], ['back_squat', 187.5], ['front_squat', 142.5], ['weighted_pullup', 27.5], ['rope_pushdown', 92.5], ['curl', 55]]) {
+    const ex = plan.exercises[id];
+    const n = ex.mainLift ? 3 : 3;
+    for (const rpe of [6, 8, 9]) {
+      const r = applyProgression({ session: mkSession(4, Array.from({ length: n }, () => ws(id, w, 5, rpe, [3, 12]))), targets: { [id]: { weight: w, reps: 5, stall: 2 } }, rules, plan, settings: st });
+      if (!loadable(id, r.targets[id].weight)) offs.push(`${id} ${w} rpe ${rpe} -> ${r.targets[id].weight}`);
+    }
+  }
+  check('v1.18.10 engine: from an off-step target (92.5 press, 27.5 pull-up, 2 x 27.5 curl) the next target is always on a 5 lb step', !offs.length, offs);
+  const missed = applyProgression({ session: mkSession(4, [1, 2, 3, 4].map(() => ws('strict_press', 95, 3, 9, [4, 6]))), targets: { strict_press: { weight: 95, reps: 5, stall: 2 } }, rules, plan, settings: st }).targets.strict_press;
+  check('v1.18.10 the 5% reset on a 95 press lands on 90, not 90.25 or 92.5', missed.weight === 90, missed);
+  check('v1.18.10 the strict press steps 5 lb like every other lift', incrementFor(rules, 'strict_press', plan.exercises.strict_press) === 5 && Object.values(rules.increments.byExercise).every(v => v >= 5));
+  const heavy = effectiveTarget({ rules, plan, settings: st, exerciseId: 'strict_press', target: { weight: 95, reps: 5 }, phaseId: 'heavy' });
+  check('v1.18.10 heavy-week start on a 95 press: 95 x 1.05 = 99.75 -> 100', heavy.weight === 100, heavy);
+  const up = upgrade11810({ targets: { strict_press: { weight: 92.5, reps: 5, e1rm: 111, bestE1rm: 111 }, back_squat: { weight: 195, reps: 5, e1rm: 228, bestE1rm: 221, baselineE1rm: 216 }, curl: { weight: 55, reps: 10, bestE1rm: 73 }, ab_wheel: { reps: 10 } }, rules, plan });
+  check('v1.18.10 upgrade: a 92.5 press target goes to 90, a 2 x 27.5 curl to 50, every stored estimate to 5 lb (228 -> 230, 221 -> 220)', up.targets.strict_press.weight === 90 && up.targets.curl.weight === 50 && up.targets.back_squat.e1rm === 230 && up.targets.back_squat.bestE1rm === 220 && up.targets.back_squat.baselineE1rm === 215 && up.targets.strict_press.e1rm === 110 && up.targets.ab_wheel.reps === 10 && up.zeroed === 3, up);
+  check('v1.18.10 upgrade: run again on its own output, nothing changes', upgrade11810({ targets: up.targets, rules, plan }).zeroed === 0);
 }
 
 // ---- v1.18.11: a goal per lift, a hand-set target, the chart's columns (Cameron, Nov 25) ----
@@ -1163,7 +1209,7 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   const cg = (id, g, now) => checkGoal({ rules, plan, settings: { ...settings }, exerciseId: id, goal: g, now });
   const sqNow = { weight: 195, reps: 5 };
   let c = cg('back_squat', { weight: 265, reps: 1 }, sqNow);
-  check('goal 265 x 1 on a 195 x 5 squat: fine, 16% over an estimated 228', c.level === 'ok' && c.max === 265 && Math.round(c.gain * 100) === 16, c);
+  check('goal 265 x 1 on a 195 x 5 squat: fine, 15% over an estimated 230', c.level === 'ok' && c.max === 265 && Math.round(c.gain * 100) === 15, c);
   c = cg('back_squat', { weight: 290, reps: 1 }, sqNow);
   check('goal 290: flagged, past the 20% a block adds (needs his OK)', c.level === 'flag' && /20%/.test(c.text) && /Androulakis/.test(c.text), c);
   c = cg('back_squat', { weight: 2650, reps: 1 }, sqNow);
@@ -1195,14 +1241,36 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   const today = new Date('2026-11-25T12:00:00');
   const sq = projectExercise({ plan, rules, settings: { ...settings, startDate: '2026-11-16' }, sessions: [], targets: { back_squat: { weight: 195, reps: 5, stall: 0 } }, exerciseId: 'back_squat', today });
   const cw = chartColumns(sq, 'weight'), cm = chartColumns(sq, 'max');
-  check('chart: a "now" column then weeks 3 to 12', cw.length === 11 && cw[0].now && cw[0].week === 2 && cw[10].week === 12, cw.map(c => c.week));
-  check('chart, weight: now 195, week 11 doing well 245 (x 3), week 12 the retest 5-rep weight', cw[0].v.well === 195 && cw[9].v.well === 245 && cw[9].t.well.reps === 3 && cw[10].retest && cw[10].v.well === sq.end.well.fiveRep, [cw[9].v, cw[10].v]);
-  check('chart, estimated max: never dips by the few pounds a heavier week reads lower; ends at the projection\'s max', cm.every((c, i) => !i || ['well', 'steady', 'struggle'].every(k => c.v[k] >= cm[i - 1].v[k])) && cm[10].v.well === sq.end.well.max && cm[10].retest, cm.map(c => c.v));
-  check('weekReaching: doing well reaches 265 in week 11, steady never', weekReaching(sq, 'well', 265) === 11 && weekReaching(sq, 'steady', 265) === null);
+  check('chart: a column a week, 3 to 12; week 3 is the next session, at the target he has now (195 x 5)', cw.length === 10 && cw[0].week === 3 && cw[9].week === 12 && cw[0].v.well === 195 && cw[0].t.well.reps === 5, cw.map(c => c.week));
+  check('chart, weight: the weight lifted that week (week 4 doing well 200, week 8 the heavier start 225 x 3, week 11 240 x 3)', cw[1].v.well === 200 && cw[5].v.well === 225 && cw[5].t.well.reps === 3 && cw[8].v.well === 240 && cw[8].t.well.reps === 3, cw.map(c => c.v.well));
+  check('chart, weight: week 12 is the retest, the 5-rep weight of what the block built (doing well about 230 x 5)', cw[9].retest && cw[9].v.well === sq.end.well.fiveRep && cw[9].v.well === 230, cw[9]);
+  check('chart, estimated max: never dips by the few pounds a heavier week reads lower; the retest shows the block\'s end (270)', cm.every((c, i) => !i || ['well', 'steady', 'struggle'].every(k => c.v[k] >= cm[i - 1].v[k])) && cm[9].v.well === sq.end.well.max && cm[9].v.well === 270 && cm[9].retest, cm.map(c => c.v));
+  check('weekReaching: doing well reaches 265 in week 11, steady never', weekReaching(sq, 'well', 265) === 11 && weekReaching(sq, 'steady', 265) === null, [weekReaching(sq, 'well', 265), weekReaching(sq, 'steady', 265)]);
+  const loadableLift = !Object.keys(plan.exercises).some(id => {
+    const p = projectExercise({ plan, rules, settings: { ...settings, startDate: '2026-11-16' }, sessions: [], targets: { [id]: { weight: plan.exercises[id].equipment === 'bodyweight' ? null : 100, reps: 8 } }, exerciseId: id, today });
+    return p && p.weeks && p.weeks.some(w => ['well', 'steady', 'struggle'].some(c => w.lift[c].weight != null && w.lift[c].weight % 5));
+  });
+  check('every week\'s lifted weight, on every lift, is a 5 lb step', loadableLift);
   const pushed = projectExercise({ plan, rules, settings: withGoal('back_squat', { weight: 265, reps: 1, push: 5 }), sessions: [], targets: { back_squat: { weight: 195, reps: 5, stall: 0 } }, exerciseId: 'back_squat', today });
-  check('projection with a push: doing well reaches 265 sooner, steady gets there too, nothing past the 20% cap', weekReaching(pushed, 'well', 265) < 11 && weekReaching(pushed, 'steady', 265) != null && pushed.end.well.e1rm <= Math.round(228 * 1.2) + 1, [weekReaching(pushed, 'well', 265), weekReaching(pushed, 'steady', 265), pushed.end.well]);
+  check('projection with a push: doing well reaches 265 sooner (week 6), steady gets there too, nothing past the 20% cap', weekReaching(pushed, 'well', 265) === 6 && weekReaching(pushed, 'steady', 265) === 12 && pushed.end.well.e1rm <= Math.round(228 * 1.2) + 1, [weekReaching(pushed, 'well', 265), weekReaching(pushed, 'steady', 265), pushed.end.well]);
+  check('push stops at the goal: after 225 x 5 (est. 265) the steps are 5 again (230 in the lighter week)', chartColumns(pushed, 'weight')[4].v.well === 230, chartColumns(pushed, 'weight').map(c => c.v.well));
   const aw = projectExercise({ plan, rules, settings: { ...settings, startDate: '2026-11-16' }, sessions: [], targets: { ab_wheel: { reps: 10 } }, exerciseId: 'ab_wheel', today });
   check('chart, a reps lift: reps in every column, no retest column', chartColumns(aw, 'weight').every(c => !c.retest && c.v.well != null) && chartColumns(aw, 'weight')[0].v.well === 10);
+  const fewer = projectExercise({ plan, rules, settings: { ...settings, startDate: '2026-11-16' }, sessions: [], targets: { back_squat: { weight: 195, reps: 5 } }, exerciseId: 'back_squat', today: new Date('2027-02-01T08:00:00') });
+  check('late in the block (week 12 only): one column, the retest', chartColumns(fewer, 'weight').length === 1 && chartColumns(fewer, 'weight')[0].retest, fewer && fewer.weeks.map(w => w.week));
+
+  // the row and the lift page read the same numbers, the way the workout builds them
+  const { nextNumbers, nextWeekOf } = await import('../js/lift-goal.js');
+  const placeIn = (sid, id) => { const s = plan.sessions.find(x => x.id === sid); for (const b of s.blocks) for (const it of b.items || []) if (it.exercise === id) return { b, it }; return null; };
+  const nn = (sid, id, t, ph) => { const p = placeIn(sid, id); return nextNumbers({ plan, rules, settings }, p.it, p.b, t, ph); };
+  const lc1 = placeIn('lift1', 'leg_curl'), lc3 = placeIn('lift3', 'leg_curl');
+  check('next numbers: the leg curl has the sets of the session it sits in', nn('lift1', 'leg_curl', { weight: 100, reps: 11 }, 'build').sets === lc1.it.sets && nn('lift3', 'leg_curl', { weight: 100, reps: 11 }, 'build').sets === lc3.it.sets, [lc1.it.sets, lc3.it.sets]);
+  const tri1 = placeIn('lift1', 'oh_tri_ext');
+  check('next numbers: reps held inside the item\'s range, as the workout does (8 on a 10-12 item shows 10)', tri1.it.reps && nn('lift1', 'oh_tri_ext', { weight: 80, reps: 8 }, 'build').reps === Math.max(8, tri1.it.reps[0]), tri1.it.reps);
+  check('next numbers: the squat in a heavier week shows its heavier start (5% up, 3 reps)', (() => { const n = nn('lift1', 'back_squat', { weight: 230, reps: 5, stall: 0 }, 'heavy'); return n.reps === 3 && n.weight > 230 && n.weight % 5 === 0; })());
+  check('next numbers: the lighter week cuts the sets', nn('lift1', 'back_squat', { weight: 195, reps: 5 }, 'light').sets < placeIn('lift1', 'back_squat').it.sets);
+  check('next numbers: a curl pair the rack can\'t make (2 x 27.5) shows the one it can', nn('lift1', 'curl', { weight: 55, reps: 10 }, 'build').weight === 50);
+  check('nextWeekOf: Monday\'s session logged in week 2 comes round next in week 3', nextWeekOf(plan, { ...settings, startDate: '2026-11-16' }, [{ sessionId: 'lift1', week: 2 }], 'lift1', new Date('2026-11-25T12:00:00')) === 3);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');

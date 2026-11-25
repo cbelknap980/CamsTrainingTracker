@@ -9,7 +9,7 @@ import { el, showModal, closeModal, toast, haptic } from './ui.js';
 import { projectExercise } from './projection.js';
 import { incrementFor } from './progression.js';
 import { fmtWeight, repsText, phaseForWeek, pairText } from './data.js';
-import { checkGoal, checkTarget, chartColumns, weekReaching, canPush, pushStep, goalShownMax, goalAtReps, GOAL_REPS } from './lift-goal.js';
+import { checkGoal, checkTarget, chartColumns, weekReaching, canPush, pushStep, goalShownMax, goalAtReps, GOAL_REPS, nextNumbers, nextWeekOf } from './lift-goal.js';
 
 // the three cases (v1.18.8): amber, blue and a dashed grey read apart on the dark surface, also without colour
 const CASE = {
@@ -33,9 +33,10 @@ const num = x => (x === '' || x == null ? null : Number(x));
 /** node.append without the nulls (the DOM's own append writes them out as "null"). */
 const put = (node, ...kids) => { node.append(...kids.filter(k => k != null && k !== false)); return node; };
 
-/** Where the lift sits in the plan: its first session, block and item. */
-function placeOf(plan, exerciseId) {
-  for (const s of plan.sessions) for (const b of s.blocks) for (const it of b.items || []) if (it.exercise === exerciseId) return { session: s, block: b, item: it };
+/** Where the lift sits in the plan: in the session it was tapped from, else its first session. */
+function placeOf(plan, exerciseId, sessionId) {
+  const order = sessionId ? [...plan.sessions.filter(s => s.id === sessionId), ...plan.sessions.filter(s => s.id !== sessionId)] : plan.sessions;
+  for (const s of order) for (const b of s.blocks) for (const it of b.items || []) if (it.exercise === exerciseId) return { session: s, block: b, item: it };
   return null;
 }
 
@@ -76,7 +77,7 @@ function build(root, st, exerciseId, opts, draw) {
   const { plan, rules, settings } = d;
   const ex = plan.exercises[exerciseId] || { name: exerciseId };
   const stored = d.targets[exerciseId] || null;
-  const place = placeOf(plan, exerciseId);
+  const place = placeOf(plan, exerciseId, opts.sessionId);
   const canWrite = !!(opts.canWrite && opts.saveTarget);
   const goal = (settings.liftGoals || {})[exerciseId] || null;
 
@@ -104,7 +105,7 @@ function build(root, st, exerciseId, opts, draw) {
   ]));
 
   // ---- next time ----
-  put(root, nextCard(st, { ex, exerciseId, stored, place, canWrite, opts, draw, settings, rules, plan }));
+  put(root, nextCard(st, { ex, exerciseId, stored, place, canWrite, opts, draw, settings, rules, plan, p }));
 
   // ---- the 12 weeks ----
   put(root, chartCard(st, { p, ex, exerciseId, goal: shownGoal, settings: sets, rules, plan, draw }));
@@ -118,16 +119,26 @@ function build(root, st, exerciseId, opts, draw) {
 
 // ---------------------------------------------------------------- next time
 
-function nextCard(st, { ex, exerciseId, stored, place, canWrite, opts, draw, settings, rules, plan }) {
-  const t = stored || {};
-  const adj = settings.restAdjust || {};
+function nextCard(st, { ex, exerciseId, stored, place, canWrite, opts, draw, settings, rules, plan, p }) {
+  // what the next session asks for, as the workout will build it (the same numbers as the row on the Plan list): the
+  // stored target or its heavier-week start, reps held inside the plan's range, sets cut on the lighter week
   const it = place && place.item, b = place && place.block;
+  const today = st.data.today || new Date();
+  const nextWeek = place ? nextWeekOf(plan, settings, st.data.sessions, place.session.id, today) : null;
+  const phaseId = nextWeek ? phaseForWeek(plan, nextWeek).id : null;
+  const n = it && stored ? nextNumbers({ plan, rules, settings }, it, b, stored, phaseId) : null;
+  const eff = n && n.weight != null && stored.weight != null && n.weight !== stored.weight && st.edit !== 'target' ? n : null;
+  const t = stored ? { ...stored, ...(n ? { weight: n.weight != null ? n.weight : stored.weight, reps: n.reps != null ? n.reps : stored.reps } : {}) } : {};
+  const adj = settings.restAdjust || {};
   const baseRest = it ? (it.restSeconds || b.roundRestSeconds || 0) : 0;
   const dRest = (adj[exerciseId] || 0) + (place ? (adj[`session:${place.session.id}`] || 0) : 0);
   const rest = baseRest ? `${baseRest + dRest} s rest${dRest ? ` (${dRest > 0 ? '+' : ''}${dRest} from check-ins)` : ''}` : '';
-  const sets = it ? (it.sets || (b.type === 'finisher' ? b.rounds : null)) : null;
+  const sets = n ? n.sets : (it ? (it.sets || (b.type === 'finisher' ? b.rounds : null)) : null);
   const has = t.weight != null || t.reps != null;
-  const src = [SOURCE[t.source] || '', t.pendingCoach ? 'reaches the phone when it next opens' : ''].filter(Boolean).join(', ');
+  const heavyStart = eff && phaseId === 'heavy';
+  const src = heavyStart
+    ? `Heavier weeks start ${Math.round(((rules.phases.heavy || {}).startWeightFactor - 1) * 100)}% up from ${wTxt(ex, stored.weight)} × ${stored.reps}`
+    : [SOURCE[t.source] || '', t.pendingCoach ? 'reaches the phone when it next opens' : ''].filter(Boolean).join(', ');
 
   const card = el('div', { class: 'lift-card lift-next', id: 'lift-next' });
   const big = has
@@ -139,14 +150,14 @@ function nextCard(st, { ex, exerciseId, stored, place, canWrite, opts, draw, set
   put(card, 
     el('div', { class: 'row lc-top' }, [
       el('h3', {}, 'Next time'),
-      canWrite && has && st.edit !== 'target' ? el('button', { type: 'button', class: 'lift-btn', id: 'lift-edit', onclick: () => { st.edit = 'target'; st.ok = false; st.draftT = { weight: t.weight != null ? t.weight : '', reps: t.reps != null ? t.reps : '' }; draw(); } }, 'Edit') : null
+      canWrite && has && st.edit !== 'target' ? el('button', { type: 'button', class: 'lift-btn', id: 'lift-edit', onclick: () => { st.edit = 'target'; st.ok = false; st.draftT = { weight: t.weight != null ? t.weight : '', reps: t.reps != null ? t.reps : '' }; draw(); document.getElementById('lift-t-weight')?.focus(); } }, 'Edit') : null
     ]),
     big,
     el('div', { class: 'muted small ln-sub' }, [pairText(ex, t.weight) ? `${pairText(ex, t.weight)} lb · ` : '', rest, rest && src ? ' · ' : '', src].join(''))
   );
 
   if (st.edit === 'target') {
-    const range = it && it.reps;
+    const range = n && n.range ? n.range : (it && it.reps);
     const w = el('input', { type: 'number', inputmode: 'decimal', step: String(incrementFor(rules, exerciseId, ex) || 5), id: 'lift-t-weight', value: st.draftT.weight, 'aria-label': 'Weight' });
     const r = el('input', { type: 'number', inputmode: 'numeric', step: '1', min: '1', id: 'lift-t-reps', value: st.draftT.reps, 'aria-label': 'Reps' });
     const msg = el('div', { class: 'lift-check', id: 'lift-t-check' });
@@ -166,7 +177,7 @@ function nextCard(st, { ex, exerciseId, stored, place, canWrite, opts, draw, set
       const c = verdict();
       if (c.level === 'block') return;
       save.disabled = true;
-      const res = await opts.saveTarget(exerciseId, { weight: num(st.draftT.weight), reps: num(st.draftT.reps) });
+      const res = await opts.saveTarget(exerciseId, { weight: num(st.draftT.weight), reps: num(st.draftT.reps), week: nextWeek });
       st.data = res.data; st.edit = null; st.draftT = null; draw(); haptic('done');
       const nt = st.data.targets[exerciseId] || {};
       toast(`${ex.name}: next time ${nt.weight != null ? `${wTxt(ex, nt.weight)} × ` : ''}${nt.reps}`, 5000, { action: 'Undo', onAction: async () => { const back = await res.undo(); if (st.root.isConnected) { st.data = back; draw(); } } });
@@ -228,7 +239,7 @@ function chartCard(st, { p, ex, exerciseId, goal, settings, rules, plan, draw })
   const mode = p.kind === 'reps' ? 'weight' : view.mode;
   const cols = chartColumns(p, mode);
   // opens on the last training week (week 11 for a main lift: week 12 is its retest)
-  let sel = st.week === -1 ? 0 : cols.findIndex(c => !c.now && c.week === st.week);
+  let sel = cols.findIndex(c => c.week === st.week);
   if (sel < 0) { sel = cols.length - 1; while (sel > 0 && cols[sel].retest) sel -= 1; }
   const inc = incrementFor(rules, exerciseId, ex) || 5;
 
@@ -257,7 +268,7 @@ function chartCard(st, { p, ex, exerciseId, goal, settings, rules, plan, draw })
   if (hi - lo < 4) { lo -= 2; hi += 2; }
   const step = tickStep(hi - lo);
   const padV = (hi - lo) * 0.08; lo -= padV; hi += padV;
-  const x = i => L + i * (W - L - R) / (cols.length - 1);
+  const x = i => (cols.length > 1 ? L + i * (W - L - R) / (cols.length - 1) : (L + W - R) / 2);
   const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
   const g = svg('svg', { viewBox: `0 0 ${W} ${H}`, class: 'lc-svg', role: 'slider', tabindex: '0', 'aria-label': 'Weeks: tap or drag to read one', 'aria-valuemin': cols[0].week, 'aria-valuemax': 12 });
   for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
@@ -291,7 +302,7 @@ function chartCard(st, { p, ex, exerciseId, goal, settings, rules, plan, draw })
   }
   // week labels: every week, the selected one stands out
   const labels = cols.map((c, i) => {
-    const t = svg('text', { x: x(i), y: H - 7, 'text-anchor': 'middle', class: 'lc-wk' }, [c.now ? 'now' : String(c.week)]);
+    const t = svg('text', { x: x(i), y: H - 7, 'text-anchor': 'middle', class: 'lc-wk' }, [String(c.week)]);
     g.appendChild(t); return t;
   });
   // the cursor
@@ -306,13 +317,13 @@ function chartCard(st, { p, ex, exerciseId, goal, settings, rules, plan, draw })
     if (fromUser && i !== sel) haptic('tap');
     sel = i;
     const col = cols[i];
-    st.week = col.now ? -1 : col.week;
+    st.week = col.week;
     cursor.setAttribute('x1', x(i)); cursor.setAttribute('x2', x(i));
     CASES.forEach((k, j) => { const v = col.v[k]; hits[j].setAttribute('cx', x(i)); hits[j].setAttribute('cy', v != null ? y(v) : -20); });
     labels.forEach((t, j) => t.classList.toggle('on', j === i));
     g.setAttribute('aria-valuenow', col.week);
-    const ph = col.now ? 'Now' : `Week ${col.week}`;
-    const phase = col.now ? '' : (col.retest ? 'Retest: work up to a set of 5' : (PHASE_NAME[col.phase] || ''));
+    const ph = i === 0 ? `Week ${col.week}, next time` : `Week ${col.week}`;
+    const phase = col.retest ? 'Retest: work up to a set of 5' : (PHASE_NAME[col.phase] || '');
     readout.innerHTML = '';
     put(readout, el('b', {}, ph), phase ? el('span', { class: 'muted' }, ` · ${phase}`) : null);
     g.setAttribute('aria-valuetext', `${ph}${phase ? `, ${phase}` : ''}: ${CASES.map(k => `${CASE[k].label} ${valText(p, ex, col, k, mode)}`).join(', ')}`);
@@ -321,12 +332,12 @@ function chartCard(st, { p, ex, exerciseId, goal, settings, rules, plan, draw })
     if (p.kind !== 'weight' || !t) extra.textContent = '';
     else if (mode === 'max') extra.textContent = col.retest ? `${CASE[view.pick].label}: about ${wTxt(ex, t.fiveRep)} × 5 on the retest` : `${CASE[view.pick].label}: ${wTxt(ex, t.weight)} × ${t.reps} that week`;
     else extra.textContent = `${CASE[view.pick].label}: estimated max ${wTxt(ex, t.max)} lb${ex.equipment === 'weighted_bw' ? ' added' : ''}`;
-    if (table) table.querySelectorAll('tr[data-week]').forEach(tr => tr.classList.toggle('on', Number(tr.dataset.week) === col.week && !col.now));
+    if (table) table.querySelectorAll('tr[data-week]').forEach(tr => tr.classList.toggle('on', Number(tr.dataset.week) === col.week));
   };
   const at = ev => {
     const r = g.getBoundingClientRect();
     const px = (ev.clientX - r.left) / r.width * W;
-    return Math.round((px - L) / ((W - L - R) / (cols.length - 1)));
+    return cols.length > 1 ? Math.round((px - L) / ((W - L - R) / (cols.length - 1))) : 0;
   };
   let down = false;
   g.addEventListener('pointerdown', ev => { down = true; try { g.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } select(at(ev), true); });
@@ -348,7 +359,7 @@ function chartCard(st, { p, ex, exerciseId, goal, settings, rules, plan, draw })
 
   // ---- every week, as a table (closed until he opens it) ----
   let table = null;
-  const rows = cols.filter(c => !c.now);
+  const rows = cols;
   table = el('table', { class: 'lc-table', id: 'lift-weeks' }, [
     el('tr', {}, [el('th', {}, 'Week'), ...CASES.map(k => el('th', {}, CASE[k].label))]),
     ...rows.map(c => el('tr', { 'data-week': c.week, onclick: () => select(cols.indexOf(c), true) }, [

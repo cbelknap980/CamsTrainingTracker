@@ -177,10 +177,33 @@ export function dumbbellOk(rules, ex, w) {
   return !(d.notAvailableLb || []).some(x => near(x, per));
 }
 
-/** A dumbbell size the gym does not have moved to the nearest one on the rack's steps (the lighter on a tie). Anything else is left as it is. */
+/** v1.18.10: the nearest multiple of step, the lower one on a tie (97.5 -> 95, 98 -> 100). */
+export function snapTo(w, step) {
+  if (w == null || !step) return w;
+  return Math.ceil(w / step - 0.5 - 1e-9) * step;
+}
+/** v1.18.10: an estimated max as shown, on rules.loads.estimateStepLb (248 -> 250, 242 -> 240). */
+export function roundEst(v, rules) {
+  if (v == null || !Number.isFinite(v)) return v;
+  const step = (rules && rules.loads && rules.loads.estimateStepLb) || 5;
+  return Math.round(v / step) * step;
+}
+
+/**
+ * A weight he can load: barbell, machine, cable and added pull-up weight on rules.loads.stepLb (5 lb: 92.5 -> 90),
+ * dumbbells on the rack's per-hand steps without the sizes the gym does not have (2 x 27.5 -> 2 x 25). The nearest,
+ * the lighter on a tie. Bodyweight lifts and anything without a weight are left as they are.
+ */
 export function snapLoad(rules, ex, w) {
-  if (w == null || dumbbellOk(rules, ex, w)) return w;
+  if (w == null || !ex || !rules) return w;
+  if (ex.equipment !== 'dumbbell') {
+    const step = rules.loads && rules.loads.stepLb;
+    return ['barbell', 'machine', 'cable', 'weighted_bw'].includes(ex.equipment) && step ? snapTo(w, step) : w;
+  }
   const d = rules.dumbbells;
+  if (!d) return w;
+  const onStep = per => near(per / (d.perHandStepLb || 5), Math.round(per / (d.perHandStepLb || 5)));
+  if (dumbbellOk(rules, ex, w) && onStep(perHandOf(rules, ex, w))) return w;
   const step = d.perHandStepLb || 5;
   const per = perHandOf(rules, ex, w);
   const count = ex.pair ? w / per : 1;
