@@ -70,6 +70,8 @@ function buildRecord(draft, plan) {
   };
   // v1.18: start to finish with the pauses in it (Cameron: "I want to see total time in gym")
   if (draft.gymSeconds != null) record.gymSeconds = draft.gymSeconds;
+  // v1.18.13: the stretch was left out; the session still counts as done when all the training was
+  if (draft.stretchSkipped) record.stretchSkipped = true;
   if (tl.catchUp) { record.catchUp = true; record.catchUpInfo = tl.catchUpInfo || {}; }
   if (!record.id || draft.recordId) record.id = draft.recordId || record.id;
   return record;
@@ -281,7 +283,7 @@ export function renderSummary(container, record, { onDone, onBackup, prev, rings
   const stats = el('div', { class: 'card done-card', id: 'done-card' }, [
     record.status === 'complete' ? el('div', { class: 'done-check' }, [icon('check')]) : null,
     el('h1', {}, record.status === 'complete' ? 'Session done' : 'Session ended early'),
-    el('p', { class: 'muted', style: 'margin:0' }, `${record.sessionName} · ${fmtDate(record.date)} · week ${record.week}`),
+    el('p', { class: 'muted', style: 'margin:0' }, `${record.sessionName} · ${fmtDate(record.date)} · week ${record.week}${record.stretchSkipped ? ' · stretch skipped' : ''}`),
     (planned - done > 0) ? el('p', { id: 'owed-note', style: 'margin:10px 0 0' }, `${planned - done} ${planned - done === 1 ? 'set was' : 'sets were'} not done. ${planned - done === 1 ? 'It is' : 'They are'} on this week's catch-up list on Home.`) : null,
     el('div', { class: 'done-stats' }, [
       tile(done === planned ? ' good' : '', done, `/ ${planned}`, 'sets logged'),

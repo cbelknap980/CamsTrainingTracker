@@ -11,7 +11,7 @@
 // every voice line, Equipment taken inside a finisher, and set times that follow his pace (pacing.js).
 // State lives in `this.s` and is saved to IndexedDB on every change so a session can be resumed.
 
-import { trimToFit, remainingSeconds, leadIns, setTiming, blankStep } from './builder.js';
+import { trimToFit, remainingSeconds, leadIns, setTiming, blankStep, workLeft, stretchMissed } from './builder.js';
 import { setInProgress, clearInProgress, setPendingReview, newId } from './store.js';
 import { fmtClock, fmtTime, fmtWeight, fmtMinutes, repsText, roundTo, effortPlain, effortLevel, spokenDuration, isPair, pairText, snapLoad } from './data.js';
 import { incrementFor, checkPR, trainingFractionFor, epley } from './progression.js';
@@ -1078,7 +1078,7 @@ export class Player {
         this.swapChoices().length ? item('skip', 'Equipment taken: do something else now', () => this.openSwap()) : null,
         onSet ? item('skip', 'Equipment taken: do something else now', () => { this.back(); this.openSwap(); }) : null,
         behind ? item('scissors', `Trim to fit (${Math.round(Math.max(p.deltaSeconds, p.overCapSeconds) / 60)} min over)`, () => this.trimPreview()) : null,
-        item('stop', 'End session early', () => this.confirmEnd(), 'danger')
+        workLeft(this.steps, this.s.idx) ? item('stop', 'End session early', () => this.confirmEnd(), 'danger') : item('check', 'Finish workout (skip the stretch)', () => this.confirmEnd(), 'finish-item')
       ]),
       el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Close')
     ]));
@@ -1086,17 +1086,21 @@ export class Player {
 
   // ---- finishing ----
   confirmEnd() {
+    // v1.18.13: with only the stretch (or If time) left, ending now is a finished workout, not an early end
+    const done = !workLeft(this.steps, this.s.idx);
     showModal(el('div', {}, [
-      el('h2', {}, 'End session early?'),
-      el('p', { class: 'muted' }, 'What you logged is saved; the remaining steps are marked skipped.'),
+      el('h2', {}, done ? 'Finish without stretching?' : 'End session early?'),
+      el('p', { class: 'muted', id: 'end-note' }, done ? 'All your training is done, so this counts as a full workout. Only the stretch is left out.' : 'What you logged is saved; the remaining steps are marked skipped.'),
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn ghost', onclick: () => closeModal() }, 'Keep going'),
-        el('button', { class: 'btn danger', onclick: () => { closeModal(); this.finish('ended_early'); } }, 'End session')
+        el('button', { class: done ? 'btn primary' : 'btn danger', id: 'end-confirm', onclick: () => { closeModal(); this.finish('ended_early'); } }, done ? 'Finish workout' : 'End session')
       ])
     ]));
   }
   /** endAtMs: v1.15.1, when the session really stopped (Save what I did and stop, after the app was closed). */
   finish(status, endAtMs) {
+    // v1.18.13 (Cameron: "if I skip stretching it still count as a workout"): an end with no training left is complete
+    if (status === 'ended_early' && !workLeft(this.steps, this.s.idx)) status = 'complete';
     this.s.status = status;
     this.steps.forEach((s, i) => { if (i >= this.s.idx && !s.done && !s.skipped) { s.skipped = true; if (s.kind === 'set') s.record = { ...this.baseRecord(s), done: false, skipped: true }; } });
     const endedAt = endAtMs && endAtMs > this.s.sessionStart ? Math.min(endAtMs, Date.now()) : Date.now();
@@ -1114,6 +1118,7 @@ export class Player {
       // v1.18: the id the record gets on Save, fixed now so a review restored after a reload saves the same session
       recordId: newId('ses')
     };
+    if (stretchMissed(this.steps)) draft.stretchSkipped = true;
     this.teardown();
     // v1.18: the review is kept until it is saved, so a reload or a closed app on the Review page does not lose the
     // workout. The in-progress copy goes once the review is stored (if storing fails, Resume still has the session).

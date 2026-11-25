@@ -544,3 +544,18 @@ export function lastResults(sessions) {
 export function remainingSeconds(steps, fromIdx) {
   return steps.slice(fromIdx).reduce((a, s) => a + (s.done ? 0 : (s.seconds || 0)), 0);
 }
+
+/**
+ * v1.18.13 (Cameron, Nov 25: "if I skip stretching it still count as a workout"): is any training left from step
+ * fromIdx on? Sets and timed work (holds, drills, Engine minutes) count; the stretch block, rests, set-up steps and
+ * the optional If time part do not. When nothing is left, ending the session saves it as complete.
+ */
+export function workLeft(steps, fromIdx = 0) {
+  return (steps || []).some((s, i) => i >= fromIdx && !s.done && !s.skipped && !s.iftime &&
+    (s.kind === 'set' || s.kind === 'timed') && s.blockType !== 'stretch');
+}
+
+/** v1.18.13: the stretch block has steps that were not done (skipped, or left when the session ended). */
+export function stretchMissed(steps) {
+  return (steps || []).some(s => s.blockType === 'stretch' && s.kind === 'stretch' && (!s.done || s.skipped));
+}
