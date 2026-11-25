@@ -1174,7 +1174,7 @@ async function planData() {
   }
   return { canWrite, data: { plan: D.plan, rules: D.rules, goals: D.goals, settings, targets, sessions, runs, checkins, coachFile, today: new Date() } };
 }
-const planOpts = canWrite => ({ canWrite, onSend: sendCheckin, ...(canWrite ? { saveTarget: saveLiftTarget, saveGoal: saveLiftGoal } : {}) });
+const planOpts = canWrite => ({ canWrite, onSend: sendCheckin, onTab: name => showTab(name), ...(canWrite ? { saveTarget: saveLiftTarget, saveGoal: saveLiftGoal } : {}) });
 async function renderPlanTab() {
   const { canWrite, data } = await planData();
   if (currentTab !== 'plan') return data;

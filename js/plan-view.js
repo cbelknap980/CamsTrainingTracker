@@ -5,25 +5,33 @@
 // A computer keeps every card on one page in two columns.
 // v1.18.11: each session is one line a lift (sets x reps, weight, a chevron); a tap opens the lift page
 // (lift-detail.js), which can set the next target or a week-12 goal through opts.saveTarget and opts.saveGoal.
+// v1.18.14 (Cameron, Nov 25: "This page still feels clunky"): on a computer the page leads with today's session, flags
+// what this week has not logged and where it still fits, puts the other days on one line each (a click opens one),
+// shows the phases on the week strip, and keeps goals, check-ins and an "About this plan" fold in a right column.
 
 import { el, infoBtn } from './ui.js';
 import { nextNumbers, nextWeekOf } from './lift-goal.js';
 import { openLiftDetail } from './lift-detail.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
 import { TAGS, thread } from './coach.js';
-import { countsFor } from './runs.js';
+import { countsFor, weekRuns, weekRange, openRunDays, runLine } from './runs.js';
 
 const DAYS = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['0', 'Sun']];
 const when = iso => { const d = new Date(iso); return `${fmtDate(toISODate(d))}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`; };
 
-function goalsCard(goals) {
+function goalsCard(goals, withRules = true) {
   return el('div', { class: 'card', id: 'plan-goals' }, [
     el('h3', {}, 'Goals, most important first'),
     el('ol', { class: 'goal-list' }, goals.goals.map(g => el('li', {}, [el('b', {}, g.name), el('div', { class: 'muted' }, g.measure)]))),
-    el('h3', { style: 'margin-top:14px' }, 'How the plan works'),
-    el('ul', { class: 'lines' }, goals.rules.map(r => el('li', {}, r)))
+    withRules ? el('h3', { style: 'margin-top:14px' }, 'How the plan works') : null,
+    withRules ? el('ul', { class: 'lines' }, goals.rules.map(r => el('li', {}, r))) : null
   ]);
 }
+
+const phaseList = (plan, week) => el('div', { class: 'phase-list' }, plan.phases.map(ph => el('div', { class: 'phase-row' + (ph.weeks.includes(week) ? ' now' : '') }, [
+  el('span', { class: `phase-dot ph-${ph.id}` }),
+  el('div', {}, [el('b', {}, `${ph.name} `), el('span', { class: 'muted' }, ph.weeks.length > 1 ? `weeks ${ph.weeks[0]}–${ph.weeks[ph.weeks.length - 1]}` : `week ${ph.weeks[0]}`), el('div', { class: 'muted' }, ph.note)])
+])));
 
 function weeksCard(plan, week) {
   const cells = [];
@@ -34,10 +42,7 @@ function weeksCard(plan, week) {
   return el('div', { class: 'card', id: 'plan-weeks' }, [
     el('h3', {}, '12 weeks'),
     el('div', { class: 'wk-strip' }, cells),
-    el('div', { class: 'phase-list' }, plan.phases.map(ph => el('div', { class: 'phase-row' + (ph.weeks.includes(week) ? ' now' : '') }, [
-      el('span', { class: `phase-dot ph-${ph.id}` }),
-      el('div', {}, [el('b', {}, `${ph.name} `), el('span', { class: 'muted' }, ph.weeks.length > 1 ? `weeks ${ph.weeks[0]}–${ph.weeks[ph.weeks.length - 1]}` : `week ${ph.weeks[0]}`), el('div', { class: 'muted' }, ph.note)])
-    ])))
+    phaseList(plan, week)
   ]);
 }
 
@@ -219,42 +224,230 @@ function checkinCard(data, opts) {
 
 const WIDE = '(min-width: 1000px)';
 const PANES = [['week', 'Week'], ['sessions', 'Sessions'], ['goals', 'Goals'], ['coach', 'Check-ins']];
-const ui = { pane: 'week', pick: null }; // the phone's open tab and session; kept while the app is open
+const ui = { pane: 'week', pick: null, wideOpen: new Set(), aboutOpen: false }; // the phone's open tab and session, the computer's open rows; kept while the app is open
 let last = null;
 if (typeof window !== 'undefined' && window.matchMedia) {
   // a window dragged across 1000 px redraws the Plan tab in the other layout, if it is still the one showing
-  window.matchMedia(WIDE).addEventListener('change', () => { if (last && last.view.querySelector('.plan-grid, .plan-tabs')) renderPlan(...last.args); });
+  window.matchMedia(WIDE).addEventListener('change', () => { if (last && last.view.querySelector('.plan-cols, .plan-tabs')) renderPlan(...last.args); });
 }
 
-/** The session the phone's Sessions tab opens on: the next lift day from today whose session is not logged yet. */
-export function nextSessionId(plan, settings, sessions, today) {
+/** The next lift day from today whose session is not logged yet: { id, iso }, or null. */
+function nextLift(plan, settings, sessions, today) {
   for (let i = 0; i < 8; i++) {
     const d = new Date(today); d.setDate(d.getDate() + i);
     const id = plan.calendar[String(d.getDay())];
     const s = id && plan.sessions.find(x => x.id === id);
-    if (s && !sessions.some(x => x.sessionId === id && x.week === weekNumber(d, settings.startDate))) return id;
+    const w = weekNumber(d, settings.startDate);
+    if (s && w >= 1 && !sessions.some(x => x.sessionId === id && x.week === w)) return { id, iso: toISODate(d) };
   }
-  return plan.sessions[0].id;
+  return null;
+}
+
+/** The session the phone's Sessions tab opens on: the next lift day from today whose session is not logged yet. */
+export function nextSessionId(plan, settings, sessions, today) {
+  const n = nextLift(plan, settings, sessions, today);
+  return n ? n.id : plan.sessions[0].id;
+}
+
+// ---- v1.18.14: the computer page ----
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const monthDay = iso => parseISODate(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const dayShort = iso => { const d = parseISODate(iso); return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${d.getDate()}`; }; // "Mon 23"
+const orList = a => (a.length > 1 ? `${a.slice(0, -1).join(', ')} or ${a[a.length - 1]}` : a[0]);
+const workSets = rec => (rec.sets || []).filter(x => x.done && !x.ramp).length;
+const liftCount = s => s.blocks.filter(b => b.items && b.type !== 'warmup' && b.type !== 'stretch' && b.type !== 'emom' && b.type !== 'iftime').reduce((n, b) => n + b.items.filter(it => it.exercise).length, 0);
+// "Fast: 7:45-8:15 per mile ..." with the label in bold, as on Home
+const runLinePart = t => { const i = t.indexOf(': '); return i > 0 && i < 12 ? el('p', {}, [el('b', {}, t.slice(0, i + 1) + ' '), t.slice(i + 2)]) : el('p', {}, t); };
+
+/**
+ * This week's planned lifts and runs in day order, each with where it stands: 'done', 'today', 'later' or 'missed'
+ * (its day has passed with nothing logged). A run done on another day counts, as on Home and the Runs tab.
+ */
+export function weekItems(data, week, today) {
+  const { plan, settings, sessions, runs } = data;
+  const { start } = weekRange(settings, week);
+  const todayIso = toISODate(today);
+  const runRows = weekRuns({ plan, settings, runs, week, today });
+  const out = [];
+  DAYS.forEach(([dow], i) => {
+    const d = parseISODate(start); d.setDate(d.getDate() + i);
+    const iso = toISODate(d);
+    const id = plan.calendar[dow];
+    const lift = id && plan.sessions.find(s => s.id === id);
+    if (lift) {
+      const rec = sessions.filter(s => s.sessionId === id && s.week === week).sort((a, b) => workSets(b) - workSets(a))[0] || null;
+      out.push({ kind: 'lift', id, iso, dow: Number(dow), name: lift.name, lift, rec, status: rec ? 'done' : (iso < todayIso ? 'missed' : (iso === todayIso ? 'today' : 'later')) });
+      return;
+    }
+    const row = id && runRows.find(r => r.id === id);
+    if (row) out.push({ kind: 'run', id, iso, dow: Number(dow), name: row.name, row, status: { done: 'done', today: 'today', open: 'missed', later: 'later' }[row.status] });
+  });
+  return out;
+}
+
+/** What the page leads with: today's lift or run if it is not logged yet, otherwise the next lift. */
+function upNext(data, items, today) {
+  const { plan, settings, sessions } = data;
+  const todayIso = toISODate(today);
+  const t = items.find(x => x.status === 'today');
+  if (t) return { item: t, tag: `Today · ${fmtDate(todayIso)}` };
+  const n = nextLift(plan, settings, sessions, today);
+  if (!n) return null;
+  const item = items.find(x => x.kind === 'lift' && x.id === n.id && x.iso === n.iso) || { kind: 'lift', id: n.id, iso: n.iso, lift: plan.sessions.find(s => s.id === n.id) };
+  return { item, tag: `${n.iso === todayIso ? 'Today' : 'Next'} · ${fmtDate(n.iso)}` };
+}
+
+/** A planned run's ask: the main line, then its Fast / Easy / warm-up lines, and what was logged if it is done. */
+function runPanel(data, r) {
+  return el('div', { class: 'rw-run' }, [
+    el('p', { class: 'run-ask' }, r.plan.text),
+    r.plan.lines ? el('div', { class: 'run-lines' }, r.plan.lines.map(runLinePart)) : (r.plan.detail ? el('p', { class: 'muted' }, r.plan.detail) : null),
+    r.run ? el('p', { class: 'muted run-logged' }, `Logged: ${runLine(r.run, data.rules)}`) : null
+  ]);
+}
+
+/**
+ * Change 2: whatever this week has not logged, with the days it still fits. A run goes by rules.runSchedule (as on
+ * Home); a lift by the free days left, where Home offers a catch-up. One button to the page where it is done.
+ */
+function missedCard(data, items, week, today, opts) {
+  const { plan, rules, settings } = data;
+  const missed = items.filter(x => x.status === 'missed');
+  if (!missed.length) return null;
+  const todayIso = toISODate(today);
+  const { start } = weekRange(settings, week);
+  const free = DAYS.map(([dow], i) => { const d = parseISODate(start); d.setDate(d.getDate() + i); return { dow: Number(dow), iso: toISODate(d) }; })
+    .filter(x => !plan.calendar[String(x.dow)] && x.iso >= todayIso);
+  return el('div', { class: 'card plan-missed', id: 'plan-missed', role: 'status' }, missed.map(x => {
+    const days = x.kind === 'run'
+      ? openRunDays({ plan, rules, settings, runId: x.id, week, today }).map(d => (d.today ? 'today' : d.name))
+      : free.map(d => (d.iso === todayIso ? 'today' : DAY_NAMES[d.dow]));
+    const fits = days.length ? `It still fits ${orList(days)}.` : 'No day is left for it this week. It drops on Sunday night.';
+    const tab = x.kind === 'run' ? 'runs' : 'home';
+    return el('div', { class: 'miss-row', 'data-missed': x.id }, [
+      el('p', {}, [el('b', {}, `${x.name} isn't logged. `), x.kind === 'run' ? `${x.row.plan.text}. ` : '', fits]),
+      opts.onTab ? el('button', { type: 'button', class: 'btn small', 'data-go': tab, onclick: () => opts.onTab(tab) }, tab === 'runs' ? 'Open Runs' : 'Open Home') : null
+    ]);
+  }));
+}
+
+/** Change 1: today's session (or the next one) first, with its lifts and weights. */
+function todayCard(data, up, onEx) {
+  const x = up.item;
+  const tag = el('span', { class: 'today-tag' }, up.tag);
+  if (x.kind === 'run') {
+    const run = data.plan.runs.find(r => r.id === x.id) || {};
+    return el('div', { class: 'card plan-today', id: 'plan-today', 'data-run': x.id }, [
+      tag,
+      el('div', { class: 'ps-head' }, [el('h2', {}, x.name)]),
+      el('div', { class: 'muted ps-sub' }, `${run.day} · about ${run.plannedMinutes} min`),
+      runPanel(data, x.row)
+    ]);
+  }
+  const card = sessionCard(data, x.lift, onEx);
+  card.id = 'plan-today';
+  card.classList.add('plan-today');
+  card.prepend(tag);
+  return card;
+}
+
+/** Change 3: the other days of the week, one line each; a click opens the session (or run) under its line. */
+function restOfWeek(data, items, skip, onEx) {
+  const { plan, settings, rules } = data;
+  const rows = items.filter(x => x !== skip).map(x => {
+    let detail;
+    let panel;
+    if (x.kind === 'lift') {
+      detail = x.rec ? `${workSets(x.rec)} sets${x.rec.status !== 'complete' ? ' · ended early' : ''}` : `${liftCount(x.lift)} lifts · about ${x.lift.plannedMinutes} min`;
+      panel = () => sessionCard(data, x.lift, onEx);
+    } else {
+      detail = x.row.run ? runLine(x.row.run, rules, true) : x.row.plan.text;
+      panel = () => runPanel(data, x.row);
+    }
+    const open = ui.wideOpen.has(x.id);
+    const box = el('div', { class: 'rw-panel', hidden: !open }, open ? panel() : null);
+    const btn = el('button', { type: 'button', class: 'rw-row', 'data-item': x.id, 'aria-expanded': String(open), onclick: () => {
+      const show = box.hidden;
+      if (show && !box.firstChild) box.appendChild(panel());
+      box.hidden = !show;
+      btn.setAttribute('aria-expanded', String(show));
+      if (show) ui.wideOpen.add(x.id); else ui.wideOpen.delete(x.id);
+    } }, [
+      el('span', { class: 'day-name' }, dayShort(x.iso)),
+      el('span', { class: 'rw-what' }, [el('b', {}, x.name), detail ? el('span', { class: 'muted' }, detail) : null]),
+      el('span', { class: 'day-status ' + x.status }, { done: '✓ done', missed: 'not logged', today: 'today' }[x.status] || ''),
+      el('span', { class: 'rw-chev' }, chevron())
+    ]);
+    return el('div', { class: 'rw-item', 'data-status': x.status }, [btn, box]);
+  });
+  const { start } = weekRange(settings, items.length ? weekNumber(parseISODate(items[0].iso), settings.startDate) : 1);
+  const rest = DAYS.map(([dow], i) => { const d = parseISODate(start); d.setDate(d.getDate() + i); return { dow, iso: toISODate(d) }; }).filter(x => !plan.calendar[x.dow]);
+  if (rest.length) rows.push(el('div', { class: 'rw-rest' }, [el('span', { class: 'day-name' }, rest.map(x => parseISODate(x.iso).toLocaleDateString(undefined, { weekday: 'short' })).join(', ')), el('span', { class: 'muted' }, 'Rest or make-up days')]));
+  return el('div', { class: 'card', id: 'plan-rest' }, [el('h3', {}, skip ? 'Rest of the week' : 'This week'), ...rows]);
+}
+
+/** Change 4 (part): one strip for weeks and phases. Phase names over their weeks, each week's start date under it. */
+function stripCard(plan, settings, week) {
+  const cells = plan.phases.map(ph => el('div', { class: `wk-ph ph-${ph.id}`, style: `grid-column:${ph.weeks[0]} / ${ph.weeks[ph.weeks.length - 1] + 1}`, title: ph.note }, ph.name));
+  for (let w = 1; w <= 12; w++) {
+    const ph = phaseForWeek(plan, w);
+    const { start } = weekRange(settings, w);
+    cells.push(el('div', { class: `wk-cell ph-${ph.id}` + (w === week ? ' now' : '') + (w < week ? ' past' : ''), style: `grid-column:${w}`, title: `Week ${w}: ${ph.name}, from ${fmtDate(start)}` }, [el('b', {}, String(w)), el('small', {}, monthDay(start))]));
+  }
+  return el('div', { class: 'card plan-strip', id: 'plan-weeks' }, [el('div', { class: 'wk-strip wk-strip-wide' }, cells)]);
+}
+
+/** Change 10: the text that reads the same every week, behind one fold. */
+function aboutCard(plan, goals, week) {
+  const d = el('details', { class: 'card plan-about', id: 'plan-about', open: ui.aboutOpen }, [
+    el('summary', {}, [el('span', { class: 'about-title' }, [el('b', {}, 'About this plan'), el('span', { class: 'muted' }, 'Phases, how the plan works, what each session and run is for')])]),
+    el('div', { class: 'about-body' }, [
+      el('h3', {}, 'Phases'),
+      phaseList(plan, week),
+      el('h3', {}, 'How the plan works'),
+      el('ul', { class: 'lines' }, goals.rules.map(r => el('li', {}, r))),
+      el('h3', {}, 'What each session is for'),
+      ...plan.sessions.map(s => el('p', {}, [el('b', {}, `${s.name}. `), el('span', { class: 'muted' }, s.goal || '')])),
+      el('h3', {}, 'Runs'),
+      ...plan.runs.map(r => el('p', {}, [el('b', {}, `${r.name}. `), el('span', { class: 'muted' }, `${r.day} · ${r.plannedMinutes} min. ${r.note}`)]))
+    ])
+  ]);
+  d.addEventListener('toggle', () => { ui.aboutOpen = d.open; });
+  return d;
+}
+
+/** "Week 2 of 12 · Baseline · Nov 23 – 29 · 1 of 5 done so far" */
+function weekLine(plan, settings, raw, week, items) {
+  if (raw < 1) return `Starts ${fmtDate(settings.startDate)}`;
+  const { start, end } = weekRange(settings, week);
+  const range = start.slice(0, 7) === end.slice(0, 7) ? `${monthDay(start)} – ${Number(end.slice(8))}` : `${monthDay(start)} – ${monthDay(end)}`;
+  const done = items.filter(x => x.status === 'done').length;
+  return `Week ${week} of 12 · ${phaseForWeek(plan, week).name} · ${range} · ${done} of ${items.length} done${raw > 12 ? '' : ' so far'}`;
 }
 
 export function renderPlan(view, data, opts = {}) {
   last = { view, args: [view, data, opts] };
   const wide = typeof window === 'undefined' || !window.matchMedia || window.matchMedia(WIDE).matches;
   if (!wide) return renderPhone(view, data, opts);
-  const { plan, settings, targets, sessions, runs, goals } = data;
+  const { plan, settings, goals } = data;
   const today = data.today || new Date();
-  const week = Math.max(1, Math.min(12, weekNumber(today, settings.startDate)));
+  const raw = weekNumber(today, settings.startDate);
+  const week = Math.max(1, Math.min(12, raw));
+  const items = weekItems(data, week, today);
+  const up = upNext(data, items, today);
+  const onEx = (id, sessionId) => openLiftDetail(data, id, { ...opts, sessionId });
   view.innerHTML = '';
-  view.appendChild(el('div', { class: 'row' }, [el('h1', {}, 'Plan')]));
-  const main = el('div', { class: 'plan-main' }, [
-    weeksCard(plan, weekNumber(today, settings.startDate)),
-    el('div', { class: 'plan-pair' }, [thisWeekCard(plan, settings, sessions, runs, today, week), goalsCard(goals)]),
-    el('h2', { class: 'section-title' }, 'Sessions'),
-    ...plan.sessions.map(s => sessionCard(data, s, (id, sessionId) => openLiftDetail(data, id, { ...opts, sessionId }))),
-    runsCard(plan)
+  view.appendChild(el('div', { class: 'row plan-top' }, [el('h1', {}, 'Plan'), el('span', { class: 'muted plan-sub', id: 'plan-sub' }, weekLine(plan, settings, raw, week, items))]));
+  view.appendChild(stripCard(plan, settings, raw));
+  // v1.18.14 change 9: two columns all the way down. Today and the week on the left; check-ins, goals and the
+  // reference fold on the right.
+  const left = el('div', { class: 'plan-left' }, [
+    missedCard(data, items, week, today, opts),
+    up ? todayCard(data, up, onEx) : null,
+    restOfWeek(data, items, up && up.item, onEx)
   ]);
-  const side = el('div', { class: 'plan-side' }, [checkinCard(data, opts)]);
-  view.appendChild(el('div', { class: 'plan-grid' }, [side, main]));
+  const rail = el('div', { class: 'plan-rail' }, [checkinCard(data, opts), goalsCard(goals, false), aboutCard(plan, goals, raw)]);
+  view.appendChild(el('div', { class: 'plan-cols' }, [left, rail]));
   const chat = document.getElementById('chat-list');
   if (chat) chat.scrollTop = chat.scrollHeight;
 }
@@ -276,6 +469,7 @@ function renderPhone(view, data, opts) {
     const tw = thisWeekCard(plan, settings, sessions, runs, today, week, id => go('sessions', id));
     tw.querySelector('h3').replaceWith(el('div', { class: 'row wk-head' }, [el('h3', { style: 'margin:0' }, 'This week'), el('span', { class: 'muted small' }, 'Tap a day to see it')]));
     pane.append(
+      missedCard(data, weekItems(data, week, today), week, today, opts) || '',
       el('div', { class: 'card', id: 'plan-weeks' }, [
         el('div', { class: 'row wk-head' }, [el('b', {}, `Week ${week} of 12`), el('span', { class: 'wk-phase' }, [el('span', { class: `phase-dot ph-${ph.id}` }), ph.name])]),
         ph.note ? el('p', { class: 'muted wk-note' }, ph.note) : null,

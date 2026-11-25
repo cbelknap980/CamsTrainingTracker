@@ -215,7 +215,9 @@ try:
     errors2 = []
     ctx, pg = open_at(browser, '2026-11-25T09:30:00-07:00', errors2, size={'width': 1280, 'height': 900}, viewer=True)
     pg.click('button[data-view="plan"]'); pg.wait_for_timeout(300)
-    check('computer: every session as one line a lift', pg.locator('.plan-session').count() == 3 and pg.locator('.plan-session .ex-row').count() >= 20)
+    # v1.18.14: the computer leads with today's session; the other days open from their line
+    check('computer: today\'s session as one line a lift', pg.locator('.plan-session').count() == 1 and pg.locator('#plan-today .ex-row').count() >= 7)
+    pg.click('.rw-row[data-item="lift1"]'); pg.wait_for_selector('.rw-panel .plan-session[data-session="lift1"]')
     pg.click('.plan-session[data-session="lift1"] .ex-row[data-ex="back_squat"]'); pg.wait_for_selector('#lift-sheet')
     check('computer: the page opens, with no Edit and no goal buttons', pg.locator('#lift-edit').count() == 0 and pg.locator('#lift-g-edit').count() == 0 and 'set on the phone' in pg.locator('#lift-goal').inner_text())
     check('computer: no page errors', not errors2, errors2)
