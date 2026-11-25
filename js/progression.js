@@ -222,6 +222,19 @@ export function mainLiftNext(target, sets, o) {
   // an all-out set (v1.19) is left out of every effort test; its reps count like any other set's
   const worst = Math.max(0, ...S.effortSets.filter(s => !s.amrap).map(s => (okNum(s.rpe) ? s.rpe : 0)));
   const clean = worst <= maxRpe;
+  // v1.18.16 (Cameron, Nov 25: "If I put easy vs max, if I push for more reps than the workout said. Lets examine
+  // logic"): a clean session on a weekly lift steps weekly.bigStep.steps increments instead of one when every rated
+  // set was Easy, or the last set beat the reps asked by bigStep.extraReps or more (APRE: the next load follows how
+  // many reps he got; Mann et al. 2010). Hard and Maxed still hold.
+  const big = weekly && weekly.bigStep && weekly.bigStep.steps > 1 ? weekly.bigStep : null;
+  const bigStepFor = (atWeight, asked) => {
+    if (!big || !clean) return 0;
+    const rated = S.effortSets.filter(s => !s.amrap && okNum(s.rpe));
+    const allEasy = rated.length > 0 && rated.every(s => s.rpe <= (big.easyUpTo != null ? big.easyUpTo : 6.9));
+    const lastSet = sets.filter(s => usable(s) && s.weight >= atWeight).slice(-1)[0];
+    const moreReps = !!lastSet && lastSet.reps >= asked + (big.extraReps || 2);
+    return allEasy || moreReps ? (big.steps - 1) * inc : 0;
+  };
   const week2 = phase === 'baseline' && !weekly;                                                      // rule 5 (R5: a weekly lift moves in week 2 too)
   const want = weekly ? clampTo(phase === 'heavy' ? lo : (weekly.reps || R), range) : hi;             // the reps a step up asks for
   const base = { W, R, S, lo, hi, resetAfter, resetFraction };
@@ -239,16 +252,17 @@ export function mainLiftNext(target, sets, o) {
   if (S.kind === 'heavier') {                                                                         // rule 2
     const up = !week2 && allDone && S.reps >= want && clean;
     const extra = up && weekly ? push : 0;
-    if (up) { cur.weight = stepUp(S.weight, inc) + extra; cur.reps = weekly ? want : lo; } else { cur.weight = S.weight; cur.reps = Math.min(S.reps, hi); }
+    const bigH = up ? bigStepFor(S.weight, want) : 0;
+    if (up) { cur.weight = stepUp(S.weight, inc) + extra + bigH; cur.reps = weekly ? want : lo; } else { cur.weight = S.weight; cur.reps = weekly ? Math.min(S.reps, want) : Math.min(S.reps, hi); }
     cur.stall = 0;
-    return out('up', up ? (weekly ? 'heavierWeekly' : 'heavierTop') : 'heavier', { ...base, ...(extra ? { pushed: extra } : {}) });
+    return out('up', up ? (weekly ? 'heavierWeekly' : 'heavierTop') : 'heavier', { ...base, ...(extra ? { pushed: extra } : {}), ...(bigH ? { big: bigH } : {}) });
   }
   if (S.kind === 'lighter') return S.missed ? flat('miss') : out('hold', 'lighter', base);            // rule 2, lighter
   if (S.missed) return flat('miss');                                                                  // 3d
   if (!allDone) return out('hold', 'notAll', base);                                                   // 3e
   if (weekly && clean) {                                                                              // R5: 3a and 3b for a weekly lift
     cur.stall = 0;
-    if (S.reps >= want) { cur.weight = stepUp(W, inc) + push; cur.reps = want; return out('up', 'weekly', { ...base, ...(push ? { pushed: push } : {}) }); }
+    if (S.reps >= want) { const bigW = bigStepFor(W, R); cur.weight = stepUp(W, inc) + push + bigW; cur.reps = want; return out('up', 'weekly', { ...base, ...(push ? { pushed: push } : {}), ...(bigW ? { big: bigW } : {}) }); }
     cur.reps = Math.min(S.reps + 1, want);
     return out('up', 'oneMore', base);
   }
@@ -259,7 +273,9 @@ export function mainLiftNext(target, sets, o) {
     return out('up', 'top', base);
   }
   if (clean) { cur.reps = Math.min(S.reps + 1, hi); cur.stall = 0; return out('up', 'oneMore', base); }   // 3b
-  if (S.reps > R) { cur.reps = Math.min(S.reps, hi); cur.stall = 0; return out('up', 'moreReps', base); }  // 3c, first half
+  // 3c, first half. v1.18.16: a weekly lift keeps its reps at weekly.reps (a Hard day at 195 x 7 asked 6 next time)
+  if (S.reps > R) { const r = weekly ? Math.min(S.reps, want) : Math.min(S.reps, hi); if (r > R) { cur.reps = r; cur.stall = 0; return out('up', 'moreReps', base); } }
+  if (weekly && S.reps > R) { cur.stall = 0; return out('hold', 'hard', base); }
   if (flatAtRpe != null && worst >= flatAtRpe) return flat('hardFlat');                               // 3c, the switch
   return out('hold', 'hard', base);
 }
@@ -660,8 +676,8 @@ function lineFor(o, { name, detail, stall }) {
     case 'heavier': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target. ${nextTime}`, reason: 'lifted more than the target' };
     case 'lighter': return { text: `${name}: ${detail}, lighter than the ${lb(o.W)} target or ended early. Same target next time${o.short ? '; if the next one is lighter too, it comes down to what you used' : ''}.`, reason: 'lighter day: target holds' };
     case 'notAll': return { text: `${name}: ${detail}, a set was skipped or done lighter. Same target next time.`, reason: 'a set was skipped or done lighter' };
-    case 'weekly': return { text: `${name}: ${detail}, every set made at Solid effort or easier. ${nextTime}${pushed}`, reason: o.pushed ? 'all sets made: a bigger step toward your goal' : 'all sets made, Solid or easier' };
-    case 'heavierWeekly': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target with every set made, Solid or easier. ${nextTime}${pushed}`, reason: o.pushed ? 'lifted more: a bigger step toward your goal' : 'lifted more, every set made' };
+    case 'weekly': return { text: `${name}: ${detail}, every set made at Solid effort or easier${o.big ? ', with room to spare, so a double step' : ''}. ${nextTime}${pushed}`, reason: o.big ? 'Easy or extra reps: double step' : (o.pushed ? 'all sets made: a bigger step toward your goal' : 'all sets made, Solid or easier') };
+    case 'heavierWeekly': return { text: `${name}: ${detail}, heavier than the ${lb(o.W)} target with every set made, Solid or easier${o.big ? ', with room to spare, so a double step' : ''}. ${nextTime}${pushed}`, reason: o.big ? 'lifted more with room to spare: double step' : (o.pushed ? 'lifted more: a bigger step toward your goal' : 'lifted more, every set made') };
     case 'easyUp': return { text: `${name}: ${detail}, last set Easy. ${nextTime}`, reason: 'last set Easy: more weight' };
     case 'solidMore': return { text: `${name}: ${detail}, last set Solid. ${o.weight > o.W ? `Next time ${lb(o.weight)}, the weight you used` : 'Same weight'}, aim for ${o.reps} next time.`, reason: `last set Solid: aim for ${o.reps} reps` };
     case 'top': return { text: `${name}: ${detail}, every set at ${o.hi}${o.R != null ? ' at Solid effort or easier' : ''}. ${nextTime}`, reason: `all sets at ${o.hi}${o.R != null ? ', Solid or easier' : ''}` };

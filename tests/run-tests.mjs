@@ -187,7 +187,7 @@ check('week 7 unchanged', r.targets.back_squat.weight === 190 && r.targets.back_
 // transition into heavy (week 7 session -> next week 8)
 check('week 7 -> heavy note present', r.lines.some(l => /weeks 8-11/.test(l.text)) === false, r.lines); // light week returns early, by design
 r = applyProgression({ session: mkSession(6, [ws('back_squat', 190, 6, 8, [4, 6]), ws('back_squat', 190, 6, 8, [4, 6]), ws('back_squat', 190, 6, 8, [4, 6])]), targets: { back_squat: { weight: 190, reps: 4, stall: 0 } }, rules, plan, settings });
-check('week 6 pass -> 195 (no heavy switch yet, week 7 is light)', r.targets.back_squat.weight === 195, r.targets.back_squat);
+check('week 6 pass, 190 x 6 on a 190 x 4 target -> v1.18.16 two reps over: double step to 200 x 5 (no heavy switch yet, week 7 is light)', r.targets.back_squat.weight === 200 && r.targets.back_squat.reps === 5, r.targets.back_squat);
 // power clean excluded
 r = applyProgression({ session: mkSession(3, [ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2]), ws('power_clean', 135, 2, 7, [2, 2])]), targets: { power_clean: { weight: 135, reps: 2 } }, rules, plan, settings });
 check('v1.18.1 R4 rule 9: the power clean follows its doubles and is never raised by the app', r.targets.power_clean.weight === 135 && /never raises the clean/.test(r.lines[0].text), r.lines[0]);
@@ -1415,6 +1415,39 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   const o1 = applyProgression({ session: mkSession(3, [1, 2, 3].map(() => ws('curl', 30, 12, 9, [10, 12]))), targets: { curl: { weight: 30, reps: 12 } }, rules: off, plan, settings }).targets.curl;
   const o2 = applyProgression({ session: mkSession(3, [1, 2, 3].map(() => ws('curl', 60, 10, 9, [10, 12], U))), targets: { curl: { weight: 50, reps: 10 } }, rules: off, plan, settings }).targets.curl;
   check('switched off, both rules go back to v1.18.14 (40 x 10; unrated holds at 50)', o1.weight === 40 && o1.reps === 10 && o2.weight === 50, [o1, o2]);
+}
+
+{
+  console.log('\nv1.18.16: Easy and extra reps on main lifts (rules mainLiftTest.weekly.bigStep)');
+  const go = (id, t, sets, range, week = 3) => applyProgression({ session: mkSession(week, sets.map(([w, r, e, x]) => ws(id, w, r, e, range, x))), targets: { [id]: { stall: 0, ...t } }, rules, plan, settings }).targets[id];
+  const SQ = { weight: 195, reps: 5 }, R = [4, 6];
+  let t = go('back_squat', SQ, [[195, 5, 8], [195, 5, 8], [195, 5, 8]], R);
+  check('all Solid: one step (200 x 5)', t.weight === 200 && t.reps === 5, t);
+  t = go('back_squat', SQ, [[195, 5, 6], [195, 5, 6], [195, 5, 6]], R);
+  check('all Easy: two steps (205 x 5)', t.weight === 205 && t.reps === 5, t);
+  t = go('back_squat', SQ, [[195, 5, 6], [195, 5, 6], [195, 5, 8]], R);
+  check('Easy, Easy, Solid: one step (200)', t.weight === 200, t);
+  t = go('back_squat', SQ, [[195, 5, 8], [195, 5, 8], [195, 7, 8]], R);
+  check('last set 2 over the reps at Solid: two steps (205 x 5)', t.weight === 205 && t.reps === 5, t);
+  t = go('back_squat', SQ, [[195, 7, 8], [195, 7, 8], [195, 6, 8]], R);
+  check('last set only 1 over: one step (200)', t.weight === 200, t);
+  t = go('back_squat', SQ, [[195, 7, 8], [195, 7, 8], [195, 7, 10]], R);
+  check('extra reps but last set Maxed: holds, reps stay 5 (was 6)', t.weight === 195 && t.reps === 5, t);
+  t = go('back_squat', SQ, [[205, 5, 6], [205, 5, 6], [205, 5, 6]], R);
+  check('heavier than the target, all Easy: follows and takes two steps (215 x 5)', t.weight === 215 && t.reps === 5, t);
+  t = go('back_squat', SQ, [[205, 7, 9], [205, 7, 9], [205, 7, 9]], R);
+  check('heavier, Hard, extra reps: follows the weight, reps stay 5', t.weight === 205 && t.reps === 5, t);
+  t = go('strict_press', { weight: 95, reps: 5 }, [[95, 5, 6], [95, 5, 6], [95, 5, 6], [95, 5, 6]], R);
+  check('strict press all Easy: 105 x 5', t.weight === 105 && t.reps === 5, t);
+  t = go('back_squat', SQ, [[195, 5, 6, { unconfirmed: true }], [195, 5, 6, { unconfirmed: true }], [195, 5, 6]], R);
+  check('earlier sets unrated, last set Easy: the last set stands, two steps (205)', t.weight === 205, t);
+  t = go('back_squat', { weight: 210, reps: 3 }, [[210, 5, 8], [210, 5, 8], [210, 5, 8]], [3, 5], 9);
+  check('heavy weeks: 210 x 5 on a 210 x 3 target at Solid: two steps, reps stay 3 (220 x 3)', t.weight === 220 && t.reps === 3, t);
+  t = go('rdl', { weight: 195, reps: 7 }, [[195, 7, 6], [195, 7, 6], [195, 7, 6]], [6, 8]);
+  check('accessories are not on this rule (RDL Easy: one step, 200 x 6)', t.weight === 200 && t.reps === 6, t);
+  const off = JSON.parse(JSON.stringify(rules)); delete off.mainLiftTest.weekly.bigStep;
+  const o = applyProgression({ session: mkSession(3, [1, 2, 3].map(() => ws('back_squat', 195, 5, 6, R))), targets: { back_squat: { ...SQ, stall: 0 } }, rules: off, plan, settings }).targets.back_squat;
+  check('without bigStep: one step as before (200)', o.weight === 200, o);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
