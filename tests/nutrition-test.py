@@ -2,7 +2,8 @@
 # for now... little buttons... for things that I consistently eat", goal 160 g, protein only, chicken and turkey as one
 # serving of a 1 lb pack. The Nutrition tab: one tap adds a serving with Undo, the day's list (change how much, delete),
 # Other, Edit buttons, the goal, earlier days, the last 7 days, the Home line, numbers that look wrong held for a look,
-# backup and sync, and a computer that only views.
+# backup and sync, and a computer that only views. v1.20.1: protein is the fourth ring on Home's week card, the
+# buttons are just the food and its grams, and the computer shows the buttons greyed.
 # Denver time, made-up data. Run: python3 tests/nutrition-test.py   (serves the repo on :8097)
 # SHOTS=dir to keep screenshots (2x, for Cameron).
 import os, subprocess, sys, time, datetime
@@ -63,20 +64,27 @@ try:
     check('the tab bar has five tabs, Nutrition last', tabs == ['home', 'progress', 'plan', 'runs', 'nutrition'], tabs)
     clipped = pg.evaluate("[...document.querySelectorAll('#tabs .tab')].filter(t => t.offsetParent && t.scrollWidth > t.clientWidth + 1).length")
     check('no tab label is cut off', clipped == 0, clipped)
-    home = pg.inner_text('#nut-home').replace('\n', ' ')
-    check('Home has one Protein today line: 65 / 160 g', 'Protein today' in home and '65 / 160 g' in home, home)
-    check('...right under the today card', pg.evaluate("document.querySelector('#today-card').nextElementSibling.id") == 'nut-home')
-    shot(pg, '1-home-protein-line')
-    pg.click('#nut-home'); pg.wait_for_timeout(400)
-    check('tapping it opens the Nutrition tab', pg.locator('#nut-top').count() == 1 and pg.locator('#tabs .tab.active').get_attribute('data-view') == 'nutrition')
+    # v1.20.1: in weeks 1 to 12 protein is the fourth ring on the Week so far card (Cameron: "I don't see nutrition added here")
+    labels = [x.strip() for x in pg.locator('#week-rings .wk-ring-label').all_inner_texts()]
+    check('the week card has four rings, Protein today last', labels == ['Lifts', 'Runs', 'Hard efforts', 'Protein today'], labels)
+    ring = pg.inner_text('#week-rings [data-ring="protein"] .wk-ring-num').replace('\n', '').replace(' ', '')
+    check('...it reads 65/160', ring == '65/160', ring)
+    check('...and the separate Protein today line is gone', pg.locator('#nut-home').count() == 0)
+    fit = pg.evaluate("[...document.querySelectorAll('#week-rings .ring-btn')].map(b => [Math.round(b.getBoundingClientRect().width), b.scrollWidth > b.clientWidth + 1, b.querySelector('.wk-ring-num').scrollWidth > b.querySelector('.wk-ring-wrap').clientWidth + 1])")
+    check('...the four rings fit side by side, nothing cut off', all(w >= 70 and not a and not b for w, a, b in fit), fit)
+    shot(pg, '1-home-protein-ring')
+    pg.click('#week-rings [data-ring="protein"]'); pg.wait_for_timeout(400)
+    check('tapping the ring opens the Nutrition tab', pg.locator('#nut-top').count() == 1 and pg.locator('#tabs .tab.active').get_attribute('data-view') == 'nutrition')
     check('today: 65 g of 160 g, 95 g to go', total(pg) == 65 and pg.inner_text('#nut-goal') == 'of 160 g protein' and pg.inner_text('#nut-left') == '95 g to go', [total(pg), pg.inner_text('#nut-left')])
     check('today\'s heading', pg.inner_text('#nut-date').startswith('Today, Wed, Nov 25'), pg.inner_text('#nut-date'))
     names = pg.evaluate("[...document.querySelectorAll('#nut-grid .nut-food[data-food]')].map(b => b.dataset.food)")
     check('his ten buttons in order, then Other', names == ['whey', 'chicken', 'turkey', 'canned_chicken', 'oikos', 'pure_protein', 'think_bar', 'fitcrunch', 'chomps', 'rice'] and pg.locator('#nut-other').count() == 1, names)
+    check('the card says Add food, with Edit', pg.inner_text('#nut-add h3') == 'Add food' and pg.inner_text('#nut-edit') == 'Edit', pg.inner_text('#nut-add h3'))
     wb = pg.inner_text('[data-food="whey"]').replace('\n', ' ')
-    check('a button says what it adds: Gold Standard whey +24 g 1 scoop', wb == 'Gold Standard whey +24 g 1 scoop', wb)
+    check('a button is the food and its grams: Gold Standard whey +24 g', wb == 'Gold Standard whey +24 g', wb)
     ck = pg.inner_text('[data-food="chicken"]').replace('\n', ' ')
-    check('chicken is ½ lb a tap, marked est.', ck == 'Chicken +50 g ½ lb · est.', ck)
+    check('chicken shows its amount, ½ lb a tap, and no est.', ck == 'Chicken +50 g ½ lb', ck)
+    check('no est. anywhere on the buttons', 'est.' not in pg.inner_text('#nut-add'), pg.inner_text('#nut-add'))
     sizes = pg.evaluate("[...document.querySelectorAll('#nut-grid .nut-food')].map(b => [Math.round(b.getBoundingClientRect().width), Math.round(b.getBoundingClientRect().height)])")
     check('buttons are thumb-sized (at least 100 x 72 px)', all(w >= 100 and h >= 72 for w, h in sizes), sizes)
     rows = pg.evaluate("[...document.querySelectorAll('#nut-list .nut-row')].map(r => r.innerText.replace(/\\n/g, ' '))")
@@ -134,6 +142,7 @@ try:
     print('Edit buttons')
     pg.click('#nut-edit'); pg.wait_for_timeout(300)
     check('the list shows every button with its grams', pg.locator('#nut-foods .nut-foods-row').count() == 11, pg.locator('#nut-foods .nut-foods-row').count())
+    check('...estimates say to check the label there', 'estimate, check the label' in pg.inner_text('#nut-foods .nut-foods-row[data-food="chicken"]'), pg.inner_text('#nut-foods .nut-foods-row[data-food="chicken"]'))
     pg.click('#nut-foods .nut-foods-row[data-food="canned_chicken"]'); pg.wait_for_timeout(300)
     check('an estimate shows how to check it', 'Check the can' in pg.inner_text('#nut-food'), pg.inner_text('#nut-food'))
     pg.fill('#nut-food-g', '95'); pg.click('#nut-food-save'); pg.wait_for_timeout(200)
@@ -144,7 +153,7 @@ try:
     check('saving 54 g updates today\'s can too (108 - 50 + 54 = 112)', total(pg) == 112 and "Today's entry uses it too" in pg.inner_text('#toast'), [total(pg), pg.inner_text('#toast')])
     pg.evaluate("() => import('./js/ui.js').then(m => m.closeModal())"); pg.wait_for_timeout(200)
     cc = pg.inner_text('[data-food="canned_chicken"]').replace('\n', ' ')
-    check('the button now reads +54 g with no est.', cc == 'Canned chicken +54 g 1 can', cc)
+    check('the button now reads +54 g', cc == 'Canned chicken +54 g', cc)
     old = pg.evaluate("import('./js/store.js').then(m => m.getFoodLog()).then(l => l.find(e => e.id === 'f2').g)")
     check('older days keep what they were logged with', old == 50, old)
     hide_toast(pg)
@@ -178,7 +187,8 @@ try:
     b = pg.evaluate("import('./js/store.js').then(m => m.exportAll('1.20.0', 'x'))")
     check('the backup has the food log and his buttons', len(b['foodLog']) == 8 and any(f['id'] == 'eggs' for f in b['foods']), [len(b['foodLog']), b['foods'] and len(b['foods'])])
     pg.click('button[data-view="home"]'); pg.wait_for_timeout(400)
-    check('Home now says 112 / 160 g', '112 / 160 g' in pg.inner_text('#nut-home'), pg.inner_text('#nut-home'))
+    ring = pg.inner_text('#week-rings [data-ring="protein"] .wk-ring-num').replace('\n', '').replace(' ', '')
+    check('the Home ring now says 112/160', ring == '112/160', ring)
     narrow_errors = []
     ctx.close()
 
@@ -192,10 +202,26 @@ try:
     check('the first row of buttons is on the first screen', first < 420, first)
     ctx.close()
 
+    print('Before week 1 (no week rings): the one-line Protein today card')
+    ctx, pg = open_app(browser, narrow_errors, data={**DATA, 'settings': {'startDate': '2026-12-07', 'bodyweightLb': 165}})
+    home = pg.inner_text('#nut-home').replace('\n', ' ') if pg.locator('#nut-home').count() else ''
+    check('Home has the Protein today line: 65 / 160 g, right under the today card', 'Protein today' in home and '65 / 160 g' in home and pg.evaluate("document.querySelector('#today-card').nextElementSibling.id") == 'nut-home', home)
+    check('...and no rings', pg.locator('#week-rings').count() == 0)
+    ctx.close()
+
     print('Computer set to Only views')
-    ctx, pg = open_app(browser, errors, size={'width': 1366, 'height': 768}, viewer=True, data={**DATA, 'foods': None})
-    pg.click('button[data-view="nutrition"]'); pg.wait_for_timeout(400)
-    check('the numbers show (65 g) with no buttons and a note', total(pg) == 65 and pg.locator('#nut-grid').count() == 0 and pg.locator('#nut-viewonly').count() == 1)
+    ctx, pg = open_app(browser, errors, size={'width': 1366, 'height': 768}, viewer=True, data={**DATA, 'foods': None}, scale=2 if SHOTS else 1)
+    labels = [x.strip() for x in pg.locator('#week-rings .wk-ring-label').all_inner_texts()]
+    check('the computer\'s week card has the Protein today ring too', labels[-1:] == ['Protein today'] and '65' in pg.inner_text('#week-rings [data-ring="protein"]'), labels)
+    shot(pg, '6-computer-home')
+    pg.click('#week-rings [data-ring="protein"]'); pg.wait_for_timeout(400)
+    check('the numbers show (65 g)', total(pg) == 65, total(pg))
+    btns = pg.evaluate("[...document.querySelectorAll('#nut-grid .nut-food')].map(b => [b.dataset.food, b.disabled])")
+    check('his foods show, greyed: the ten buttons, all disabled, no Other', len(btns) == 10 and all(d for _, d in btns) and pg.locator('#nut-other').count() == 0, btns)
+    check('...under Your foods, with a note to tap them on the phone', pg.inner_text('#nut-add h3') == 'Your foods' and 'Tap these on your phone' in pg.inner_text('#nut-viewonly') and pg.locator('#nut-edit').count() == 0, pg.inner_text('#nut-add'))
+    pg.click('[data-food="whey"]', force=True); pg.wait_for_timeout(300)
+    check('...a click adds nothing (still 65)', total(pg) == 65, total(pg))
+    shot(pg, '7-computer-nutrition')
     check('...no goal button either', pg.locator('button#nut-goal').count() == 0)
     check('...lines do not open', pg.locator('#nut-list .nut-row.tappable').count() == 0)
     ctx.close()

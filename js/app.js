@@ -21,8 +21,8 @@ import { runUpgrades } from './upgrade.js';
 import { changesFor, replyFor, pendingAdjustments, withRest, keepsOwnTarget, staleAdjustment } from './coach.js';
 import { ownTargetFlagged } from './lift-goal.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp, effortChips } from './ui.js';
-import { weekRings, ringsCard } from './rings.js';
-import { renderNutritionTab, proteinHomeCard } from './nutrition-view.js';
+import { weekRings, ringsCard, proteinRing } from './rings.js';
+import { renderNutritionTab, proteinHomeCard, proteinToday } from './nutrition-view.js';
 import { flaggedGroups, applyNumberFix, rateSavedSet, impossibleNumber } from './sanity.js';
 
 const view = document.getElementById('view');
@@ -455,9 +455,11 @@ async function renderHome() {
   if (stalled.length && canCount) view.appendChild(stallCard(stalled));
 
   // v1.14: the week at a glance, above today's card. Each ring opens the page behind it.
+  // v1.20.1: a fourth ring for today's protein, opening the Nutrition tab
+  const protein = await proteinToday();
   if (week >= 1 && week <= 12) {
-    view.appendChild(ringsCard(weekRings({ plan: D.plan, rules: D.rules, settings, sessions: allSessions, runs: allRuns, week, today }), {
-      week, onOpen: k => (k === 'runs' ? showTab('runs') : (k === 'hard' ? showTab('plan') : showTab('progress')))
+    view.appendChild(ringsCard([...weekRings({ plan: D.plan, rules: D.rules, settings, sessions: allSessions, runs: allRuns, week, today }), proteinRing(protein.total, protein.goal)], {
+      week, onOpen: k => (k === 'runs' ? showTab('runs') : (k === 'hard' ? showTab('plan') : (k === 'protein' ? showTab('nutrition') : showTab('progress'))))
     }));
   }
   const todayCard = el('div', { class: 'card accent', id: 'today-card' });
@@ -503,8 +505,9 @@ async function renderHome() {
     todayCard.appendChild(el('p', { class: 'muted' }, 'Nothing owed this week. Rest, or pick a session below.'));
   }
   view.appendChild(todayCard);
-  // v1.20: today's protein in one line; a tap opens the Nutrition tab
-  view.appendChild(await proteinHomeCard(() => showTab('nutrition')));
+  // v1.20: today's protein in one line; a tap opens the Nutrition tab. v1.20.1: only when there are no week rings
+  // (before week 1 or after week 12); in the 12 weeks it is the fourth ring.
+  if (!(week >= 1 && week <= 12)) view.appendChild(await proteinHomeCard(() => showTab('nutrition')));
   if (hasOwed && (session || run)) {
     const c = el('div', { class: 'card', id: 'catchup-card' }, [el('h3', {}, 'Owed this week')]);
     catchUpBody(c, false);

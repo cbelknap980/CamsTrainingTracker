@@ -3,7 +3,7 @@
 // eat"). One tap on a food adds one serving, with Undo; today's list below (tap a line to change how much, swipe to
 // delete); the last 7 days at the bottom. The goal is settings.proteinGoalG (160 g). Numbers come from
 // js/nutrition.js and the starting buttons from data/foods.json. A computer set to Only views shows the numbers
-// without the buttons.
+// and the buttons greyed out (v1.20.1), since food is logged on the phone.
 
 import { toISODate, fmtDate, fmtTime } from './data.js';
 import { getFoodLog, setFoodLog, getFoods, setFoods, getSettings, saveSettings, newId } from './store.js';
@@ -56,40 +56,38 @@ export async function renderNutritionTab(view, ctx) {
   ]));
 
   // ---- the buttons ----
-  if (canWrite) {
-    const add = async (food) => {
-      const at = date === today ? new Date().toISOString() : noonOf(date);
-      const entry = makeEntry(food, { date, at, servings: 1, id: newId('food') });
-      if (date !== today) entry.later = true;
-      const fresh = await getFoodLog();
-      const rep = date === today ? recentRepeat(fresh, food.id, at, check) : null;
-      fresh.push(entry);
-      await setFoodLog(fresh);
-      haptic('press');
-      await again();
-      toast(rep ? `${food.name} added twice in a minute. Meant to?` : `${food.name} +${entryG(entry)} g${date !== today ? ` on ${fmtDate(date)}` : ''}`, null, {
-        action: 'Undo', onAction: async () => { await setFoodLog((await getFoodLog()).filter(e => e.id !== entry.id)); again(); }
-      });
-    };
-    const grid = el('div', { class: 'nut-grid', id: 'nut-grid' }, [
-      ...foods.map(f => el('button', { type: 'button', class: 'nut-food' + (f.source === 'estimate' ? ' est' : ''), 'data-food': f.id, onclick: () => add(f) }, [
-        el('b', {}, f.name),
-        el('span', { class: 'nut-g' }, `+${f.g} g`),
-        el('small', {}, f.source === 'estimate' ? `${amountText(f)} · est.` : amountText(f))
-      ])),
-      el('button', { type: 'button', class: 'nut-food other', id: 'nut-other', onclick: () => otherSheet({ date, today, check, again, defaults: ctx.foodsData }) }, [icon('plus'), el('b', {}, 'Other')])
-    ]);
-    view.appendChild(el('div', { class: 'card', id: 'nut-add' }, [
-      el('div', { class: 'nut-head' }, [
-        el('h3', {}, date === today ? 'Tap what you ate' : `Add to ${fmtDate(date)}`),
-        el('button', { type: 'button', class: 'link-btn', id: 'nut-edit', onclick: () => foodsSheet({ ctx, check, again, today }) }, 'Edit buttons')
-      ]),
-      grid,
-      foods.some(f => f.source === 'estimate') ? el('p', { class: 'muted nut-est-note' }, 'est. means a typical number. Check the label once in Edit buttons and it goes away.') : null
-    ]));
-  } else {
-    view.appendChild(el('div', { class: 'card', id: 'nut-viewonly' }, [el('p', { class: 'muted', style: 'margin:0' }, 'This computer only views. Log food on your phone and it shows here after it uploads.')]));
-  }
+  // v1.20.1 (Cameron: "make cleaner and simpler to use"): a button is the food and its grams, plus the amount only
+  // when a serving is not 1 of something (½ lb of chicken). A computer that only views shows the same buttons, greyed.
+  const add = async (food) => {
+    const at = date === today ? new Date().toISOString() : noonOf(date);
+    const entry = makeEntry(food, { date, at, servings: 1, id: newId('food') });
+    if (date !== today) entry.later = true;
+    const fresh = await getFoodLog();
+    const rep = date === today ? recentRepeat(fresh, food.id, at, check) : null;
+    fresh.push(entry);
+    await setFoodLog(fresh);
+    haptic('press');
+    await again();
+    toast(rep ? `${food.name} added twice in a minute. Meant to?` : `${food.name} +${entryG(entry)} g${date !== today ? ` on ${fmtDate(date)}` : ''}`, null, {
+      action: 'Undo', onAction: async () => { await setFoodLog((await getFoodLog()).filter(e => e.id !== entry.id)); again(); }
+    });
+  };
+  const grid = el('div', { class: 'nut-grid', id: 'nut-grid' }, [
+    ...foods.map(f => el('button', { type: 'button', class: 'nut-food', 'data-food': f.id, disabled: canWrite ? null : true, onclick: canWrite ? () => add(f) : null }, [
+      el('b', {}, f.name),
+      el('span', { class: 'nut-g' }, `+${f.g} g`),
+      Number(f.qty) !== 1 ? el('small', {}, amountText(f)) : null
+    ])),
+    canWrite ? el('button', { type: 'button', class: 'nut-food other', id: 'nut-other', onclick: () => otherSheet({ date, today, check, again, defaults: ctx.foodsData }) }, [icon('plus'), el('b', {}, 'Other')]) : null
+  ]);
+  view.appendChild(el('div', { class: 'card' + (canWrite ? '' : ' nut-readonly'), id: 'nut-add' }, [
+    el('div', { class: 'nut-head' }, [
+      el('h3', {}, !canWrite ? 'Your foods' : date === today ? 'Add food' : `Add to ${fmtDate(date)}`),
+      canWrite ? el('button', { type: 'button', class: 'link-btn', id: 'nut-edit', onclick: () => foodsSheet({ ctx, check, again, today }) }, 'Edit') : null
+    ]),
+    canWrite ? null : el('p', { class: 'muted nut-viewonly', id: 'nut-viewonly' }, 'Tap these on your phone. This computer only shows what you logged.'),
+    grid
+  ]));
 
   // ---- the day's list ----
   const entries = dayEntries(log, date);
@@ -104,7 +102,7 @@ export async function renderNutritionTab(view, ctx) {
     list.appendChild(canWrite ? swipeToDelete(row, () => removeEntry(e, again)) : row);
   }
   view.appendChild(el('div', { class: 'card', id: 'nut-day-list' }, [
-    el('h3', {}, entries.length ? `${date === today ? 'Today' : fmtDate(date)} · ${entries.length} ${entries.length === 1 ? 'item' : 'items'}` : (date === today ? 'Today' : fmtDate(date))),
+    el('h3', {}, date === today ? 'Today' : fmtDate(date)),
     list
   ]));
 
@@ -213,7 +211,7 @@ async function foodsSheet({ ctx, check, again, today }) {
     el('h2', {}, 'Your buttons'),
     el('p', { class: 'muted', style: 'margin:0 0 8px' }, 'Tap one to change its name or grams, or to remove it.'),
     el('div', { class: 'nut-foods-list' }, list.map(f => el('button', { type: 'button', class: 'nut-foods-row', 'data-food': f.id, onclick: () => foodSheet(f, { ctx, check, again, today, reopen }) }, [
-      el('span', {}, [el('b', {}, f.name), el('small', {}, amountText(f) + (f.source === 'estimate' ? ' · est.' : ''))]),
+      el('span', {}, [el('b', {}, f.name), el('small', {}, amountText(f) + (f.source === 'estimate' ? ' · estimate, check the label' : ''))]),
       el('b', {}, `${f.g} g`)
     ]))),
     el('button', { class: 'btn', id: 'nut-food-new', onclick: () => foodSheet(null, { ctx, check, again, today, reopen }) }, [icon('plus'), 'Add a button']),
@@ -304,4 +302,11 @@ export async function proteinHomeCard(onOpen) {
     ]),
     el('span', { class: 'nut-bar small' + (p.hit ? ' hit' : '') }, el('span', { style: `width:${p.pct}%` }))
   ]);
+}
+
+/** v1.20.1: today's protein and the goal, for the Home ring. */
+export async function proteinToday() {
+  const settings = await getSettings();
+  const goal = Number(settings.proteinGoalG) || 160;
+  return { total: dayTotal(await getFoodLog(), toISODate(new Date())), goal };
 }

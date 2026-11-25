@@ -75,7 +75,7 @@ with sync_playwright() as p:
 
     print('Home')
     rings = page.locator('#week-rings .ring-btn')
-    check('week rings: Lifts, Runs, Hard efforts', rings.count() == 3 and [x.strip() for x in page.locator('.wk-ring-label').all_inner_texts()] == ['Lifts', 'Runs', 'Hard efforts'], page.locator('.wk-ring-label').all_inner_texts())
+    check('week rings: Lifts, Runs, Hard efforts, Protein today (v1.20.1)', rings.count() == 4 and [x.strip() for x in page.locator('#week-rings .wk-ring-label').all_inner_texts()] == ['Lifts', 'Runs', 'Hard efforts', 'Protein today'], page.locator('.wk-ring-label').all_inner_texts())
     check('rings count this week only (last week\'s Lift 1 is not in it)', '0/3' in page.locator('[data-ring=lifts] .wk-ring-num').inner_text().replace(' ', ''), page.locator('[data-ring=lifts]').inner_text())
     check('the rings sit above today\'s card', page.evaluate("document.querySelector('#week-rings').compareDocumentPosition(document.querySelector('#today-card')) & 4") > 0)
     page.screenshot(path=f'{SHOTS}/v114-home.png')
