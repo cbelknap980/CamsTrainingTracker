@@ -2,7 +2,7 @@
 // after a restore or (on the computer) a pull brings in data an older version wrote: importAll keeps that data's
 // appVersion as dataVersion, and every change for a newer version runs once.
 
-import { getTargets, setTargets, getRuns, putRun, kvGet, kvSet } from './store.js';
+import { getTargets, setTargets, getRuns, putRun, getSessions, putSession, kvGet, kvSet } from './store.js';
 import { APP_VERSION, getData, snapLoad, roundEst } from './data.js';
 import { settleRun } from './runs.js';
 
@@ -71,7 +71,26 @@ export function upgrade11810({ targets, rules, plan }) {
   return { targets: out.targets, zeroed: changed, runs: [] };
 }
 
-const UPGRADES = [{ version: '1.18.1', run: upgrade1181 }, { version: '1.18.5', run: upgrade1185 }, { version: '1.18.10', run: upgrade11810 }];
+/**
+ * v1.18.13 (Cameron, Nov 25: "if I skip stretching it still count as a workout"): a saved session marked ended early
+ * with every set done (none skipped or missing) and the Engine done where the session has one only left out the
+ * stretch, so it becomes complete. His Lift 1 on Nov 24 is one. Sessions with a skipped set stay as they are.
+ * Returns { targets, zeroed: 0, runs: [], sessions } with sessions = the records that changed (new objects).
+ */
+export function upgrade11813({ targets, sessions, plan }) {
+  const changed = [];
+  for (const s of sessions || []) {
+    const sets = s && s.sets ? s.sets : [];
+    if (!s || s.status !== 'ended_early' || !sets.length || sets.some(x => x.skipped || !x.done)) continue;
+    const lift = plan && plan.sessions ? plan.sessions.find(l => l.id === s.sessionId) : null;
+    const engine = lift && (lift.blocks || []).some(b => b.type === 'emom');
+    if (engine && !(s.engineMinutes > 0)) continue;
+    changed.push({ ...s, status: 'complete', stretchSkipped: true, upgradedFrom: 'ended_early' });
+  }
+  return { targets, zeroed: 0, runs: [], sessions: changed };
+}
+
+const UPGRADES = [{ version: '1.18.1', run: upgrade1181 }, { version: '1.18.5', run: upgrade1185 }, { version: '1.18.10', run: upgrade11810 }, { version: '1.18.13', run: upgrade11813 }];
 
 /**
  * Run each upgrade newer than the data on this device, once. Returns { zeroed, runs } (counts) when something ran,
@@ -87,10 +106,11 @@ export async function runUpgrades() {
   const { rules, plan } = getData();
   let zeroed = 0, runsChanged = 0;
   for (const u of due) {
-    const [targets, runs] = await Promise.all([getTargets(), getRuns()]);
-    const out = u.run({ targets, runs, rules, plan });
+    const [targets, runs, sessions] = await Promise.all([getTargets(), getRuns(), getSessions()]);
+    const out = u.run({ targets, runs, sessions, rules, plan });
     if (out.zeroed) await setTargets(out.targets);
     for (const r of out.runs) await putRun(r);
+    for (const s of out.sessions || []) await putSession(s);
     zeroed += out.zeroed; runsChanged += out.runs.length;
   }
   await kvSet('dataVersion', APP_VERSION);

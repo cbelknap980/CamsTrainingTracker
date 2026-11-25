@@ -1297,5 +1297,64 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('a rep count off the plan alone is his call: not flagged', !of('back_squat', { weight: 195, reps: 5 }, 195, 8));
 }
 
+// ---- v1.18.13: skipping the stretch still counts as a workout ----
+{
+  console.log('\nv1.18.13: a workout with the stretch skipped');
+  const { workLeft, stretchMissed } = await import('../js/builder.js');
+  const { upgrade11813 } = await import('../js/upgrade.js');
+  for (const sid of ['lift1', 'lift2', 'lift3']) {
+    const tl = buildTimeline({ plan, rules, settings, sessionId: sid, week: 3, targets: {} });
+    const steps = tl.steps.map(s => ({ ...s }));
+    const firstStretch = steps.findIndex(s => s.blockType === 'stretch');
+    check(`${sid}: has a stretch block`, firstStretch > 0);
+    check(`${sid}: at the start, training is left`, workLeft(steps, 0));
+    // everything before the stretch done, If time left untouched
+    steps.forEach((s, i) => { if (i < firstStretch && !s.iftime) s.done = true; });
+    check(`${sid}: with every set and the Engine done, only the stretch left = nothing left to train`, !workLeft(steps, firstStretch));
+    check(`${sid}: ending on the step before the stretch also counts`, !workLeft(steps, firstStretch - 1));
+    check(`${sid}: the stretch counts as missed`, stretchMissed(steps));
+    const lastSet = steps.map((s, i) => [s, i]).filter(([s]) => s.kind === 'set' && !s.iftime).pop()[1];
+    steps[lastSet].done = false;
+    check(`${sid}: one work set left = still an early end`, workLeft(steps, lastSet));
+    const emom = steps.findIndex(s => s.blockType === 'emom');
+    if (emom >= 0) { steps[lastSet].done = true; steps[emom].done = false; check(`${sid}: an Engine minute left = still an early end`, workLeft(steps, emom)); }
+    steps.forEach(s => { s.done = true; });
+    check(`${sid}: stretch done = not missed`, !stretchMissed(steps));
+  }
+  // the Player decides when the session ends
+  const tl = buildTimeline({ plan, rules, settings, sessionId: 'lift1', week: 3, targets: {} });
+  const firstStretch = tl.steps.findIndex(s => s.blockType === 'stretch');
+  const endAt = idx => {
+    const t = JSON.parse(JSON.stringify(tl)); let draft = null;
+    t.steps.forEach((s, i) => { if (i < idx && !s.iftime) { s.done = true; if (s.kind === 'set') s.record = { exerciseId: s.exerciseId, weight: 100, reps: 5, done: true, skipped: false }; } });
+    const p = Object.create(Player.prototype);
+    p.s = { timeline: t, idx, status: 'running', sessionStart: Date.now() - 3600e3, pausedTotal: 0, pausedAt: null, trims: [], prs: [], startedISO: new Date().toISOString(), gymStart: Date.now() - 3600e3 };
+    p.teardown = () => {}; p.gymMs = () => 3600e3; p.onFinish = d => { draft = d; };
+    p.finish('ended_early');
+    return draft;
+  };
+  const a = endAt(firstStretch);
+  check('End session on the stretch saves it as complete, stretch skipped', a.status === 'complete' && a.stretchSkipped === true, [a.status, a.stretchSkipped]);
+  const b = endAt(firstStretch - 3);
+  check('End session with sets left stays ended early', b.status === 'ended_early', b.status);
+  // saved sessions: his Nov 24 Lift 1 (every set done, ended at the stretch) becomes complete
+  const all = s => s.map(x => ({ exerciseId: 'back_squat', done: true, skipped: false, ...x }));
+  const recs = [
+    { id: 'nov24', sessionId: 'lift1', status: 'ended_early', engineMinutes: 0, sets: all([{}, {}, {}]) },
+    { id: 'nov18', sessionId: 'lift2', status: 'ended_early', engineMinutes: 0, sets: all([{}, { done: false, skipped: true }]) },
+    { id: 'eng', sessionId: 'lift2', status: 'ended_early', engineMinutes: 0, sets: all([{}, {}]) },
+    { id: 'eng2', sessionId: 'lift2', status: 'ended_early', engineMinutes: 8, sets: all([{}, {}]) },
+    { id: 'ok', sessionId: 'lift3', status: 'complete', sets: all([{}]) },
+    { id: 'none', sessionId: 'lift3', status: 'ended_early', sets: [] }
+  ];
+  const snap = JSON.stringify(recs);
+  const up = upgrade11813({ targets: {}, sessions: recs, plan });
+  const ids = up.sessions.map(s => s.id).sort().join(',');
+  const lift2Engine = plan.sessions.find(l => l.id === 'lift2').blocks.some(b => b.type === 'emom');
+  check('upgrade: ended early with every set done becomes complete; a skipped set, a missed Engine or no sets stay', ids === (lift2Engine ? 'eng2,nov24' : 'eng,eng2,nov24'), ids);
+  check('upgrade: the input is not changed and a second run changes nothing', JSON.stringify(recs) === snap && upgrade11813({ sessions: recs.map(r => up.sessions.find(x => x.id === r.id) || r), plan }).sessions.length === 0);
+  check('upgrade: the week grid then shows Lift 1 week 2 as done', adherence([{ ...up.sessions.find(s => s.id === 'nov24'), week: 2 }], plan, { ...settings, startDate: '2026-11-16' }, new Date('2026-11-25T12:00:00')).rows.find(r => r.id === 'lift1').cells[1].status === 'done');
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
 process.exit(failures ? 1 : 0);
