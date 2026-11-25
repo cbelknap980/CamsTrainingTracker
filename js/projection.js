@@ -126,5 +126,5 @@ export function projectExercise({ plan, rules, settings, sessions, targets, exer
     for (const c of CASES) if (runs[c][w]) last[c] = withE(runs[c][w]);
     weeks.push({ week: w, phase: phaseForWeek(plan, w).id, ...last });
   }
-  return { kind, now, weeks, end: { ...last }, sessionsLeft: occ.length, mainLift: !!ex.mainLift, weekly, oldBest: ex.oldBest && ex.oldBest.lb ? ex.oldBest.lb : null };
+  return { kind, now, weeks, end: { ...last }, sessionsLeft: occ.length, mainLift: !!ex.mainLift, weekly, oldBest: ex.oldBest && ex.oldBest.lb ? ex.oldBest.lb : null, standard: ex.standard && ex.standard.lb ? { lb: ex.standard.lb, label: ex.standard.label || 'Benchmark' } : null };
 }

@@ -52,7 +52,7 @@ try:
     pg.click('#plan-seg [data-pane="sessions"]'); pg.click('[data-pick="lift1"]'); pg.wait_for_timeout(150)
     pg.click('tr[data-ex="back_squat"]'); pg.wait_for_selector('#proj-sheet')
     sh = pg.locator('#proj-sheet').inner_text()
-    check('back squat: now 185 x 6, a week-12 target, a chart and a week table', 'Now' in sh and '185 × 6' in sh and all(c in sh for c in ('Doing well', 'Steady', 'Struggling')) and pg.locator('#proj-sheet .proj-case').count() == 3 and pg.locator('#proj-sheet svg path.proj-line').count() == 3 and pg.locator('#proj-sheet svg .proj-best').count() == 1 and pg.locator('#proj-retest').count() == 1 and pg.locator('#proj-table tr').count() >= 5, sh[:300])
+    check('back squat: now 185 x 6, a week-12 target, a chart and a week table', 'Now' in sh and '185 × 6' in sh and all(c in sh for c in ('Doing well', 'Steady', 'Struggling')) and pg.locator('#proj-sheet .proj-case').count() == 3 and pg.locator('#proj-sheet svg path.proj-line').count() == 3 and pg.locator('#proj-sheet svg .proj-best').count() == 1 and 'Intermediate at 165 lb: 274 lb' in sh and 'Your best single: 245' in sh and pg.locator('#proj-retest').count() == 1 and pg.locator('#proj-table tr').count() >= 5, sh[:300])
     tiles = [int(t) for t in pg.locator('#proj-sheet .proj-case b').all_inner_texts()]
     check('v1.18.8 back squat: doing well ends above steady, steady above struggling, none below today or past 20% over it', tiles[0] > tiles[1] > tiles[2] >= 222 and tiles[0] <= 222 * 1.2 + 1, tiles)
     pg.evaluate("() => import('./js/ui.js').then(m => m.closeModal())"); pg.wait_for_timeout(100)
