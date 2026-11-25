@@ -270,7 +270,11 @@ button.ring-btn:active { background: rgba(255, 255, 255, 0.05); }
 .wk-ring { position: absolute; inset: 0; width: 64px; height: 64px; }
 .wk-ring-bg { fill: none; stroke: rgba(255, 255, 255, 0.09); stroke-width: 7; }
 .wk-ring-fg { fill: none; stroke-width: 7; stroke-linecap: round; transition: stroke-dashoffset 0.8s var(--ease); }
-.r-lifts .wk-ring-fg { stroke: #f5a524; } .r-runs .wk-ring-fg { stroke: #6ea8ff; } .r-hard .wk-ring-fg { stroke: #ff7a59; }
+.r-lifts .wk-ring-fg { stroke: #f5a524; } .r-runs .wk-ring-fg { stroke: #6ea8ff; } .r-hard .wk-ring-fg { stroke: #ff7a59; } .r-protein .wk-ring-fg { stroke: #3dcc7a; }
+.wk-rings.four .wk-ring-row { grid-template-columns: repeat(4, 1fr); gap: 2px; }
+.wk-ring-num.grams { font-size: 0.98rem; letter-spacing: -0.03em; }
+.wk-ring-num.grams small { font-size: 0.66rem; }
+.wk-rings.four .wk-ring-label { font-size: 0.78rem; text-align: center; line-height: 1.15; }
 .wk-ring-fg[stroke-dashoffset="163.4"] { stroke: none; }
 .wk-ring-num { position: relative; font-weight: 800; font-size: 1.1rem; letter-spacing: -0.02em; }
 .wk-ring-num small { font-size: 0.75rem; font-weight: 650; color: var(--muted); }
@@ -967,7 +971,9 @@ span.nut-goal { text-decoration: none; cursor: default; }
 .nut-food small { font-size: 0.7rem; line-height: 1.1; }
 .nut-food.other { background: none; box-shadow: 0 0 0 1.5px var(--line) inset; color: var(--muted); }
 .nut-food.other .ico svg { width: 22px; height: 22px; }
-.nut-est-note { font-size: var(--t-label); margin: 10px 0 0; }
+.nut-viewonly { font-size: var(--t-small); margin: -2px 0 10px; }
+.nut-readonly .nut-food { cursor: default; opacity: 0.72; }
+.nut-readonly .nut-food:active { transform: none; background: var(--surface-2); }
 .nut-list .swipe-wrap, .nut-list > .nut-row { border-top: 1px solid var(--line); }
 .nut-list .swipe-wrap:first-child, .nut-list > .nut-row:first-child { border-top: 0; }
 .nut-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 0; background: var(--surface-1); }

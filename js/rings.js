@@ -46,16 +46,24 @@ function ring(k, cls) {
   return svg;
 }
 
-/** The card: three rings with the count inside and the label under. onOpen(key) runs on a tap. */
+/**
+ * v1.20.1 (Cameron, Nov 25: "I don't see nutrition added here"): today's protein as a fourth ring on Home, grams
+ * against the goal, opening the Nutrition tab.
+ */
+export function proteinRing(total, goal) {
+  return { key: 'protein', label: 'Protein today', done: Math.round(total), of: goal, unit: 'g', detail: `${Math.round(total)} of ${goal} g today` };
+}
+
+/** The card: three rings (four with protein) with the count inside and the label under. onOpen(key) runs on a tap. */
 export function ringsCard(rings, { week, onOpen, compact } = {}) {
-  return el('div', { class: 'card wk-rings' + (compact ? ' compact' : ''), id: compact ? null : 'week-rings' }, [
+  return el('div', { class: 'card wk-rings' + (compact ? ' compact' : '') + (rings.length === 4 ? ' four' : ''), id: compact ? null : 'week-rings' }, [
     compact ? null : el('h3', {}, `Week ${week} so far`),
     el('div', { class: 'wk-ring-row' }, rings.map(r => el(onOpen ? 'button' : 'div', {
       type: onOpen ? 'button' : null, class: 'ring-btn' + (r.done >= r.of && r.of ? ' full' : ''), 'data-ring': r.key,
       'aria-label': `${r.label}: ${r.done} of ${r.of}. ${r.detail}`,
       onclick: onOpen ? () => onOpen(r.key) : null
     }, [
-      el('span', { class: 'wk-ring-wrap' }, [ring(r.of ? r.done / r.of : 0, 'r-' + r.key), el('span', { class: 'wk-ring-num' }, [String(r.done), el('small', {}, `/${r.of}`)])]),
+      el('span', { class: 'wk-ring-wrap' }, [ring(r.of ? r.done / r.of : 0, 'r-' + r.key), el('span', { class: 'wk-ring-num' + (r.unit ? ' grams' : '') }, [String(r.done), el('small', {}, `/${r.of}`)])]),
       el('span', { class: 'wk-ring-label' }, r.label)
     ])))
   ]);
