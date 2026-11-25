@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { Player, playTones } from './player.js';
 import { learnPacing, pacingLines, pacingConfig } from './pacing.js';
 import { saveSession, renderSummary, renderReview, setsTable, rateUnratedButton, gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from './logger.js';
-import { epley, targetFromBenchmark, estimateStart, incrementFor, heavyStartDue, heavyStartTarget, flatWords } from './progression.js';
+import { epley, targetFromBenchmark, estimateStart, incrementFor, heavyStartDue, heavyStartTarget, flatWords, stalledLifts } from './progression.js';
 import { getTargets, setTarget, setTargets, replaceTarget, getSessions, getRuns, deleteSession, putSession, getInProgress, clearInProgress, getPendingReview, setPendingReview, clearPendingReview, getSettings, saveSettings, setSettingsDefaults, wipeAll, getPairTotals, setPairTotals, pairWeightsOnFile, doublePairWeights, kvGet, getCheckins, addCheckin, getCoachApplied, setCoachApplied, newId } from './store.js';
 import { backupNow, downloadBackup, restoreFromFile, exportExcel } from './export.js';
 import { renderArchitecture } from './architecture.js';
@@ -18,7 +18,7 @@ import { importFromGarmin } from './garmin.js';
 import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
 import { renderPlan } from './plan-view.js';
 import { runUpgrades } from './upgrade.js';
-import { changesFor, replyFor, pendingAdjustments, withRest, keepsOwnTarget } from './coach.js';
+import { changesFor, replyFor, pendingAdjustments, withRest, keepsOwnTarget, staleAdjustment } from './coach.js';
 import { ownTargetFlagged } from './lift-goal.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp, effortChips } from './ui.js';
 import { weekRings, ringsCard } from './rings.js';
@@ -160,11 +160,15 @@ async function syncCoach(rerender) {
       const done = await getCoachApplied();
       const todo = pendingAdjustments(r.file, done, D.plan);
       const sessions = todo.length ? await getSessions() : [];
-      const kept = [];
+      const kept = [], stale = [];
       for (const a of todo) {
         // v1.18.12: a target he set himself since his last session of the lift stays (unless he saved it past a warning)
-        const own = a.exerciseId && (a.weight != null || a.reps != null) && keepsOwnTarget((await getTargets())[a.exerciseId], sessions, a.exerciseId);
-        if (own) kept.push(a.exerciseId);
+        const mine = a.exerciseId && (a.weight != null || a.reps != null) && keepsOwnTarget((await getTargets())[a.exerciseId], sessions, a.exerciseId);
+        // v1.18.15: a coach change worked out before a later session of that lift is left out too
+        const old = !mine && a.exerciseId && (a.weight != null || a.reps != null) && staleAdjustment(a, sessions);
+        const own = mine || old;
+        if (mine) kept.push(a.exerciseId);
+        if (old) stale.push(a.exerciseId);
         if (a.exerciseId && (a.weight != null || a.reps != null) && !own) {
           const patch = { source: 'coach', updated: new Date().toISOString() };
           // v1.18.10: a coach weight lands on a weight he can load too (92.5 -> 90)
@@ -181,9 +185,9 @@ async function syncCoach(rerender) {
       }
       if (applied) {
         await setCoachApplied(done);
-        const n = applied - kept.length;
+        const n = applied - kept.length - stale.length;
         const names = [...new Set(kept)].map(id => (D.plan.exercises[id] || { name: id }).name);
-        toast([n > 0 ? `Coach updated ${n} ${n === 1 ? 'thing' : 'things'}.` : '', names.length ? `Kept the target you set on ${names.join(', ')}.` : '', 'See Plan.'].filter(Boolean).join(' '), names.length ? 5000 : 3500);
+        toast([n > 0 ? `Coach updated ${n} ${n === 1 ? 'thing' : 'things'}.` : '', names.length ? `Kept the target you set on ${names.join(', ')}.` : '', stale.length ? `Skipped an older coach change for ${[...new Set(stale)].map(id => (D.plan.exercises[id] || { name: id }).name).join(', ')}; you trained it since.` : '', 'See Plan.'].filter(Boolean).join(' '), names.length || stale.length ? 5000 : 3500);
       }
     }
     if ((rerender || applied) && (currentTab === 'plan' || currentTab === 'home')) showTab(currentTab);
@@ -443,6 +447,9 @@ async function renderHome() {
   // v1.16: numbers that look wrong come first, until Cameron fixes or confirms them
   const flags = flaggedGroups(allSessions, D.plan, D.rules);
   if (flags.length) view.appendChild(checkNumbersCard(flags, allSessions));
+  // v1.18.15 (audit Nov 25): a main lift that has asked for the same numbers three sessions running says so
+  const stalled = stalledLifts({ sessions: allSessions, targets, plan: D.plan, rules: D.rules, settings });
+  if (stalled.length && canCount) view.appendChild(stallCard(stalled));
 
   // v1.14: the week at a glance, above today's card. Each ring opens the page behind it.
   if (week >= 1 && week <= 12) {
@@ -584,6 +591,28 @@ function mainLiftsCard(targets, settings, flags = [], sessions = []) {
     el('h3', {}, ['Main lifts', infoBtn('Main lifts', `Next time is the weight and reps the app will ask for the next time you do the lift. It comes from your last session: every set made at Solid or easier adds weight (5 lb, 2.5 on the strict press) and the reps stay at 5, or 3 in the heavier weeks; a Hard or Maxed set, or a missed rep, holds the weight. ${flatWords(D.rules)} The power clean follows the weight you use; the app never raises it. e1RM is your estimated one-rep max from your best set. Tap a lift to change its target by hand, or to enter a benchmark (the weight you can do for 5 with 2 left). Pull-up weights are the weight you add.`)]),
     el('table', { class: 'tgt-table' }, [el('tr', {}, [el('th', {}, 'Lift'), el('th', { class: 'num' }, 'Next time')]), ...rows]),
     el('p', { class: 'muted', style: 'margin-top:8px' }, 'Other lifts show their targets on the start page of that day\'s workout.')
+  ]);
+}
+
+// ---- v1.18.15: a main lift holding at the same numbers (audit Nov 25, approved by Cameron) ----
+function stallCard(list) {
+  const answer = async (s, take) => {
+    const seenNow = (await getSettings()).stallNoteSeen || {};
+    if (take) await setTarget(s.exerciseId, { weight: s.offer.weight, reps: s.offer.reps, source: 'you', flagged: false, stall: 0, updated: new Date().toISOString() });
+    const w = take ? s.offer : s;
+    await saveSettings({ stallNoteSeen: { ...seenNow, [s.exerciseId]: `${w.weight}x${w.reps}` } });
+    toast(take ? `${s.name}: next time ${fmtWeight(s.offer.weight)} lb x ${s.offer.reps}` : `${s.name}: keeping ${fmtWeight(s.weight)} lb x ${s.reps}`, 3500);
+    renderHome();
+  };
+  return el('div', { class: 'card check-card', id: 'stall-note' }, [
+    el('h3', {}, ['Holding steady', infoBtn('Holding steady', ['A Hard day that makes every rep keeps the weight where it is and does not count toward a reset, so a lift can sit at the same numbers for a while.', 'After three sessions in a row the app asks. Keep going is fine if the sets feel close. One rep fewer (or one step lighter) usually gets it moving: the next Solid session adds the rep back, then the weight.'])]),
+    ...list.map(s => el('div', { class: 'stall-row', 'data-ex': s.exerciseId }, [
+      el('p', { style: 'margin:0 0 8px' }, [el('b', {}, s.name), ` has asked for ${fmtWeight(s.weight)} lb x ${s.reps} for ${s.sessions} sessions running.`]),
+      el('div', { class: 'btn-row', style: 'display:flex;gap:8px;flex-wrap:wrap' }, [
+        el('button', { class: 'btn primary', 'data-act': 'take', onclick: () => answer(s, true) }, s.offer.reps < s.reps ? `Try ${s.offer.reps} reps` : `Try ${fmtWeight(s.offer.weight)} lb`),
+        el('button', { class: 'btn', 'data-act': 'keep', onclick: () => answer(s, false) }, 'Keep going')
+      ])
+    ]))
   ]);
 }
 
@@ -1168,7 +1197,7 @@ async function planData() {
   if (!canWrite && coachFile) {
     for (const a of pendingAdjustments(coachFile, await getCoachApplied(), D.plan)) {
       if (!a.exerciseId || (a.weight == null && a.reps == null)) continue;
-      if (keepsOwnTarget(targets[a.exerciseId], sessions, a.exerciseId)) continue; // v1.18.12: the phone keeps it too
+      if (keepsOwnTarget(targets[a.exerciseId], sessions, a.exerciseId) || staleAdjustment(a, sessions)) continue; // v1.18.12: the phone keeps it too; v1.18.15: or a newer session
       targets[a.exerciseId] = { ...(targets[a.exerciseId] || {}), ...(a.weight != null ? { weight: snapLoad(D.rules, D.plan.exercises[a.exerciseId], Number(a.weight)) } : {}), ...(a.reps != null ? { reps: Number(a.reps) } : {}), source: 'coach', pendingCoach: true };
     }
   }

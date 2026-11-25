@@ -129,11 +129,11 @@ export function rerunLift({ record, exerciseId, plan, rules, settings }) {
 
 // what a re-run decides about the target; bests and e1RM are worked out over every session instead. A heavy-start
 // mark the re-run did not keep is taken off, so the next heavy-week screen applies it from the corrected target.
-const RERUN_KEYS = ['weight', 'reps', 'stall', 'heavyStart', 'source', 'baselineWeight', 'baselineE1rm', 'updated', 'sessionId'];
+const RERUN_KEYS = ['weight', 'reps', 'stall', 'short', 'jumpedTo', 'heavyStart', 'source', 'baselineWeight', 'baselineE1rm', 'updated', 'sessionId'];
 function takeRerun(cur, t) {
   for (const k of RERUN_KEYS) {
     if (k in t) cur[k] = t[k] && typeof t[k] === 'object' ? JSON.parse(JSON.stringify(t[k])) : t[k];
-    else if (k === 'heavyStart') delete cur.heavyStart;
+    else if (k === 'heavyStart' || k === 'short' || k === 'jumpedTo') delete cur[k];
   }
 }
 

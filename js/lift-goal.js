@@ -4,7 +4,7 @@
 // look at, and it can't change the plan until he says it is right.
 // Pure functions, no DOM, no storage.
 
-import { epley, goalMax, incrementFor, isExcluded, weeklyFor, bodyweightOf, effectiveTarget } from './progression.js';
+import { epley, goalMax, incrementFor, isExcluded, weeklyFor, bodyweightOf, effectiveTarget, targetRepBounds } from './progression.js';
 import { numberFlag, impossibleNumber } from './sanity.js';
 import { fmtWeight, dumbbellOk, snapLoad, weekNumber } from './data.js';
 
@@ -49,7 +49,8 @@ export function nextNumbers({ plan, rules, settings }, it, b, t, phaseId) {
   const eff = t && rules ? (effectiveTarget({ rules, plan, settings, exerciseId: it.exercise, target: t, phaseId }) || t) : t;
   const weight = eff && eff.weight != null ? snapLoad(rules, ex, eff.weight) : null;
   let reps = eff && eff.reps != null ? eff.reps : null;
-  if (range && reps != null) reps = Math.min(Math.max(reps, range[0]), range[1]);
+  const rb = rules ? targetRepBounds(rules, ex, range, eff) : range;    // v1.18.15: an accessory may run past its range
+  if (rb && reps != null) reps = Math.min(Math.max(reps, rb[0]), rb[1]);
   return { sets, reps, range, weight, hold: null };
 }
 

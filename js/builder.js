@@ -2,7 +2,7 @@
 // Pure functions, no DOM, no storage. Tested in tests/builder.test.mjs.
 
 import { effortText, effortToRpe, roundTo, equipmentFor, easyLoad, snapLoad } from './data.js';
-import { effectiveTarget } from './progression.js';
+import { effectiveTarget, targetRepBounds } from './progression.js';
 
 /**
  * v1.9: coach check-ins move rest times in small steps. restAdjust = { exerciseId | 'session:<id>': seconds }.
@@ -137,7 +137,9 @@ function targetFor(ctx, exerciseId, repRange) {
   // v1.18.5: a dumbbell weight the rack can't make (2 x 27.5) shows as the nearest one it can
   let weight = t && t.weight != null ? snapLoad(ctx.rules, ctx.plan.exercises[exerciseId], t.weight) : null;
   let reps = t && t.reps != null ? t.reps : (repRange ? repRange[0] : null);
-  if (repRange && reps != null) reps = Math.min(Math.max(reps, repRange[0]), repRange[1]);
+  // v1.18.15: a weighted accessory may ask past the top of its range, or under the bottom just after a big jump
+  const b = targetRepBounds(ctx.rules, ctx.plan.exercises[exerciseId], repRange, t);
+  if (b && reps != null) reps = Math.min(Math.max(reps, b[0]), b[1]);
   return { weight, reps };
 }
 
