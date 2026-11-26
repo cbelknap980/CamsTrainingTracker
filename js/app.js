@@ -15,14 +15,14 @@ import { weekOwed, owedLines, buildCatchUpSession, slackDays } from './catchup.j
 import { renderRunsTab, runForm, openRunText, countItBlock } from './runs-view.js';
 import { weekRuns, runLine, openRunDays } from './runs.js';
 import { importFromGarmin } from './garmin.js';
-import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE } from './sync.js';
+import { getSync, saveSync, clearSync, parseRepo, checkAccess, pushNow, pullNow, pullCoach, startAutoSync, setupLink, readSetupLink, SYNC_FILE, queueFoodOp, foodOutboxState, pullFoodInbox, sendFoodOps } from './sync.js';
 import { renderPlan } from './plan-view.js';
 import { runUpgrades } from './upgrade.js';
 import { changesFor, replyFor, pendingAdjustments, withRest, keepsOwnTarget, staleAdjustment } from './coach.js';
 import { ownTargetFlagged } from './lift-goal.js';
 import { el, toast, showModal, closeModal, confirmDialog, installHaptics, setHaptics, haptic, onBack, dropBack, infoBtn, transition, swipeToDelete, syncStatusBar, countUp, effortChips } from './ui.js';
 import { weekRings, ringsCard, proteinRing } from './rings.js';
-import { renderNutritionTab, proteinHomeCard, proteinToday } from './nutrition-view.js';
+import { renderNutritionTab, proteinHomeCard, proteinToday, refreshRemoteNote } from './nutrition-view.js';
 import { flaggedGroups, applyNumberFix, rateSavedSet, impossibleNumber } from './sanity.js';
 
 const view = document.getElementById('view');
@@ -71,6 +71,11 @@ async function boot() {
   await updateWeekChip();
   updateSyncChip();
   syncCoach();
+  // v1.20.2: food tapped on the computer reaches the phone when the app opens or comes back to the front; the
+  // computer sends any taps still waiting when it comes back online
+  checkFoodInbox();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkFoodInbox(); });
+  window.addEventListener('online', () => sendFoodOps().catch(() => null).then(refreshRemoteNote));
   if (await pairPrompt(() => openApp())) return;
   openApp();
 }
@@ -141,11 +146,31 @@ async function onSyncChip() {
     await syncCoach(true);
     if (r.ok && r.changed && !(await pairPrompt(() => showTab(currentTab)))) showTab(currentTab);
   } else {
+    await checkFoodInbox(true);
     const r = await pushNow(APP_VERSION, D.plan.planVersion);
     toast(r.ok ? 'Uploaded' : r.error, 3500);
     await syncCoach(true);
   }
   updateSyncChip();
+}
+
+/**
+ * v1.20.2: on the phone, apply food logged on the computer (at most every 20 s unless forced). Says what came in and
+ * redraws Home or Nutrition, where it shows.
+ */
+let foodInboxAt = 0;
+async function checkFoodInbox(force) {
+  if (!force && Date.now() - foodInboxAt < 20000) return;
+  foodInboxAt = Date.now();
+  try {
+    const r = await pullFoodInbox();
+    if (!r.ok || r.skipped) return;
+    const n = (r.added || 0) + (r.removed || 0) + (r.changed || 0);
+    if (!n) return;
+    const parts = [r.added ? `${r.added} added` : null, r.changed ? `${r.changed} changed` : null, r.removed ? `${r.removed} deleted` : null].filter(Boolean);
+    toast(`Food from your computer: ${parts.join(', ')}`, 3500);
+    if ((currentTab === 'home' || currentTab === 'nutrition') && !player && document.getElementById('modal').hidden) showTab(currentTab, { restore: true });
+  } catch (e) { /* the computer's food never stops the phone */ }
 }
 
 /**
@@ -329,8 +354,15 @@ function showTab(name, { restore = false } = {}) {
     if (name === 'progress') return renderProgressTab();
     if (name === 'plan') return renderPlanTab();
     if (name === 'runs') return renderRunsTab(view, { plan: D.plan, rules: D.rules, onOpenSync: () => renderSyncSheet() });
-    // v1.20: protein (a computer set to Only views shows it without the buttons)
-    if (name === 'nutrition') return getSync().then(cfg => renderNutritionTab(view, { foodsData: D.foods, canWrite: !(cfg && cfg.role === 'viewer') }));
+    // v1.20: protein. v1.20.2: a computer set to Only views logs food too and sends it to the phone; Edit buttons
+    // and the goal stay on the phone
+    if (name === 'nutrition') {
+      checkFoodInbox();
+      return getSync().then(cfg => {
+        const computer = !!(cfg && cfg.role === 'viewer');
+        return renderNutritionTab(view, { foodsData: D.foods, canWrite: true, canEdit: !computer, sendOp: computer ? queueFoodOp : null, outbox: computer ? foodOutboxState : null });
+      });
+    }
     if (name === 'architecture') return renderArchitecture(view, D.architecture, D.plan);
   };
   const y = restore ? (scrollByTab[name] || 0) : 0;

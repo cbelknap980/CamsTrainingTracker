@@ -972,6 +972,7 @@ span.nut-goal { text-decoration: none; cursor: default; }
 .nut-food.other { background: none; box-shadow: 0 0 0 1.5px var(--line) inset; color: var(--muted); }
 .nut-food.other .ico svg { width: 22px; height: 22px; }
 .nut-viewonly { font-size: var(--t-small); margin: -2px 0 10px; }
+.nut-remote { font-size: var(--t-label); margin: 10px 0 0; }
 .nut-readonly .nut-food { cursor: default; opacity: 0.72; }
 .nut-readonly .nut-food:active { transform: none; background: var(--surface-2); }
 .nut-list .swipe-wrap, .nut-list > .nut-row { border-top: 1px solid var(--line); }

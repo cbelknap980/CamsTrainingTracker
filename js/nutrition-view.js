@@ -2,8 +2,10 @@
 // and intuitive to use with a simple user interface... little buttons... to easily add things that I consistently
 // eat"). One tap on a food adds one serving, with Undo; today's list below (tap a line to change how much, swipe to
 // delete); the last 7 days at the bottom. The goal is settings.proteinGoalG (160 g). Numbers come from
-// js/nutrition.js and the starting buttons from data/foods.json. A computer set to Only views shows the numbers
-// and the buttons greyed out (v1.20.1), since food is logged on the phone.
+// js/nutrition.js and the starting buttons from data/foods.json. v1.20.2: a computer set to Only views logs food
+// too (Cameron: "I should be able to tap these on my phone or computer"): each change is saved on the computer and
+// sent as a step (sync.js queueFoodOp) that the phone applies the next time it opens. Edit buttons and the goal stay
+// on the phone.
 
 import { toISODate, fmtDate, fmtTime } from './data.js';
 import { getFoodLog, setFoodLog, getFoods, setFoods, getSettings, saveSettings, newId } from './store.js';
@@ -14,7 +16,40 @@ import { icon } from './icons.js';
 const noonOf = date => { const [y, m, d] = date.split('-').map(Number); return new Date(y, m - 1, d, 12).toISOString(); };
 const dayLabel = (date, today) => (date === today ? `Today, ${fmtDate(date)}` : date === addDays(today, -1) ? `Yesterday, ${fmtDate(date)}` : fmtDate(date));
 
-/** The Nutrition tab. ctx: { foodsData (data/foods.json), canWrite, date (optional, 'YYYY-MM-DD') }. */
+// v1.20.2: every change to the log goes through these three, so the computer can send it on to the phone
+let sendOp = null, outboxOf = null;
+const send = op => { if (sendOp) sendOp(op).then(refreshRemoteNote, refreshRemoteNote); };
+async function addEntry(entry) {
+  const l = await getFoodLog(); l.push(entry); await setFoodLog(l);
+  send({ type: 'add', entry });
+}
+async function dropEntry(id) {
+  await setFoodLog((await getFoodLog()).filter(e => e.id !== id));
+  send({ type: 'remove', entryId: id });
+}
+async function patchEntry(id, patch) {
+  const l = await getFoodLog();
+  const i = l.findIndex(x => x.id === id);
+  if (i >= 0) { l[i] = { ...l[i], ...patch }; await setFoodLog(l); }
+  send({ type: 'set', entryId: id, ...patch });
+}
+
+/** The computer's line under its buttons: where its taps go, or that some could not be sent yet. */
+async function remoteText() {
+  const st = outboxOf ? await outboxOf() : { waiting: 0 };
+  if (st.waiting && st.error) return `${st.waiting} ${st.waiting === 1 ? 'change is' : 'changes are'} saved here and waiting to send (${st.error}). They go when GitHub is reachable.`;
+  return 'What you add here shows on your phone the next time the app opens there. Edit and the goal are on your phone.';
+}
+/** After a send (or a failed one), bring the computer's line up to date if the tab is showing. */
+export async function refreshRemoteNote() {
+  const n = document.getElementById('nut-remote');
+  if (n) n.textContent = await remoteText();
+}
+
+/**
+ * The Nutrition tab. ctx: { foodsData (data/foods.json), canWrite (log food), canEdit (buttons and goal; phone only),
+ * sendOp (the computer's way to the phone), outbox (async, the computer's waiting taps), date (optional) }.
+ */
 export async function renderNutritionTab(view, ctx) {
   const today = toISODate(new Date());
   const date = ctx.date && ctx.date <= today ? ctx.date : today;
@@ -25,6 +60,9 @@ export async function renderNutritionTab(view, ctx) {
   const check = ctx.foodsData.check;
   const amounts = ctx.foodsData.amounts || [0.5, 1, 1.5, 2, 3];
   const canWrite = ctx.canWrite !== false;
+  const canEdit = canWrite && ctx.canEdit !== false;
+  sendOp = ctx.sendOp || null;
+  outboxOf = ctx.outbox || null;
   // a change on the same day keeps the page where it was; another day starts at the top
   const again = (d = date) => renderNutritionTab(view, { ...ctx, date: d, keepScroll: d === date });
   const y = window.scrollY;
@@ -46,7 +84,7 @@ export async function renderNutritionTab(view, ctx) {
     el('div', { class: 'nut-total' }, [
       el('span', { class: 'nut-big', id: 'nut-total' }, String(total)),
       el('span', { class: 'nut-unit' }, 'g'),
-      canWrite
+      canEdit
         ? el('button', { type: 'button', class: 'nut-goal', id: 'nut-goal', onclick: () => goalSheet(goal, again) }, `of ${goal} g protein`)
         : el('span', { class: 'nut-goal' }, `of ${goal} g protein`)
     ]),
@@ -57,19 +95,17 @@ export async function renderNutritionTab(view, ctx) {
 
   // ---- the buttons ----
   // v1.20.1 (Cameron: "make cleaner and simpler to use"): a button is the food and its grams, plus the amount only
-  // when a serving is not 1 of something (½ lb of chicken). A computer that only views shows the same buttons, greyed.
+  // when a serving is not 1 of something (½ lb of chicken).
   const add = async (food) => {
     const at = date === today ? new Date().toISOString() : noonOf(date);
     const entry = makeEntry(food, { date, at, servings: 1, id: newId('food') });
     if (date !== today) entry.later = true;
-    const fresh = await getFoodLog();
-    const rep = date === today ? recentRepeat(fresh, food.id, at, check) : null;
-    fresh.push(entry);
-    await setFoodLog(fresh);
+    const rep = date === today ? recentRepeat(await getFoodLog(), food.id, at, check) : null;
+    await addEntry(entry);
     haptic('press');
     await again();
     toast(rep ? `${food.name} added twice in a minute. Meant to?` : `${food.name} +${entryG(entry)} g${date !== today ? ` on ${fmtDate(date)}` : ''}`, null, {
-      action: 'Undo', onAction: async () => { await setFoodLog((await getFoodLog()).filter(e => e.id !== entry.id)); again(); }
+      action: 'Undo', onAction: async () => { await dropEntry(entry.id); again(); }
     });
   };
   const grid = el('div', { class: 'nut-grid', id: 'nut-grid' }, [
@@ -78,15 +114,16 @@ export async function renderNutritionTab(view, ctx) {
       el('span', { class: 'nut-g' }, `+${f.g} g`),
       Number(f.qty) !== 1 ? el('small', {}, amountText(f)) : null
     ])),
-    canWrite ? el('button', { type: 'button', class: 'nut-food other', id: 'nut-other', onclick: () => otherSheet({ date, today, check, again, defaults: ctx.foodsData }) }, [icon('plus'), el('b', {}, 'Other')]) : null
+    canWrite ? el('button', { type: 'button', class: 'nut-food other', id: 'nut-other', onclick: () => otherSheet({ date, today, check, again, defaults: ctx.foodsData, canEdit }) }, [icon('plus'), el('b', {}, 'Other')]) : null
   ]);
   view.appendChild(el('div', { class: 'card' + (canWrite ? '' : ' nut-readonly'), id: 'nut-add' }, [
     el('div', { class: 'nut-head' }, [
       el('h3', {}, !canWrite ? 'Your foods' : date === today ? 'Add food' : `Add to ${fmtDate(date)}`),
-      canWrite ? el('button', { type: 'button', class: 'link-btn', id: 'nut-edit', onclick: () => foodsSheet({ ctx, check, again, today }) }, 'Edit') : null
+      canEdit ? el('button', { type: 'button', class: 'link-btn', id: 'nut-edit', onclick: () => foodsSheet({ ctx, check, again, today }) }, 'Edit') : null
     ]),
     canWrite ? null : el('p', { class: 'muted nut-viewonly', id: 'nut-viewonly' }, 'Tap these on your phone. This computer only shows what you logged.'),
-    grid
+    grid,
+    ctx.sendOp ? el('p', { class: 'muted nut-remote', id: 'nut-remote' }, await remoteText()) : null
   ]));
 
   // ---- the day's list ----
@@ -126,11 +163,11 @@ export async function renderNutritionTab(view, ctx) {
 }
 
 async function removeEntry(e, again) {
-  const before = await getFoodLog();
-  await setFoodLog(before.filter(x => x.id !== e.id));
+  await dropEntry(e.id);
   await again();
-  toast(`${e.name} deleted`, null, { action: 'Undo', onAction: async () => { const l = await getFoodLog(); l.push(e); await setFoodLog(l); again(); } });
+  toast(`${e.name} deleted`, null, { action: 'Undo', onAction: async () => { await addEntry(e); again(); } });
 }
+
 
 /** A line in the list: how much (½, 1, 1½, 2, 3 servings, or grams for an Other), or delete. */
 function entrySheet(e, { amounts, check, again }) {
@@ -147,10 +184,7 @@ function entrySheet(e, { amounts, check, again }) {
   save.addEventListener('click', async () => {
     const r = checkProtein(grams(), check, 'entry');
     if (r.refuse || (r.warn && !warned)) { msg.textContent = r.text; msg.hidden = false; if (r.warn) { warned = true; save.textContent = 'Save anyway'; } return; }
-    const l = await getFoodLog();
-    const i = l.findIndex(x => x.id === e.id);
-    if (i >= 0) l[i] = isOther ? { ...l[i], g: grams(), servings: 1 } : { ...l[i], servings };
-    await setFoodLog(l);
+    await patchEntry(e.id, isOther ? { g: grams(), servings: 1 } : { servings });
     closeModal(); again();
     toast(`${e.name}: ${grams()} g`);
   });
@@ -166,7 +200,7 @@ function entrySheet(e, { amounts, check, again }) {
 }
 
 /** Other: grams of protein, a name if he wants one, and an option to keep it as a button. */
-function otherSheet({ date, today, check, again, defaults }) {
+function otherSheet({ date, today, check, again, defaults, canEdit }) {
   const name = el('input', { type: 'text', id: 'nut-other-name', placeholder: 'Other', autocomplete: 'off', 'aria-label': 'Name' });
   const g = el('input', { type: 'number', inputmode: 'decimal', id: 'nut-other-g', placeholder: 'g', 'aria-label': 'Grams of protein' });
   const keep = el('input', { type: 'checkbox', id: 'nut-other-keep' });
@@ -179,7 +213,7 @@ function otherSheet({ date, today, check, again, defaults }) {
     if (r.refuse || (r.warn && !warned)) { msg.textContent = r.text; msg.hidden = false; if (r.warn) { warned = true; addBtn.textContent = 'Add anyway'; } return; }
     const nm = name.value.trim() || 'Other';
     let food = { name: nm, g: Number(g.value), qty: 1, unit: 'serving', units: 'servings' };
-    if (keep.checked && name.value.trim()) {
+    if (canEdit && keep.checked && name.value.trim()) {
       const list = foodsList(await getFoods(), defaults);
       food = { ...food, id: foodId(nm, list), source: 'you' };
       list.push(food);
@@ -188,15 +222,15 @@ function otherSheet({ date, today, check, again, defaults }) {
     const at = date === today ? new Date().toISOString() : noonOf(date);
     const entry = makeEntry(food, { date, at, servings: 1, id: newId('food') });
     if (date !== today) entry.later = true;
-    const l = await getFoodLog(); l.push(entry); await setFoodLog(l);
+    await addEntry(entry);
     closeModal(); await again();
-    toast(`${nm} +${entryG(entry)} g`, null, { action: 'Undo', onAction: async () => { await setFoodLog((await getFoodLog()).filter(e => e.id !== entry.id)); again(); } });
+    toast(`${nm} +${entryG(entry)} g`, null, { action: 'Undo', onAction: async () => { await dropEntry(entry.id); again(); } });
   });
   showModal(el('div', { class: 'nut-sheet' }, [
     el('h2', {}, 'Other food'),
     el('div', { class: 'field' }, [el('label', { for: 'nut-other-g' }, 'Grams of protein'), g]),
     el('div', { class: 'field' }, [el('label', { for: 'nut-other-name' }, 'What was it (optional)'), name]),
-    el('label', { class: 'toggle nut-keep', for: 'nut-other-keep' }, [el('span', {}, 'Make it a button (needs a name)'), keep]),
+    canEdit ? el('label', { class: 'toggle nut-keep', for: 'nut-other-keep' }, [el('span', {}, 'Make it a button (needs a name)'), keep]) : null,
     msg, addBtn
   ]));
   setTimeout(() => g.focus(), 50);
