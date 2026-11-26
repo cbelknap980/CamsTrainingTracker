@@ -1,5 +1,5 @@
 {
-  "planVersion": "1.7",
+  "planVersion": "1.8",
   "planName": "12-Week Strength Block",
   "source": "2026-11-15 General 12-Week Training Plan.md",
   "startDate": "2026-11-16",
@@ -1154,7 +1154,7 @@
       "day": "Tuesday",
       "type": "Intervals",
       "plannedMinutes": 35,
-      "note": "Warm up with 5 min easy jogging. Then rounds of fast and easy: weeks 1-4, 5 x 2 min fast / 2 min easy; weeks 5-8, 5 x 3 / 2; weeks 9-12, 4 x 4 / 2-3. Run the fast parts by pace: 7:45-8:15 per mile for 2 min, 8:00-8:25 for 3 min, 8:10-8:35 for 4 min. Heart rate is the check: it should reach 178-188 by the end of each fast part (it lags, so it is still climbing in the first minute). Over 188 before the end means ease off a little. Easy is a jog or a walk until heart rate is under 160. Cool down with 3 min easy, then the stretch block. Week 1: a 5K time trial can replace this.",
+      "note": "Warm up with 5 min easy jogging. Then rounds of fast and easy: weeks 1-4, 5 x 2 min fast / 2 min easy; weeks 5-8, 5 x 3 / 2 (week 7, the lighter week: 3 x 3 / 2); weeks 9-12, 4 x 4 / 2-3. Run the fast parts by pace: 7:45-8:15 per mile for 2 min, 8:00-8:25 for 3 min, 8:10-8:35 for 4 min. Heart rate is the check: it should reach 170-180 by the end of each fast part, 90-95% of a 31-year-old's max of about 189 (it lags, so it is still climbing in the first minute). Over 180 before the end means ease off a little. Easy is a jog or a walk until heart rate is under 160. Cool down with 3 min easy, then the stretch block. Weeks 3 and 12: a 5K time trial instead. The paces are set from your week 3 time and move every 4 weeks toward a fit 31-year-old's 23:00 5K (7:00-7:20 per mile on the fast parts).",
       "effort": "fast by pace, heart rate as the check",
       "warmupMin": 5,
       "cooldownMin": 3,
@@ -1172,6 +1172,27 @@
         {
           "weeks": [
             5,
+            6
+          ],
+          "reps": 5,
+          "hardMin": 3,
+          "easyMin": "2",
+          "pace": "8:00-8:25"
+        },
+        {
+          "weeks": [
+            7,
+            7
+          ],
+          "reps": 3,
+          "hardMin": 3,
+          "easyMin": "2",
+          "pace": "8:00-8:25",
+          "why": "Week 7 is the lighter week: the lifts take half their sets and the Engine 6 min, so the intervals drop to 3 rounds (Nov 26 run plan review)."
+        },
+        {
+          "weeks": [
+            8,
             8
           ],
           "reps": 5,
@@ -1190,17 +1211,43 @@
           "pace": "8:10-8:35"
         }
       ],
+      "tests": [
+        {
+          "week": 3,
+          "name": "5K time trial",
+          "lines": [
+            "Warm up: 10 min easy, with 4 short pickups of about 20 s.",
+            "Run: 5K (3.1 mi) as fast as you can hold evenly. Start a little slower than you think; the last mile is all out.",
+            "After: 5 min easy, then the stretch block. Your time sets the interval paces."
+          ],
+          "why": "Baseline for getting faster, and the paces for the intervals come from it (Nov 26 run plan review)."
+        },
+        {
+          "week": 12,
+          "name": "5K time trial",
+          "lines": [
+            "Warm up: 10 min easy, with 4 short pickups of about 20 s.",
+            "Run: 5K (3.1 mi) as fast as you can hold evenly. Start a little slower than you think; the last mile is all out.",
+            "After: 5 min easy, then the stretch block. Compare it with your week 3 time."
+          ],
+          "why": "Retest against week 3, same day of the week and the day after legs, like the first one."
+        }
+      ],
       "alsoCounts": [
         "5K test",
         "Bike/rower sub"
       ],
       "hr": {
         "fastEnd": [
-          178,
-          188
+          170,
+          180
         ],
         "easyUnder": 160,
-        "why": "Nov 24 2026, from Cameron's Garmin runs: highest heart rate seen 190-193; easy runs average 158-163 bpm at 9:24-9:55/mi (his heart rate runs high for his pace, so easy tops out at 165, not the usual 150); a hard 2 mi at 8:39/mi averaged 175."
+        "why": "Nov 26 2026, Cameron: base it on a fit runner his age, at least 3 sources. Max heart rate about 189 at 31 (Fox 220-age 189, Tanaka 2001 186, HUNT/Nes 2013 191). Fast parts end at 90-95% of it (Helgerud 2007 4x4; Stöggl & Sperlich 2015, top zone over 90%; Daniels' interval zone near max)."
+      },
+      "goal": {
+        "fiveK": "23:00",
+        "why": "Fit 31-year-old man: USATF 2025 age grading at age 30 (60% = 21:22, 50% = 25:38), Daniels' levels (Novice 24:00, Intermediate 20:00), US race data (top 10% of men about 22:06)."
       }
     },
     {
@@ -1209,21 +1256,26 @@
       "day": "Weekend",
       "type": "Long run",
       "plannedMinutes": 55,
-      "note": "Easy: heart rate 150-165, about 9:30-10:15 per mile, a pace where you can talk in full sentences. If heart rate passes 165, slow down or walk a minute. Start 3.5 mi, add 0.5 mi each time it's done, up to 6-7 mi. A ski day replaces it and doesn't reset the distance.",
-      "effort": "Heart rate 150-165, about 9:30-10:15 per mile",
+      "note": "Easy: heart rate 130-150, a pace where you can talk in full sentences (a fit 31-year-old runs about 9:00-9:45 per mile there; go by heart rate, not pace). If heart rate passes 150, slow down or walk a minute. Start 3.5 mi, then add 0.5 mi each time, but never more than 10% past your longest run in the last 30 days, up to 6-7 mi. A ski day replaces it, but only runs count toward the distance, so after weeks without running it comes back down.",
+      "effort": "Heart rate 130-150, easy enough to talk",
       "distance": {
         "startMiles": 3.5,
         "stepMiles": 0.5,
-        "capMiles": 7
+        "capMiles": 7,
+        "maxJump": 0.1,
+        "windowDays": 30,
+        "roundMiles": 0.25,
+        "why": "Frandsen et al., Br J Sports Med 2025 (5,205 runners on Garmin): a single run 10-30% longer than the longest run in the previous 30 days raised injury risk 64%, over 100% longer more than doubled it. Nov 26 run plan review."
       },
       "alsoCounts": [
         "Ski day"
       ],
       "hr": {
         "easy": [
-          150,
-          165
-        ]
+          130,
+          150
+        ],
+        "why": "Nov 26 2026, Cameron: base it on a fit runner his age, at least 3 sources. Easy tops out at about 79% of a max of 189 (Daniels' easy zone 65-79%; RunnersConnect under about 75%; Powers & Howley zone 1 60-71%)."
       }
     }
   ],

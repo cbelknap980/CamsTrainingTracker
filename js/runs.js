@@ -112,18 +112,43 @@ export function countCandidates(plan, runs, run, { start, end }) {
 const isLong = (run, r) => r.type === run.type || r.planId === run.id && !(run.alsoCounts || []).includes(r.type);
 
 /** Long run: the distance to aim for next, one step past the longest one done so far, up to the cap. */
-export function longRunTarget(run, runs) {
+// v1.22.0 (Nov 26 run plan review): with distance.maxJump the step is measured from the longest run of any kind
+// (intervals, easy runs and 5K tests too; not ski days or bike/rower sessions) in the windowDays before asOf, and is
+// at most maxJump of it (rounded down to roundMiles), so a long run is never more than 10% past what his legs did
+// in the last month (Frandsen et al., BJSM 2025: single runs 10-30% past that raised injury risk 64%). With no run in
+// the window it starts again at startMiles. asOf defaults to the day after the latest run given.
+const NOT_RUNNING = ['Ski day', 'Bike/rower sub'];
+export function longRunTarget(run, runs, asOf) {
   const d = run.distance;
   if (!d) return null;
   const done = (runs || []).filter(r => isLong(run, r) && r.distance);
-  const longest = done.reduce((m, r) => Math.max(m, r.distance), 0);
-  const next = longest ? Math.round((longest + d.stepMiles) * 2) / 2 : d.startMiles;
-  return { miles: Math.min(d.capMiles, Math.max(d.startMiles, next)), longest: longest || null, count: done.length, atCap: Math.max(d.startMiles, next) >= d.capMiles };
+  const longestEver = done.reduce((m, r) => Math.max(m, r.distance), 0);
+  if (d.maxJump) {
+    const dated = (runs || []).filter(r => r.date && r.distance && !NOT_RUNNING.includes(r.type));
+    const latest = dated.reduce((m, r) => (r.date > m ? r.date : m), '');
+    const endIso = asOf || (latest ? toISODate(new Date(parseISODate(latest).getTime() + 86400000)) : null);
+    let longest = 0;
+    if (endIso) {
+      const from = parseISODate(endIso); from.setDate(from.getDate() - (d.windowDays || 30));
+      const fromIso = toISODate(from);
+      longest = dated.filter(r => r.date >= fromIso && r.date < endIso).reduce((m, r) => Math.max(m, r.distance), 0);
+    }
+    const step = d.roundMiles || 0.25;
+    const raw = longest ? Math.min(longest + d.stepMiles, longest * (1 + d.maxJump)) : d.startMiles;
+    const next = longest ? Math.floor((raw + 1e-9) / step) * step : raw;
+    const miles = Math.min(d.capMiles, Math.max(next, longest ? 0 : d.startMiles));
+    return { miles: round(miles, 2), longest: longest || null, longestEver: longestEver || null, windowDays: d.windowDays || 30, count: done.length, atCap: next >= d.capMiles };
+  }
+  const next = longestEver ? Math.round((longestEver + d.stepMiles) * 2) / 2 : d.startMiles;
+  return { miles: Math.min(d.capMiles, Math.max(d.startMiles, next)), longest: longestEver || null, count: done.length, atCap: Math.max(d.startMiles, next) >= d.capMiles };
 }
 
 /** What a plan run asks for in a given week, as one short line plus the pieces it was built from. */
-export function prescription(run, week, runs) {
+export function prescription(run, week, runs, asOf) {
   const w = Math.min(12, Math.max(1, week || 1));
+  // v1.22.0 (Nov 26 run plan review): a test week (5K time trial in weeks 3 and 12) replaces the intervals
+  const test = (run.tests || []).find(t => t.week === w);
+  if (test) return { kind: 'test', ...test, text: test.name, lines: test.lines.slice(), detail: test.lines.join(' ') };
   if (run.intervals) {
     const iv = run.intervals.find(i => w >= i.weeks[0] && w <= i.weeks[1]) || run.intervals[0];
     // v1.18.4 (Cameron, Nov 24: "Put a pace target. Instead of RPE can we use heartrate"): the fast parts go by pace,
@@ -140,8 +165,9 @@ export function prescription(run, week, runs) {
     return { kind: 'intervals', ...iv, text: `${iv.reps} × ${iv.hardMin} min hard, ${iv.easyMin} min easy`, detail: `${run.warmupMin} min easy first, ${run.cooldownMin} min easy after · ${run.effort}` };
   }
   if (run.distance) {
-    const t = longRunTarget(run, runs);
-    return { kind: 'distance', ...t, text: `${t.miles} mi`, detail: `${run.effort}${t.longest ? ` · longest so far ${round(t.longest, 1)} mi` : ''}` };
+    const t = longRunTarget(run, runs, asOf);
+    const said = t.windowDays ? `longest run in the last ${t.windowDays} days` : 'longest so far';
+    return { kind: 'distance', ...t, text: `${t.miles} mi`, detail: `${run.effort}${t.longest ? ` · ${said} ${round(t.longest, 1)} mi` : ''}` };
   }
   return { kind: 'time', text: `${run.plannedMinutes} min`, detail: run.effort || '' };
 }
@@ -164,6 +190,8 @@ export function weekRuns({ plan, settings, runs, week, today }) {
   const todayIso = toISODate(today);
   const inWeek = (runs || []).filter(r => r.date >= start && r.date <= end);
   const before = (runs || []).filter(r => r.date < start);
+  // v1.22.0: a later week's long run is worked out from the last 30 days as of today (its own runs are not known yet)
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1); const afterToday = toISODate(tomorrow);
   return (plan.runs || []).map(run => {
     const dow = Number(Object.keys(plan.calendar || {}).find(k => plan.calendar[k] === run.id));
     const d = parseISODate(start); d.setDate(d.getDate() + ((dow + 6) % 7));
@@ -172,7 +200,7 @@ export function weekRuns({ plan, settings, runs, week, today }) {
     const lastDay = weekend ? end : date;
     const hit = inWeek.filter(r => countsFor(plan, r, run)).sort((a, b) => (a.date < b.date ? -1 : 1))[0] || null;
     const status = hit ? 'done' : (todayIso >= date && todayIso <= lastDay ? 'today' : (todayIso > lastDay ? 'open' : 'later'));
-    return { id: run.id, name: run.name, short: run.name.includes(': ') ? run.name.split(': ')[1] : run.name, day: run.day, date, type: run.type, plan: prescription(run, week, before), status, run: hit };
+    return { id: run.id, name: run.name, short: run.name.includes(': ') ? run.name.split(': ')[1] : run.name, day: run.day, date, type: run.type, plan: prescription(run, week, before, start <= todayIso ? start : afterToday), status, run: hit };
   });
 }
 
