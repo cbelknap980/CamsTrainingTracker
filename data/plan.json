@@ -1,5 +1,5 @@
 {
-  "planVersion": "1.8",
+  "planVersion": "1.9",
   "planName": "12-Week Strength Block",
   "source": "2026-11-15 General 12-Week Training Plan.md",
   "startDate": "2026-11-16",
@@ -1154,7 +1154,7 @@
       "day": "Tuesday",
       "type": "Intervals",
       "plannedMinutes": 35,
-      "note": "Warm up with 5 min easy jogging. Then rounds of fast and easy: weeks 1-4, 5 x 2 min fast / 2 min easy; weeks 5-8, 5 x 3 / 2 (week 7, the lighter week: 3 x 3 / 2); weeks 9-12, 4 x 4 / 2-3. Run the fast parts by pace: 7:45-8:15 per mile for 2 min, 8:00-8:25 for 3 min, 8:10-8:35 for 4 min. Heart rate is the check: it should reach 170-180 by the end of each fast part, 90-95% of a 31-year-old's max of about 189 (it lags, so it is still climbing in the first minute). Over 180 before the end means ease off a little. Easy is a jog or a walk until heart rate is under 160. Cool down with 3 min easy, then the stretch block. Weeks 3 and 12: a 5K time trial instead. The paces are set from your week 3 time and move every 4 weeks toward a fit 31-year-old's 23:00 5K (7:00-7:20 per mile on the fast parts).",
+      "note": "Warm up with 5 min easy jogging. Then rounds of fast and easy: weeks 1-4, 5 x 2 min fast / 2 min easy; weeks 5-8, 5 x 3 / 2; weeks 9-12, 4 x 4 / 2-3. Run the fast parts by pace. Until your first 5K check-in: 7:45-8:15 per mile for 2 min, 8:00-8:25 for 3 min, 8:10-8:35 for 4 min. After it, the paces come from your latest 5K (Daniels' interval pace), so they get faster as you do. Heart rate is the check: it should reach 170-180 by the end of each fast part, 90-95% of a 31-year-old's max of about 189 (it lags, so it is still climbing in the first minute). Over 180 before the end means ease off a little. Easy is a jog or a walk until heart rate is under 160. Cool down with 3 min easy, then the stretch block. Weeks 3, 7 and 12: a 5K check-in instead, about every 4-5 weeks, measured against a fit 31-year-old's 23:00.",
       "effort": "fast by pace, heart rate as the check",
       "warmupMin": 5,
       "cooldownMin": 3,
@@ -1172,27 +1172,6 @@
         {
           "weeks": [
             5,
-            6
-          ],
-          "reps": 5,
-          "hardMin": 3,
-          "easyMin": "2",
-          "pace": "8:00-8:25"
-        },
-        {
-          "weeks": [
-            7,
-            7
-          ],
-          "reps": 3,
-          "hardMin": 3,
-          "easyMin": "2",
-          "pace": "8:00-8:25",
-          "why": "Week 7 is the lighter week: the lifts take half their sets and the Engine 6 min, so the intervals drop to 3 rounds (Nov 26 run plan review)."
-        },
-        {
-          "weeks": [
-            8,
             8
           ],
           "reps": 5,
@@ -1214,25 +1193,68 @@
       "tests": [
         {
           "week": 3,
-          "name": "5K time trial",
+          "name": "5K check-in",
           "lines": [
             "Warm up: 10 min easy, with 4 short pickups of about 20 s.",
             "Run: 5K (3.1 mi) as fast as you can hold evenly. Start a little slower than you think; the last mile is all out.",
-            "After: 5 min easy, then the stretch block. Your time sets the interval paces."
+            "After: 5 min easy, then the stretch block.",
+            "Count it as the 5K test. The app reads your fastest 5K from the watch and sets your interval paces from it."
           ],
-          "why": "Baseline for getting faster, and the paces for the intervals come from it (Nov 26 run plan review)."
+          "why": "First benchmark: the interval paces come from it (Nov 26 run plan review)."
+        },
+        {
+          "week": 7,
+          "name": "5K check-in",
+          "lines": [
+            "Warm up: 10 min easy, with 4 short pickups of about 20 s.",
+            "Run: 5K (3.1 mi) as fast as you can hold evenly. Start a little slower than you think; the last mile is all out.",
+            "After: 5 min easy, then the stretch block.",
+            "Count it as the 5K test. Your interval paces move with your time."
+          ],
+          "why": "The lighter week: fresher legs for the test, and it stands in for that week's intervals."
         },
         {
           "week": 12,
-          "name": "5K time trial",
+          "name": "5K check-in",
           "lines": [
             "Warm up: 10 min easy, with 4 short pickups of about 20 s.",
             "Run: 5K (3.1 mi) as fast as you can hold evenly. Start a little slower than you think; the last mile is all out.",
-            "After: 5 min easy, then the stretch block. Compare it with your week 3 time."
+            "After: 5 min easy, then the stretch block.",
+            "Count it as the 5K test. Compare it with your week 3 time."
           ],
-          "why": "Retest against week 3, same day of the week and the day after legs, like the first one."
+          "why": "Retest week for the whole block."
         }
       ],
+      "testsWhy": "Every 4-5 weeks (Cameron, Nov 26: regular 5K check-ins that update the plan). McMillan: recalculate training paces about every 4-8 weeks. VDOT O2 (Daniels): update paces from a recent race or time trial, otherwise about 1 VDOT point every 4-6 weeks. A 5K time trial varies about 1% test to test (Sunderland parkrun study: typical error 14.7 s, CV 0.95%), so 2 weeks of gains would hide in the noise; 4-5 weeks of interval training should show 2-4%.",
+      "paceFrom5k": {
+        "upper": 1.0,
+        "lower": 0.97,
+        "stages": {
+          "2": [
+            -5,
+            5
+          ],
+          "3": [
+            0,
+            5
+          ],
+          "4": [
+            5,
+            10
+          ]
+        },
+        "why": "Daniels' interval pace, 97-100% of the VDOT the 5K gives (Daniels & Gilbert equations); for a 23:00 runner that is 7:04-7:15, the same as 3K race pace (7:10) and McMillan's 15-minute race pace (7:14). Shorter reps a little faster, longer a little slower, to the nearest 5 s."
+      },
+      "fiveKCheck": {
+        "minSeconds": 840,
+        "maxSeconds": 2700,
+        "maxChange": 0.05,
+        "why": "A 5K outside 14:00-45:00, or more than 5% off the last good one, waits for Cameron's OK before it moves the paces (his Nov 19 rule on numbers that look wrong). Test-to-test noise is about 1%; 4-5 weeks of training rarely moves a 5K more than 2-4%."
+      },
+      "goal": {
+        "fiveK": "23:00",
+        "why": "Fit 31-year-old man: USATF 2025 age grading at age 30 (60% = 21:22, 50% = 25:38), Daniels' levels (Novice 24:00, Intermediate 20:00), US race data (top 10% of men about 22:06)."
+      },
       "alsoCounts": [
         "5K test",
         "Bike/rower sub"
@@ -1244,10 +1266,6 @@
         ],
         "easyUnder": 160,
         "why": "Nov 26 2026, Cameron: base it on a fit runner his age, at least 3 sources. Max heart rate about 189 at 31 (Fox 220-age 189, Tanaka 2001 186, HUNT/Nes 2013 191). Fast parts end at 90-95% of it (Helgerud 2007 4x4; Stöggl & Sperlich 2015, top zone over 90%; Daniels' interval zone near max)."
-      },
-      "goal": {
-        "fiveK": "23:00",
-        "why": "Fit 31-year-old man: USATF 2025 age grading at age 30 (60% = 21:22, 50% = 25:38), Daniels' levels (Novice 24:00, Intermediate 20:00), US race data (top 10% of men about 22:06)."
       }
     },
     {

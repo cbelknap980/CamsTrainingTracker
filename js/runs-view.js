@@ -8,7 +8,7 @@ import { APP_VERSION, weekNumber, toISODate, parseISODate, fmtDate, getData } fr
 import { getRuns, putRun, deleteRun, getSettings, newId, ignoreGarmin } from './store.js';
 import { getSync, garminLinks, garminJobState, GARMIN_SECRET, GARMIN_FILE } from './sync.js';
 import { getGarminState, importFromGarmin, checkGarminNow } from './garmin.js';
-import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles, settleWeek, openRunDays, needsCredit, creditOptions, countAs, keepAsSide, countCandidates, weekRange } from './runs.js';
+import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles, settleWeek, openRunDays, needsCredit, creditOptions, countAs, keepAsSide, countCandidates, weekRange, fiveKSeconds, fiveKTests, fmtSeconds } from './runs.js';
 import { svg, tooltip, yTicks } from './progress.js';
 
 const clock = iso => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -16,6 +16,7 @@ const when = iso => (toISODate(new Date(iso)) === toISODate(new Date()) ? `today
 const dayLabel = iso => { const d = parseISODate(iso); return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${d.getDate()}`; };
 const startClock = t => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'pm' : 'am'}`; };
 const STATUS = { done: '✓ done', today: 'today', open: 'not logged yet', later: '' };
+const lowerName = t => (/^\d/.test(t) ? t : t.toLowerCase());
 const shortDay = iso => parseISODate(iso).toLocaleDateString(undefined, { weekday: 'short' });
 
 /** v1.12: after a run is saved, settle again what the app-picked runs in that week count as. */
@@ -47,7 +48,7 @@ export function countItBlock(row, ctx, onCounted) {
   const cands = countCandidates(plan, runs, run, weekRange(settings, week));
   if (!cands.length) return null;
   return el('div', { class: 'count-it', 'data-count-for': row.id }, [
-    el('p', { class: 'count-it-head' }, cands.length === 1 ? `From Garmin this week. Was it the ${row.short.toLowerCase()}?` : `From Garmin this week. Was one of these the ${row.short.toLowerCase()}?`),
+    el('p', { class: 'count-it-head' }, cands.length === 1 ? `From Garmin this week. Was it the ${lowerName(row.short)}?` : `From Garmin this week. Was one of these the ${lowerName(row.short)}?`),
     ...cands.map(c => el('div', { class: 'count-it-row' }, [
       el('span', {}, [el('b', {}, shortDay(c.date)), ` · ${runLine(c, rules, true) || c.type}`]),
       el('div', { class: 'count-it-btns' }, [
@@ -127,13 +128,25 @@ function runSheet(r, ctx) {
   };
   const stat = (label, value) => (value === null || value === undefined || value === '' ? null : el('div', { class: 'run-stat' }, [el('span', {}, label), el('b', {}, value)]));
   const pace = countsMiles(rules, r.type) ? (r.pace || paceOf(r.distance, r.minutes)) : null;
+  // v1.23.0: a 5K check-in shows its 5K time; one that looks wrong waits for his OK before it sets the paces
+  const testRun = (plan.runs || []).find(x => x.tests);
+  const fk = fiveKSeconds(r);
+  const mine = fk ? fiveKTests((ctx.runs || [r]).map(x => (x.id === r.id ? r : x)).concat((ctx.runs || []).some(x => x.id === r.id) ? [] : [r]), testRun && testRun.fiveKCheck).find(t => t.id === r.id) : null;
   showModal(el('div', { id: 'run-sheet' }, [
     el('h2', {}, `${r.type}, ${fmtDate(r.date)}`),
     r.source === 'garmin' ? el('p', { class: 'muted', style: 'margin:0 0 10px' }, `From Garmin${r.name ? ` · ${r.name}` : ''}${r.startTime ? ` · started ${startClock(r.startTime)}` : ''}`) : null,
     el('div', { class: 'run-stats' }, [
       stat('Distance', r.distance ? `${r.distance} mi` : null), stat('Time', r.minutes ? fmtDuration(r.minutes) : null), stat('Pace', pace ? `${fmtDuration(pace)}/mi` : null),
+      stat('5K time', fk ? fmtSeconds(fk) : null),
       stat('Avg heart rate', r.hr ? Math.round(r.hr) : null), stat('Max heart rate', r.maxHr ? Math.round(r.maxHr) : null), stat('Climb', r.climbFt ? `${r.climbFt} ft` : null), stat('Cadence', r.cadence ? `${r.cadence} spm` : null)
     ]),
+    mine && mine.flagged ? el('div', { class: 'count-it', id: 'run-5k-check' }, [
+      el('p', { class: 'count-it-head' }, `Check this 5K: ${mine.why}. It won't set your interval paces until you say it's right.`),
+      readOnly ? null : el('div', { class: 'btn-row' }, [
+        el('button', { class: 'btn small', id: 'run-5k-ok', onclick: () => save({ fiveKConfirmed: mine.seconds }) }, 'The time is right'),
+        el('button', { class: 'btn small ghost', onclick: () => runForm(plan, settings, r, refresh) }, 'Fix it')
+      ])
+    ]) : null,
     readOnly ? null : el('h3', { style: 'margin-top:14px' }, 'Counts as'),
     readOnly ? null : el('div', { class: 'tag-row', id: 'run-type-row' }, plan.runTypes.map(t => el('button', { class: 'tag-btn' + (t === r.type ? ' on' : ''), onclick: () => { const pr = planRunForType(plan, t); save({ type: t, planId: pr ? pr.id : null, typeLocked: true, autoType: false, autoWhy: null }); } }, t))),
     // v1.18.1: a Garmin run counts toward miles, and for a planned run only once he says which it was
@@ -254,7 +267,7 @@ export async function renderRunsTab(view, ctx) {
   const week = weekNumber(today, settings.startDate);
   const phone = !cfg || cfg.role !== 'viewer';
   const refresh = () => renderRunsTab(view, ctx);
-  const full = { ...ctx, settings, refresh, readOnly: !phone };
+  const full = { ...ctx, settings, refresh, readOnly: !phone, runs };
   view.innerHTML = '';
 
   view.appendChild(el('div', { class: 'row page-head' }, [
@@ -312,6 +325,34 @@ export async function renderRunsTab(view, ctx) {
     ]));
   } else {
     main.appendChild(el('div', { class: 'card', id: 'runs-week' }, [el('h3', {}, 'The plan\'s runs'), ...plan.runs.map(r => el('p', { class: 'muted' }, [el('b', {}, `${r.name}. `), r.note]))]));
+  }
+
+  // v1.23.0: 5K check-ins against the goal; each good one sets the interval paces
+  const testRun = (plan.runs || []).find(r => r.tests && r.tests.length);
+  if (testRun) {
+    const tests = fiveKTests(runs, testRun.fiveKCheck);
+    const good = tests.filter(t => !t.flagged);
+    const latest = good[good.length - 1] || null;
+    const goal = testRun.goal && testRun.goal.fiveK;
+    const goalSec = goal ? Math.round(parseMinutes(goal) * 60) : null;
+    const dow = Number(Object.keys(plan.calendar || {}).find(k => plan.calendar[k] === testRun.id));
+    const dayOf = w => { const d = parseISODate(weekRange(settings, w).start); d.setDate(d.getDate() + ((dow + 6) % 7)); return toISODate(d); };
+    const nextWeek = testRun.tests.map(t => t.week).find(w => w > week || (w === week && !tests.some(t => t.week === w)));
+    main.appendChild(el('div', { class: 'card', id: 'runs-5k' }, [
+      el('h3', {}, '5K check-ins'),
+      ...tests.map(t => el('div', { class: 'list-item', 'data-test': t.id, onclick: () => { const r = runs.find(x => x.id === t.id); if (r) runSheet(r, full); } }, [
+        el('div', { class: 'row' }, [
+          el('b', {}, `${fmtDate(t.date)} · ${fmtSeconds(t.seconds)}`),
+          el('span', { class: 'muted' }, t.change === null ? (t.flagged ? '' : 'first') : `${t.change < 0 ? '−' : '+'}${fmtSeconds(Math.abs(t.change))}`)
+        ]),
+        t.flagged ? el('div', { class: 'run-moved' }, `Check this one: ${t.why}. Tap to OK it or fix it. Until then your paces stay put.`) : null
+      ])),
+      tests.length ? null : el('p', { class: 'muted', style: 'margin:0 0 6px' }, 'No check-in yet. Until the first one, the intervals use the plan\'s paces.'),
+      goal ? el('p', { class: 'muted', id: 'runs-5k-goal', style: 'margin:6px 0 0' }, latest
+        ? (latest.seconds <= goalSec ? `Goal ${goal} (a fit 31-year-old): reached.` : `Goal ${goal} (a fit 31-year-old): ${fmtSeconds(latest.seconds - goalSec)} to go. Your interval paces come from your ${fmtSeconds(latest.seconds)}.`)
+        : `Goal ${goal}, a fit 31-year-old's 5K.`) : null,
+      nextWeek ? el('p', { class: 'muted card-foot', id: 'runs-5k-next' }, `Next check-in: ${fmtDate(dayOf(nextWeek))} (week ${nextWeek}), in place of the intervals. Your time sets the interval paces.`) : null
+    ]));
   }
 
   // miles by week
