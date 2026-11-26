@@ -2,13 +2,13 @@
 import { readFileSync } from 'node:fs';
 import { buildTimeline, trimToFit, remainingSeconds, lastResults, setTiming } from '../js/builder.js';
 import { applyProgression, epley, checkPR, estimateStart, effectiveTarget, flatWords, incrementFor } from '../js/progression.js';
-import { effortPlain, effortLevel, spokenDuration, easyLoad, snapLoad, dumbbellOk } from '../js/data.js';
+import { effortPlain, effortLevel, spokenDuration, easyLoad, snapLoad, dumbbellOk, weekNumber, parseISODate } from '../js/data.js';
 import { weekOwed, owedSetsFor, owedLines, buildCatchUpSession, slackDays, plannedDay } from '../js/catchup.js';
 import { parseRepo, toBase64, fromBase64, setupLink, readSetupLink, explainStatus } from '../js/sync.js';
 import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks, muscleSets } from '../js/progress.js';
 import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../js/coach.js';
 import { applyRestAdjust } from '../js/builder.js';
-import { parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays, needsCredit, countsFor, creditOptions, countAs, keepAsSide, countCandidates, weekRange, countsMiles } from '../js/runs.js';
+import { fiveKSeconds, fiveKTests, paceFrom5k, vdotFrom5k, parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays, needsCredit, countsFor, creditOptions, countAs, keepAsSide, countCandidates, weekRange, countsMiles } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
 import { numberFlag, flaggedGroups, applyNumberFix, rateSavedSet, rerunLift, impossibleNumber } from '../js/sanity.js';
 // v1.18
@@ -556,12 +556,12 @@ console.log('v1.9 muscle groups and coach check-ins');
   const [r1, r2] = plan.runs;
   check('v1.10 the interval set follows the week', prescription(r1, 1).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 6).text === '5 × 3 min fast, 2 min easy' && prescription(r1, 11).text === '4 × 4 min fast, 2-3 min easy', [prescription(r1, 1).text, prescription(r1, 6).text, prescription(r1, 11).text]);
   // v1.22.0 (Nov 26 run plan review): 5K time trial in weeks 3 and 12, 3 rounds in the lighter week 7
-  check('v1.22.0 weeks 3 and 12 are a 5K time trial; week 7 is 3 rounds; weeks 6 and 8 stay 5', prescription(r1, 3).kind === 'test' && prescription(r1, 3).text === '5K time trial' && prescription(r1, 12).text === '5K time trial' && prescription(r1, 3).lines.length === 3 && /Compare it with your week 3 time/.test(prescription(r1, 12).lines[2])
-    && prescription(r1, 2).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 4).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 7).text === '3 × 3 min fast, 2 min easy' && prescription(r1, 8).text === '5 × 3 min fast, 2 min easy' && prescription(r1, 9).text === '4 × 4 min fast, 2-3 min easy',
+  check('v1.23.0 weeks 3, 7 and 12 are a 5K check-in; the weeks around them keep their intervals', [3, 7, 12].every(w => prescription(r1, w).kind === 'test' && prescription(r1, w).text === '5K check-in' && prescription(r1, w).lines.length === 4) && /Compare it with your week 3 time/.test(prescription(r1, 12).lines[3])
+    && prescription(r1, 2).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 4).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 6).text === '5 × 3 min fast, 2 min easy' && prescription(r1, 8).text === '5 × 3 min fast, 2 min easy' && prescription(r1, 9).text === '4 × 4 min fast, 2-3 min easy',
     [3, 7, 8, 12].map(w => prescription(r1, w).text));
   check('v1.22.0 every interval week 1-12 is covered by exactly one stage or test', Array.from({ length: 12 }, (_, i) => i + 1).every(w => r1.intervals.filter(iv => w >= iv.weeks[0] && w <= iv.weeks[1]).length === 1));
   check('v1.10 the numbers on the plan runs agree with their notes', r1.note.includes('5 x 2 min fast / 2 min easy') && r1.note.includes('5 x 3 / 2') && r1.note.includes('4 x 4 / 2-3') && r2.note.includes('Start 3.5 mi, then add 0.5 mi') && r2.distance.startMiles === 3.5 && r2.distance.stepMiles === 0.5
-    && r1.note.includes('week 7, the lighter week: 3 x 3 / 2') && r1.intervals.find(iv => iv.weeks[0] === 7).reps === 3 && r1.note.includes('Weeks 3 and 12: a 5K time trial') && r1.tests.map(t => t.week).join() === '3,12'
+    && r1.note.includes('Weeks 3, 7 and 12: a 5K check-in') && r1.tests.map(t => t.week).join() === '3,7,12' && r1.note.includes(`reach ${r1.hr.fastEnd[0]}-${r1.hr.fastEnd[1]}`) && r1.note.includes(r1.goal.fiveK)
     && r2.note.includes(`never more than ${r2.distance.maxJump * 100}% past your longest run in the last ${r2.distance.windowDays} days`) && r2.note.includes(`passes ${r2.hr.easy[1]}`));
   // v1.18.4 (Cameron, Nov 24): pace targets and heart rate in place of RPE, in the plan data and the note alike
   const lines1 = prescription(r1, 1).lines || [], lines6 = prescription(r1, 6).lines || [], lines12 = prescription(r1, 11).lines || [];
@@ -596,6 +596,33 @@ console.log('v1.9 muscle groups and coach check-ins');
   const wk8 = weekRuns({ plan, settings: st, runs: realRuns, week: 8, today: new Date('2026-11-26T08:00:00') });
   check('v1.22.0 this week the long run reads 4 mi with the last 30 days named; a later week shows the same next step as of today',
     wk2[1].plan.text === '4 mi' && /longest run in the last 30 days 3.7 mi/.test(wk2[1].plan.detail) && /130-150/.test(wk2[1].plan.detail) && wk8[1].plan.text === '4 mi', [wk2[1].plan, wk8[1].plan.text]);
+  // v1.23.0 (Cameron, Nov 26): 5K check-ins that set the interval paces
+  const tt = (id, date, extra) => ({ id, date, type: '5K test', planId: 'run1', week: weekNumber(parseISODate(date), '2026-11-16'), ...extra });
+  check('v1.23.0 a 5K check-in reads Garmin\'s fastest 5K inside the run, or a 3.0-3.5 mi run scaled to 5K; other run types have none',
+    fiveKSeconds(tt('a', '2026-12-01', { best5k: 1600.4, distance: 4.9, minutes: 45 })) === 1600 && fiveKSeconds(tt('b', '2026-12-01', { distance: 3.11, minutes: 26.7 })) === 1600
+    && fiveKSeconds(tt('c', '2026-12-01', { distance: 4.5, minutes: 45 })) === null && fiveKSeconds({ type: 'Intervals', best5k: 1500 }) === null,
+    [fiveKSeconds(tt('b', '2026-12-01', { distance: 3.11, minutes: 26.7 }))]);
+  const pf = r1.paceFrom5k;
+  check('v1.23.0 paces from a 23:00 5K match the fit-runner numbers (Daniels interval pace, 3K pace, McMillan 15-min pace: 7:00-7:25)',
+    paceFrom5k(1380, 2, pf) === '7:00-7:20' && paceFrom5k(1380, 3, pf) === '7:05-7:20' && paceFrom5k(1380, 4, pf) === '7:10-7:25' && Math.round(vdotFrom5k(1380)) === 42,
+    [2, 3, 4].map(h => paceFrom5k(1380, h, pf)));
+  check('v1.23.0 a slower 5K gives slower paces, and every band runs fast to slow',
+    paceFrom5k(1620, 2, pf) === '8:10-8:30' && paceFrom5k(1620, 4, pf) === '8:20-8:35' && [1380, 1620, 1800].every(sec => [2, 3, 4].every(h => { const [a, b] = paceFrom5k(sec, h, pf).split('-').map(parseMinutes); return a < b; })),
+    [paceFrom5k(1620, 2, pf), paceFrom5k(1620, 4, pf)]);
+  const dec1 = tt('t1', '2026-12-01', { best5k: 1600 });
+  const w4 = prescription(r1, 4, [dec1]);
+  check('v1.23.0 after the Dec 1 check-in, week 4\'s fast parts come from it and say so; with no check-in the plan\'s bands stay',
+    w4.pace === '8:05-8:25' && w4.lines[0] === 'Fast: 8:05-8:25 per mile (from your Dec 1 5K, 26:40). Heart rate 170-180 by the end of each one.' && prescription(r1, 4, []).pace === '7:45-8:15' && prescription(r1, 9, [dec1]).pace === '8:15-8:30',
+    [w4.lines[0], prescription(r1, 9, [dec1]).pace]);
+  const jan = tt('t2', '2026-12-29', { best5k: 1450 });
+  const tests2 = fiveKTests([dec1, jan], r1.fiveKCheck);
+  check('v1.23.0 a 5K more than 5% off the last one waits for his OK and does not move the paces; his OK lets it',
+    tests2[1].flagged && /2:30 faster than your last 5K \(26:40\)/.test(tests2[1].why) && prescription(r1, 8, [dec1, jan]).pace === '8:10-8:25'
+    && !fiveKTests([dec1, { ...jan, fiveKConfirmed: 1450 }], r1.fiveKCheck)[1].flagged && prescription(r1, 8, [dec1, { ...jan, fiveKConfirmed: 1450 }]).pace === '7:25-7:40'
+    && fiveKTests([tt('t3', '2026-12-01', { best5k: 700 })], r1.fiveKCheck)[0].flagged && !fiveKTests([tt('t4', '2026-12-29', { best5k: 1560 }), dec1], r1.fiveKCheck)[1].flagged,
+    [tests2[1], prescription(r1, 8, [dec1, { ...jan, fiveKConfirmed: 1450 }]).pace]);
+  check('v1.23.0 Count it in a check-in week makes the run the 5K test; other weeks it stays the intervals; a bike session stays a bike session',
+    countAs({ id: 'g', type: 'Easy run', week: 3 }, r1).type === '5K test' && countAs({ id: 'g', type: 'Easy run', week: 2 }, r1).type === 'Intervals' && countAs({ id: 'g', type: 'Bike/rower sub', week: 3 }, r1).type === 'Bike/rower sub');
   check('v1.10 a ski day counts for the long run, a 5K test for the intervals, an easy run for neither', planRunForType(plan, 'Ski day').id === 'run2' && planRunForType(plan, '5K test').id === 'run1' && planRunForType(plan, 'Easy run') === null);
   const wk = (runs, day) => weekRuns({ plan, settings: st, runs, week: 1, today: new Date(day + 'T08:00:00') });
   const mon = wk([], '2026-11-16'), tue = wk([], '2026-11-17'), thu = wk([], '2026-11-19'), sun = wk([], '2026-11-22');

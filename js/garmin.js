@@ -11,7 +11,8 @@ import { APP_VERSION } from './data.js';
 
 export const getGarminState = async () => (await kvGet('garmin')) || {};
 // v1.12: bump when the merge rules change, so the phone re-reads the last Garmin file once and re-settles the weeks
-const MERGE_VERSION = 2;
+// v1.23.0: 3, so runs already in the log pick up Garmin's fastest 5K (best5k)
+const MERGE_VERSION = 3;
 const saveState = async patch => { const next = { ...(await getGarminState()), ...patch }; await kvSet('garmin', next); return next; };
 
 /** What went wrong on Garmin's side, in words Cameron can act on. */

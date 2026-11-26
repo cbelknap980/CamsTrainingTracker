@@ -6,6 +6,7 @@ import { toISODate, parseISODate, weekNumber } from './data.js';
 
 const METERS_PER_MILE = 1609.344;
 const FEET_PER_METER = 3.28084;
+const fmtShort = iso => parseISODate(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const round = (v, places) => { const f = 10 ** places; return Math.round(v * f) / f; };
 const num = v => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 const pick = (o, ...paths) => {
@@ -88,7 +89,9 @@ export function creditOptions(plan, r) {
 
 /** v1.18.1: the record of Cameron's tap: this activity was that planned run (a bike or rower session stays one). */
 export function countAs(r, run) {
-  const type = r.type !== 'Easy run' && (run.alsoCounts || []).includes(r.type) ? r.type : run.type;
+  // v1.23.0: in a 5K check-in week (run.tests), the run counted for the intervals is the 5K test
+  const testWeek = (run.tests || []).some(t => t.week === r.week) && (run.alsoCounts || []).includes('5K test') && !['Bike/rower sub', 'Ski day'].includes(r.type);
+  const type = testWeek ? '5K test' : (r.type !== 'Easy run' && (run.alsoCounts || []).includes(r.type) ? r.type : run.type);
   return { ...r, type, planId: run.id, typeLocked: true, autoType: false, autoWhy: null };
 }
 
@@ -110,6 +113,67 @@ export function countCandidates(plan, runs, run, { start, end }) {
 }
 
 const isLong = (run, r) => r.type === run.type || r.planId === run.id && !(run.alsoCounts || []).includes(r.type);
+
+// ---- v1.23.0: 5K check-ins (Cameron, Nov 26: "regular 5k time trial check-ins as benchmarks to measure my performance...
+// This should then dynamically update our training plan"). Weeks in run.tests; each good one sets the interval paces. ----
+
+const FIVE_K_MILES = 5000 / METERS_PER_MILE;
+
+/** A 5K check-in's time in seconds: Garmin's fastest 5K inside the run when it has one, else the run scaled to 5K when it was 3.0-3.5 mi. */
+export function fiveKSeconds(r) {
+  if (!r || r.type !== '5K test') return null;
+  if (r.best5k) return Math.round(r.best5k);
+  if (r.distance >= 3 && r.distance <= 3.5 && r.minutes) return Math.round(r.minutes * 60 * FIVE_K_MILES / r.distance);
+  return null;
+}
+
+/** "26:40" from seconds. */
+export const fmtSeconds = sec => fmtDuration(sec / 60);
+
+/**
+ * Every 5K check-in, oldest first: { id, date, week, seconds, change (vs the last good one), flagged, why }.
+ * A time outside check.minSeconds-maxSeconds, or more than check.maxChange (a share) off the last good one, waits for
+ * Cameron's OK (run.fiveKConfirmed = those seconds) before it moves the paces (his Nov 19 rule on numbers that look wrong).
+ */
+export function fiveKTests(runs, check = {}) {
+  const lo = check.minSeconds || 840, hi = check.maxSeconds || 2700, jump = check.maxChange || 0.05;
+  const list = (runs || []).map(r => ({ r, seconds: fiveKSeconds(r) })).filter(x => x.seconds)
+    .sort((a, b) => (`${a.r.date} ${a.r.startTime || ''}` < `${b.r.date} ${b.r.startTime || ''}` ? -1 : 1));
+  let last = null;
+  return list.map(({ r, seconds }) => {
+    const change = last ? seconds - last.seconds : null;
+    let why = null;
+    if (seconds < lo || seconds > hi) why = `a 5K of ${fmtSeconds(seconds)} is outside ${fmtSeconds(lo)}-${fmtSeconds(hi)}`;
+    else if (last && Math.abs(change) > last.seconds * jump) why = `${fmtSeconds(Math.abs(change))} ${change < 0 ? 'faster' : 'slower'} than your last 5K (${fmtSeconds(last.seconds)})`;
+    const flagged = !!why && r.fiveKConfirmed !== seconds;
+    const t = { id: r.id, date: r.date, week: r.week || null, seconds, change, flagged, why, garmin: !!r.best5k };
+    if (!flagged) last = t;
+    return t;
+  });
+}
+
+// Daniels & Gilbert (Oxygen Power, 1979): oxygen cost of a speed (m/min) and the share of VO2max held for t minutes
+const vo2Cost = v => -4.6 + 0.182258 * v + 0.000104 * v * v;
+const shareHeld = t => 0.8 + 0.1894393 * Math.exp(-0.012778 * t) + 0.2989558 * Math.exp(-0.1932605 * t);
+const speedFor = vo2 => { const a = 0.000104, b = 0.182258, c = -4.6 - vo2; return (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a); };
+
+/** VDOT from a 5K time in seconds. */
+export const vdotFrom5k = seconds => vo2Cost(5000 / (seconds / 60)) / shareHeld(seconds / 60);
+
+/** Seconds per mile at a share of VDOT. */
+const secPerMileAt = (share, vdot) => METERS_PER_MILE / speedFor(share * vdot) * 60;
+
+/**
+ * The fast-part pace for a rep length, from a 5K time: Daniels' interval pace (cfg.upper to cfg.lower of VDOT, 100%
+ * to 97%), shifted by cfg.stages[hardMin] seconds (shorter reps a little faster), to the nearest 5 s. "8:20-8:45".
+ */
+export function paceFrom5k(seconds, hardMin, cfg) {
+  const v = vdotFrom5k(seconds);
+  const off = (cfg.stages || {})[String(hardMin)] || [0, 5];
+  const r5 = x => Math.round(x / 5) * 5;
+  const fast = r5(secPerMileAt(cfg.upper || 1, v) + off[0]), slow = r5(secPerMileAt(cfg.lower || 0.97, v) + off[1]);
+  return `${fmtSeconds(fast)}-${fmtSeconds(slow)}`;
+}
 
 /** Long run: the distance to aim for next, one step past the longest one done so far, up to the cap. */
 // v1.22.0 (Nov 26 run plan review): with distance.maxJump the step is measured from the longest run of any kind
@@ -154,13 +218,17 @@ export function prescription(run, week, runs, asOf) {
     // v1.18.4 (Cameron, Nov 24: "Put a pace target. Instead of RPE can we use heartrate"): the fast parts go by pace,
     // with heart rate as the check at the end of each one (it lags on a 2-4 min rep); numbers from his Garmin runs
     const hr = run.hr || {};
-    if (iv.pace && hr.fastEnd) {
+    // v1.23.0: once there is a 5K check-in, the fast parts go at the pace it gives (run.paceFrom5k)
+    const good = run.paceFrom5k ? fiveKTests(runs, run.fiveKCheck).filter(t => !t.flagged) : [];
+    const from = good[good.length - 1] || null;
+    const pace = from ? paceFrom5k(from.seconds, iv.hardMin, run.paceFrom5k) : iv.pace;
+    if (pace && hr.fastEnd) {
       const lines = [
-        `Fast: ${iv.pace} per mile. Heart rate ${hr.fastEnd[0]}-${hr.fastEnd[1]} by the end of each one.`,
+        `Fast: ${pace} per mile${from ? ` (from your ${fmtShort(from.date)} 5K, ${fmtSeconds(from.seconds)})` : ''}. Heart rate ${hr.fastEnd[0]}-${hr.fastEnd[1]} by the end of each one.`,
         `Easy: jog or walk until heart rate is under ${hr.easyUnder}.`,
         `Warm up ${run.warmupMin} min easy first, cool down ${run.cooldownMin} min after.`
       ];
-      return { kind: 'intervals', ...iv, text: `${iv.reps} × ${iv.hardMin} min fast, ${iv.easyMin} min easy`, lines, detail: lines.join(' ') };
+      return { kind: 'intervals', ...iv, pace, paceFrom: from, text: `${iv.reps} × ${iv.hardMin} min fast, ${iv.easyMin} min easy`, lines, detail: lines.join(' ') };
     }
     return { kind: 'intervals', ...iv, text: `${iv.reps} × ${iv.hardMin} min hard, ${iv.easyMin} min easy`, detail: `${run.warmupMin} min easy first, ${run.cooldownMin} min easy after · ${run.effort}` };
   }
@@ -200,7 +268,10 @@ export function weekRuns({ plan, settings, runs, week, today }) {
     const lastDay = weekend ? end : date;
     const hit = inWeek.filter(r => countsFor(plan, r, run)).sort((a, b) => (a.date < b.date ? -1 : 1))[0] || null;
     const status = hit ? 'done' : (todayIso >= date && todayIso <= lastDay ? 'today' : (todayIso > lastDay ? 'open' : 'later'));
-    return { id: run.id, name: run.name, short: run.name.includes(': ') ? run.name.split(': ')[1] : run.name, day: run.day, date, type: run.type, plan: prescription(run, week, before, start <= todayIso ? start : afterToday), status, run: hit };
+    const ask = prescription(run, week, before, start <= todayIso ? start : afterToday);
+    // v1.23.0: a check-in week names the run for what it is that week
+    const short = ask.kind === 'test' ? ask.text : (run.name.includes(': ') ? run.name.split(': ')[1] : run.name);
+    return { id: run.id, name: run.name, short, day: run.day, date, type: run.type, plan: ask, status, run: hit };
   });
 }
 
@@ -269,6 +340,8 @@ export function garminToRun(a, { rules }) {
     maxHr: num(pick(a, 'maxHR', 'maxHeartRateInBeatsPerMinute', 'summaryDTO.maxHR')),
     climbFt: climb === null ? null : Math.round(climb * FEET_PER_METER),
     cadence: cadence === null ? null : Math.round(cadence),
+    // v1.23.0: Garmin's fastest 5K inside the activity (seconds), so a 5K check-in with a warm-up still reads right
+    best5k: num(pick(a, 'fastestSplit_5000')),
     intervalLike: intervalSignal(a, (cfg.assign || {}))
   };
 }
@@ -288,7 +361,7 @@ function intervalSignal(a, cfg) {
   return null;
 }
 
-const MEASURED = ['date', 'startTime', 'distance', 'minutes', 'pace', 'hr', 'maxHr', 'climbFt', 'cadence', 'garminType', 'name', 'intervalLike'];
+const MEASURED = ['date', 'startTime', 'distance', 'minutes', 'pace', 'hr', 'maxHr', 'climbFt', 'cadence', 'garminType', 'name', 'intervalLike', 'best5k'];
 
 /**
  * Work out what the log needs from a Garmin file.
