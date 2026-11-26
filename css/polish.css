@@ -1089,9 +1089,10 @@ body.computer .modal .sheet.sheet-page:has(#run-sheet) { max-width: 620px; }
 .wo { margin: 8px 0 10px; }
 .wo-blocks { display: flex; align-items: flex-end; gap: 2px; height: 30px; }
 .wo-b { flex-basis: 0; min-width: 3px; border-radius: 3px 3px 1px 1px; }
-.wo-warm, .wo-cool { height: 45%; background: #5b8fe0; opacity: 0.75; }
-.wo-easy { height: 30%; background: rgba(255, 255, 255, 0.24); }
-.wo-fast { height: 100%; background: var(--accent); }
+/* v1.26.0: the fast parts wear the intervals color; warm-up, cool-down and the easy jogs are greys told apart by height */
+.wo-warm, .wo-cool { height: 45%; background: rgba(255, 255, 255, 0.3); }
+.wo-easy { height: 28%; background: rgba(255, 255, 255, 0.16); }
+.wo-fast { height: 100%; background: var(--t-iv); }
 .wo-legend { display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; font-size: var(--t-label); color: var(--muted); }
 .wo-total { color: var(--text); font-weight: 600; }
 
@@ -1118,10 +1119,96 @@ body.computer .modal .sheet.sheet-page:has(#run-sheet) { max-width: 620px; }
 .run-item .row { align-items: center; gap: 8px; }
 .run-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .run-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
-.run-dot.t-iv { background: var(--accent); }
-.run-dot.t-lr { background: #5b8fe0; }
-.run-dot.t-fk { background: #f2cc3a; }
-.run-dot.t-ez { background: var(--good); }
-.run-item .run-line { padding-left: 16px; }
 .garmin-row.foot { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .garmin-row.warn { margin: 0 0 10px; }
+
+/* ---- v1.26.0: the Runs tab's layout and look (runs-view.js). One color per run type, checked with the dataviz
+   palette validator on the card surface (#1a1d23, dark): all pairs pass lightness, chroma, color-blind and normal-vision
+   separation, 3:1 against the card. Easy runs, subs and ski days share a grey. Text stays in the text colors; the
+   type color is only on marks (dots, tiles, bars, the strip). ---- */
+:root { --t-lr: #3d8ae6; --t-iv: #c98a12; --t-fk: #e24d8b; --t-other: #8b93a1; }
+.t-lr { --type: var(--t-lr); }
+.t-iv { --type: var(--t-iv); }
+.t-fk { --type: var(--t-fk); }
+.t-other { --type: var(--t-other); }
+.run-dot[class*="t-"] { background: var(--type); }
+.run-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 1. the goals as two tiles: a big number, the goal under it, a bar, two short lines */
+.goal-section { margin-bottom: 14px; }
+.head-note { font-size: var(--t-small); white-space: nowrap; }
+.goal-section .goal-head { align-items: baseline; margin: 4px 2px 8px; }
+.goal-section .goal-head h3 { margin: 0; }
+.goal-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.goal-tiles.one { grid-template-columns: minmax(0, 1fr); }
+.goal-tile { display: flex; flex-direction: column; align-items: stretch; text-align: left; color: var(--text); font: inherit; cursor: pointer; margin: 0; padding: 14px 14px 13px; min-height: 44px; }
+.goal-tile > span { display: block; }
+.goal-tile > .goal-tile-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.goal-name { display: inline-flex; align-items: center; gap: 7px; font-size: var(--t-small); font-weight: 650; }
+.goal-tile .ex-go { width: 24px; height: 24px; flex: none; }
+.goal-tile .ex-go svg { width: 12px; height: 12px; }
+.goal-tile > .goal-big { display: flex; align-items: flex-end; min-height: 2.5rem; margin-top: 8px; font-size: 1.95rem; font-weight: 750; line-height: 1.1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.goal-tile > .goal-big.none { font-size: 1.1rem; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+.goal-of { font-size: var(--t-label); color: var(--muted); margin-top: 3px; }
+.goal-tile .goal-bar { margin: 10px 0 9px; height: 8px; }
+.goal-bar span { background: var(--type, var(--accent)); }
+.goal-tile > .goal-sub { display: flex; flex-direction: column; gap: 2px; font-size: var(--t-label); line-height: 1.35; margin-top: auto; }
+.goal-sub span:first-child { color: var(--text); font-weight: 600; }
+.goal-section .goal-tests { margin: 10px 2px 0; align-items: center; }
+.goal-section .goal-flag { margin: 10px 2px 0; padding: 0; }
+.goal-foot { font-size: var(--t-small); margin: 10px 2px 0; }
+
+/* 2. the week strip */
+.runs-week-head { align-items: baseline; margin-bottom: 10px; }
+.runs-week-head h3 { margin: 0; }
+.rw-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; margin: 0 -4px 14px; }
+.rw-day { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 7px 0 8px; border-radius: 12px; }
+.rw-day.today { background: var(--surface-2); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.22); }
+.rw-dow { font-size: var(--t-label); font-weight: 600; color: var(--muted); }
+.rw-day.today .rw-dow { color: var(--text); }
+.rw-mark { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: var(--t-small); color: var(--muted); font-variant-numeric: tabular-nums; }
+.rw-mark.planned { box-shadow: inset 0 0 0 2px var(--type); color: var(--text); font-weight: 650; }
+.rw-mark.planned.either { box-shadow: none; border: 2px dashed var(--type); }
+.rw-mark.done { background: var(--type); color: #121418; font-size: 1rem; font-weight: 800; }
+.rw-day.past .rw-mark:not(.done):not(.planned) { color: rgba(154, 161, 173, 0.6); }
+
+/* 3. the next run: the biggest thing on the card, with Log at the bottom where the thumb is */
+.run-next { background: var(--surface-2); border-radius: 14px; padding: 14px; margin: 0 0 4px; box-shadow: inset 0 0 0 1px var(--edge); }
+.run-next-top { display: flex; align-items: center; gap: 8px; font-size: var(--t-small); color: var(--muted); }
+.run-next.today .run-next-top { color: var(--text); font-weight: 650; }
+.run-next-name { font-size: 1.15rem; font-weight: 700; margin-top: 8px; }
+.run-next-ask { font-size: 2rem; font-weight: 750; line-height: 1.15; letter-spacing: -0.01em; margin-top: 1px; }
+.run-next-ask.long { font-size: 1.4rem; line-height: 1.25; }
+.run-next-ask.alone { margin-top: 8px; }
+.run-next .run-lines, .run-next .run-detail { margin-top: 8px; }
+.run-next .wo { margin: 12px 0 4px; }
+.run-next .wo-blocks { height: 36px; }
+.run-next .run-moved { margin-top: 10px; }
+.run-next-log { width: 100%; min-height: 52px; margin-top: 14px; font-size: var(--t-body); font-weight: 700; }
+.run-all-done { margin: 0 0 4px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); font-size: var(--t-small); }
+#runs-week .run-next + .run-plan, #runs-week .run-all-done + .run-plan { border-top: 0; padding-top: 12px; }
+.run-plan .run-name { gap: 8px; }
+
+/* 4. the runs as activity rows: a date tile in the type color, the type and its check, labeled stats */
+.run-item { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: start; }
+.run-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.run-date { width: 44px; height: 48px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--surface-2); background: color-mix(in srgb, var(--type) 24%, var(--surface-1)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--type) 55%, transparent); }
+.run-date-dow { font-size: 0.68rem; font-weight: 600; color: rgba(243, 244, 246, 0.78); line-height: 1.2; }
+.run-date-num { font-size: 1.15rem; font-weight: 750; line-height: 1.1; }
+.run-item-body { min-width: 0; }
+.run-item .row { min-height: 24px; }
+.run-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-src { margin-left: 8px; font-size: var(--t-label); color: var(--muted); }
+.ra-stats { display: grid; grid-template-columns: 1fr 1.2fr 1fr 0.75fr; gap: 4px 10px; margin-top: 6px; max-width: 340px; }
+.ra-stat { display: flex; flex-direction: column; min-width: 0; }
+.ra-k { font-size: 0.68rem; color: var(--muted); line-height: 1.3; }
+.ra-v { font-size: var(--t-small); font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.run-item .run-line { margin-top: 4px; }
+
+/* 5. miles stacked by type, with a legend; 2px card-colored gaps between the parts */
+.viz-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; font-size: var(--t-label); color: var(--text); }
+.viz-key { display: inline-flex; align-items: center; gap: 6px; }
+.run-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--type); }
+.viz-seg { fill: var(--type); }
+.viz-stack { outline: none; cursor: pointer; }
+.viz-stack.on .viz-seg, .viz-stack:focus-visible .viz-seg { filter: brightness(1.18); }

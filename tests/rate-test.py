@@ -143,7 +143,7 @@ with sync_playwright() as p:
     pg.reload(); pg.wait_for_selector('.card.accent h1'); pg.wait_for_timeout(300)
     check('upgrade: it runs once (a count made since stays)', pg.evaluate("import('./js/store.js').then(m => m.getTargets())")['back_squat']['stall'] == 2)
     pg.click('#tabs button[data-view="runs"]'); pg.wait_for_selector('#runs-week')
-    row = pg.locator('.run-plan[data-run="run1"]')
+    row = pg.locator('#runs-week [data-run="run1"]')
     check('Runs tab: the intervals are open and offer Count it for that run', 'Count it' in row.inner_text() and row.locator('[data-count="garmin-1"]').count() == 1, row.inner_text())
     row.scroll_into_view_if_needed()
     pg.screenshot(path=f'{SHOTS}/rate-upgrade-count-it.png')
@@ -152,7 +152,7 @@ with sync_playwright() as p:
     row.locator('[data-side="garmin-1"]').click(); pg.wait_for_timeout(300)
     g1 = next(r for r in pg.evaluate("import('./js/store.js').then(m => m.getRuns())") if r['id'] == 'garmin-1')
     check('Side run: an easy run for good, for no planned run, and the intervals stop asking', g1['type'] == 'Easy run' and g1['planId'] is None and g1['typeLocked'] is True and pg.locator('#runs-week [data-count]').count() == 0 and 'side run' in toast_text(pg), [g1, toast_text(pg)])
-    check('Side run: it still counts toward the week\'s miles', '6.6 mi this week' in pg.locator('#runs-week').inner_text(), pg.locator('#runs-week').inner_text())
+    check('Side run: it still counts toward the week\'s miles', '· 6.6 mi' in pg.locator('#runs-week-total').inner_text(), pg.locator('#runs-week').inner_text())
     pg.click('#tabs button[data-view="home"]'); pg.wait_for_selector('.card.accent h1')
     check('Side run: Home asks nothing about it either', pg.locator('#view [data-count]').count() == 0, pg.locator('#view').inner_text()[:300])
     # a restore of an older backup gets the upgrade too

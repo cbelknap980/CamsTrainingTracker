@@ -709,3 +709,62 @@ export function runGoals({ plan, settings, runs, today }) {
   }
   return { week, fiveK, long, done: { runs: doneCount, missed } };
 }
+
+// ---- v1.26.0: the Runs tab's layout and look (Cameron, Nov 26: "5 more things. Focus on latout and attentive this
+// time"). One color per run type (Garmin's activity colors), a Monday-to-Sunday strip (Strava's calendar widget,
+// Runna's plan week), miles stacked by type (Strava's weekly bars). ----
+
+/** The color key of a run type: lr (long run), iv (intervals), fk (5K test), other (easy runs, subs, ski days). */
+export const typeKey = type => ({ 'Long run': 'lr', 'Intervals': 'iv', '5K test': 'fk' })[type] || 'other';
+/** The keys in their fixed order: the miles chart stacks them bottom up and the legend lists them in it. */
+export const TYPE_KEYS = ['lr', 'iv', 'fk', 'other'];
+
+/** weeklyMiles split by type: [{ week, miles, runs, parts: { lr, iv, fk, other } }] (parts in miles). */
+export function weeklyMilesByType(runs, settings, rules, weeks = 12) {
+  const rows = Array.from({ length: weeks }, (_, i) => ({ week: i + 1, miles: 0, runs: 0, parts: { lr: 0, iv: 0, fk: 0, other: 0 } }));
+  for (const r of runs || []) {
+    const w = r.week || weekNumber(parseISODate(r.date), settings.startDate);
+    if (w < 1 || w > weeks || !countsMiles(rules, r.type)) continue;
+    const row = rows[w - 1], k = typeKey(r.type);
+    row.parts[k] = round(row.parts[k] + (r.distance || 0), 2);
+    row.miles = round(row.miles + (r.distance || 0), 1);
+    row.runs += 1;
+  }
+  return rows;
+}
+
+/**
+ * The plan week as seven days, Monday first, for the strip on top of This week.
+ * returns [{ date, today, past, marks: [{ key, state: 'done'|'planned', either, id, type }] }]
+ * A planned run that is not done sits on its day; the weekend long run sits on both Saturday and Sunday with
+ * either: true. A done run sits on the day it was run. Runs logged outside the plan sit on their day too.
+ */
+export function weekDays({ plan, settings, runs, week, today }) {
+  const { start } = weekRange(settings, week);
+  const todayIso = toISODate(today);
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = parseISODate(start); d.setDate(d.getDate() + i);
+    const iso = toISODate(d);
+    return { date: iso, today: iso === todayIso, past: iso < todayIso, marks: [] };
+  });
+  const at = iso => days.find(d => d.date === iso);
+  const used = new Set();
+  for (const row of weekRuns({ plan, settings, runs, week, today })) {
+    if (row.run) {
+      used.add(row.run.id);
+      const d = at(row.run.date);
+      if (d) d.marks.push({ key: typeKey(row.run.type), state: 'done', either: false, id: row.id, type: row.run.type });
+      continue;
+    }
+    const key = row.plan && row.plan.kind === 'test' ? 'fk' : typeKey(row.type);
+    const either = /weekend/i.test(row.day || '');
+    const spots = either ? [row.date, days[6].date] : [row.date];
+    spots.forEach(iso => { const d = at(iso); if (d) d.marks.push({ key, state: 'planned', either, id: row.id, type: key === 'fk' ? '5K test' : row.type }); });
+  }
+  for (const r of runs || []) {
+    if (used.has(r.id)) continue;
+    const d = at(r.date);
+    if (d) d.marks.push({ key: typeKey(r.type), state: 'done', either: false, id: r.id, type: r.type });
+  }
+  return days;
+}

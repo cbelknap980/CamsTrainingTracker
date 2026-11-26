@@ -10,6 +10,7 @@ import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../j
 import { applyRestAdjust } from '../js/builder.js';
 import { intervalPlan, longRunPlan, checkIns, fiveKProjection, runDay, fmtSeconds } from '../js/runs.js';
 import { planCheck, intervalMinutes, workoutBlocks, runGoals, inDays, planRunOf } from '../js/runs.js';
+import { typeKey, TYPE_KEYS, weeklyMilesByType, weekDays } from '../js/runs.js';
 import { fiveKSeconds, fiveKTests, paceFrom5k, vdotFrom5k, parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays, needsCredit, countsFor, creditOptions, countAs, keepAsSide, countCandidates, weekRange, countsMiles } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
 import { numberFlag, flaggedGroups, applyNumberFix, rateSavedSet, rerunLift, impossibleNumber } from '../js/sanity.js';
@@ -1753,6 +1754,38 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('after two check-ins (27:00, then 26:00): a quarter of the way from 27:00 to 23:00, next one Tue Feb 2', g2.fiveK.latest.seconds === 1560 && Math.round(g2.fiveK.share * 100) === 25 && g2.fiveK.next.date === '2027-02-02', g2.fiveK);
   const g3 = runGoals({ plan, settings: st, runs: [...his, k1], today: new Date(2026, 11, 15, 12) });
   check('on Dec 15 (week 5): 4 done, and 4 missed in weeks that are over (weeks 2 and 3 long runs, both runs in week 4)', g3.done.runs === 4 && g3.done.missed === 4, g3.done);
+}
+
+// ---- v1.26.0: the Runs tab's layout and look (Cameron, Nov 26). Type colors, miles by type, the week strip. ----
+{
+  console.log('v1.26.0 Runs tab: type keys, miles by type, week strip');
+  const plan = JSON.parse(readFileSync(new URL('../data/plan.json', import.meta.url)));
+  const rules = JSON.parse(readFileSync(new URL('../data/rules.json', import.meta.url)));
+  const st = { startDate: '2026-11-16' };
+  check('one key per run type; easy runs, subs and ski days share one', typeKey('Long run') === 'lr' && typeKey('Intervals') === 'iv' && typeKey('5K test') === 'fk' && typeKey('Easy run') === 'other' && typeKey('Ski day') === 'other' && TYPE_KEYS.join() === 'lr,iv,fk,other');
+  // made-up runs (his own log never goes in the app repo)
+  const runs = [
+    { id: 'm-1', date: '2026-11-18', type: 'Intervals', planId: 'run1', distance: 2.7, minutes: 27, week: 1 },
+    { id: 'm-2', date: '2026-11-22', type: 'Long run', planId: 'run2', distance: 3.6, minutes: 36, week: 1 },
+    { id: 'm-3', date: '2026-11-26', type: 'Intervals', planId: 'run1', distance: 3.4, minutes: 61, week: 2 },
+    { id: 'm-4', date: '2026-11-27', type: 'Easy run', planId: null, typeLocked: true, distance: 1.5, minutes: 15, week: 2 },
+    { id: 'm-5', date: '2026-11-28', type: 'Ski day', week: 2, minutes: 180 }
+  ];
+  const mb = weeklyMilesByType(runs, st, rules);
+  check('miles by type: week 1 is 3.6 long run + 2.7 intervals = 6.3; week 2 is 3.4 intervals + 1.5 other = 4.9, the ski day adds none',
+    mb[0].miles === 6.3 && mb[0].parts.lr === 3.6 && mb[0].parts.iv === 2.7 && mb[1].miles === 4.9 && mb[1].parts.iv === 3.4 && mb[1].parts.other === 1.5 && mb[1].runs === 2,
+    mb.slice(0, 2));
+  check('the totals match weeklyMiles', weeklyMiles(runs, st, rules).every((r, i) => r.miles === mb[i].miles && r.runs === mb[i].runs));
+  const days = weekDays({ plan, settings: st, runs, week: 2, today: new Date(2026, 10, 26, 15) });
+  const mark = iso => days.find(d => d.date === iso).marks;
+  check('week 2 strip: Mon Nov 23 to Sun Nov 29, today is Thu 26', days.length === 7 && days[0].date === '2026-11-23' && days[6].date === '2026-11-29' && days.filter(d => d.today).map(d => d.date).join() === '2026-11-26' && days[0].past && !days[4].past);
+  check('the intervals planned Tue show done on Thu, when they were run (not on Tue)', mark('2026-11-24').length === 0 && mark('2026-11-26').length === 1 && mark('2026-11-26')[0].state === 'done' && mark('2026-11-26')[0].key === 'iv', [mark('2026-11-24'), mark('2026-11-26')]);
+  check('a ski day counts as the long run: done on Sat in the grey, and Sun has nothing left', mark('2026-11-28').length === 1 && mark('2026-11-28')[0].type === 'Ski day' && mark('2026-11-28')[0].key === 'other' && mark('2026-11-28')[0].state === 'done' && mark('2026-11-29').length === 0, [mark('2026-11-28'), mark('2026-11-29')]);
+  check('a run outside the plan sits on its day (easy run Fri)', mark('2026-11-27').length === 1 && mark('2026-11-27')[0].key === 'other' && mark('2026-11-27')[0].state === 'done');
+  const noSki = weekDays({ plan, settings: st, runs: runs.filter(r => r.type !== 'Ski day'), week: 2, today: new Date(2026, 10, 26, 15) });
+  check('with no ski day, the weekend long run is planned on Sat and Sun, either day', noSki.slice(5).every(d => d.marks.length === 1 && d.marks[0].key === 'lr' && d.marks[0].state === 'planned' && d.marks[0].either), noSki.slice(5));
+  const d3 = weekDays({ plan, settings: st, runs, week: 3, today: new Date(2026, 11, 1, 9) });
+  check('week 3: the check-in Tue Dec 1 is planned as a 5K (its own color), today', d3[1].date === '2026-12-01' && d3[1].today && d3[1].marks[0].key === 'fk' && d3[1].marks[0].state === 'planned' && !d3[1].marks[0].either, d3[1]);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');
