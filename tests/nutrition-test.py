@@ -3,7 +3,8 @@
 # serving of a 1 lb pack. The Nutrition tab: one tap adds a serving with Undo, the day's list (change how much, delete),
 # Other, Edit buttons, the goal, earlier days, the last 7 days, the Home line, numbers that look wrong held for a look,
 # backup and sync, and a computer that only views. v1.20.1: protein is the fourth ring on Home's week card, the
-# buttons are just the food and its grams, and the computer shows the buttons greyed.
+# buttons are just the food and its grams. v1.20.2: the computer logs food too (tests/food-sync-test.py covers the trip
+# to the phone).
 # Denver time, made-up data. Run: python3 tests/nutrition-test.py   (serves the repo on :8097)
 # SHOTS=dir to keep screenshots (2x, for Cameron).
 import os, subprocess, sys, time, datetime
@@ -209,21 +210,27 @@ try:
     check('...and no rings', pg.locator('#week-rings').count() == 0)
     ctx.close()
 
-    print('Computer set to Only views')
+    print('Computer set to Only views (v1.20.2: it logs food too; here GitHub cannot be reached)')
     ctx, pg = open_app(browser, errors, size={'width': 1366, 'height': 768}, viewer=True, data={**DATA, 'foods': None}, scale=2 if SHOTS else 1)
     labels = [x.strip() for x in pg.locator('#week-rings .wk-ring-label').all_inner_texts()]
     check('the computer\'s week card has the Protein today ring too', labels[-1:] == ['Protein today'] and '65' in pg.inner_text('#week-rings [data-ring="protein"]'), labels)
     shot(pg, '6-computer-home')
     pg.click('#week-rings [data-ring="protein"]'); pg.wait_for_timeout(400)
     check('the numbers show (65 g)', total(pg) == 65, total(pg))
-    btns = pg.evaluate("[...document.querySelectorAll('#nut-grid .nut-food')].map(b => [b.dataset.food, b.disabled])")
-    check('his foods show, greyed: the ten buttons, all disabled, no Other', len(btns) == 10 and all(d for _, d in btns) and pg.locator('#nut-other').count() == 0, btns)
-    check('...under Your foods, with a note to tap them on the phone', pg.inner_text('#nut-add h3') == 'Your foods' and 'Tap these on your phone' in pg.inner_text('#nut-viewonly') and pg.locator('#nut-edit').count() == 0, pg.inner_text('#nut-add'))
-    pg.click('[data-food="whey"]', force=True); pg.wait_for_timeout(300)
-    check('...a click adds nothing (still 65)', total(pg) == 65, total(pg))
+    btns = pg.evaluate("[...document.querySelectorAll('#nut-grid .nut-food')].map(b => [b.dataset.food || b.id, b.disabled])")
+    check('his foods show as live buttons: ten foods and Other', len(btns) == 11 and not any(d for _, d in btns), btns)
+    check('...under Add food, with no Edit and no goal button (phone only)', pg.inner_text('#nut-add h3') == 'Add food' and pg.locator('#nut-edit').count() == 0 and pg.locator('button#nut-goal').count() == 0, pg.inner_text('#nut-add h3'))
+    pg.click('[data-food="whey"]'); pg.wait_for_timeout(400)
+    check('a click adds a scoop (89 g)', total(pg) == 89, total(pg))
+    try: pg.wait_for_function("document.getElementById('nut-remote').innerText.includes('waiting to send')", timeout=5000)
+    except Exception: pass
+    check('...and with no connection it says the change waits here', 'waiting to send' in pg.inner_text('#nut-remote'), pg.inner_text('#nut-remote'))
+    check('...lines open to change or delete', pg.locator('#nut-list .nut-row.tappable').count() == 3)
+    pg.click('#nut-other'); pg.wait_for_timeout(300)
+    check('...Other has no Make it a button on the computer', pg.locator('#nut-other-g').count() == 1 and not pg.locator('#nut-other-keep').is_visible())
+    pg.evaluate("() => import('./js/ui.js').then(m => m.closeModal())"); pg.wait_for_timeout(200)
+    hide_toast(pg)
     shot(pg, '7-computer-nutrition')
-    check('...no goal button either', pg.locator('button#nut-goal').count() == 0)
-    check('...lines do not open', pg.locator('#nut-list .nut-row.tappable').count() == 0)
     ctx.close()
 
     check('no page errors', not errors and not narrow_errors, errors + narrow_errors)

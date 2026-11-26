@@ -136,3 +136,37 @@ export function progressOf(total, goal) {
   const left = Math.max(0, goal - total);
   return { total, goal, left, pct: goal > 0 ? Math.min(100, Math.round((total / goal) * 100)) : 0, hit: goal > 0 && total >= goal };
 }
+
+/**
+ * v1.20.2 (Cameron, Nov 25: "I should be able to tap these on my phone or computer"). The computer never writes the
+ * phone's file; it writes what it did as a list of steps (food-from-computer.json) and the phone applies them.
+ * A step: { id, at, type: 'add', entry } | { id, at, type: 'remove', entryId } | { id, at, type: 'set', entryId, servings?, g? }.
+ * Each step can be applied twice with no harm (an add whose entry is already there is skipped), so the computer can
+ * lay the same steps over the phone's copy until the phone has them.
+ */
+export function validFoodOp(op, check = { refuseG: 300 }) {
+  if (!op || typeof op !== 'object' || !op.id) return false;
+  const gOk = g => Number.isFinite(Number(g)) && Number(g) > 0 && Number(g) <= check.refuseG;
+  const sOk = s => Number.isFinite(Number(s)) && Number(s) > 0 && Number(s) <= 10;
+  if (op.type === 'add') {
+    const e = op.entry;
+    return !!(e && e.id && /^\d{4}-\d{2}-\d{2}$/.test(String(e.date)) && gOk(e.g) && sOk(e.servings) && Number(e.g) * Number(e.servings) <= check.refuseG);
+  }
+  if (op.type === 'remove') return !!op.entryId;
+  if (op.type === 'set') return !!op.entryId && (op.servings == null || sOk(op.servings)) && (op.g == null || gOk(op.g)) && (op.servings != null || op.g != null);
+  return false;
+}
+
+/** The log with the steps applied in order. Returns { log, applied: [step ids], bad: [step ids] }. */
+export function applyFoodOps(log, ops, check) {
+  let out = (log || []).map(e => ({ ...e }));
+  const applied = [], bad = [];
+  for (const op of ops || []) {
+    if (!validFoodOp(op, check)) { if (op && op.id) bad.push(op.id); continue; }
+    if (op.type === 'add') { if (!out.some(e => e.id === op.entry.id)) out.push({ ...op.entry, fromComputer: true }); }
+    else if (op.type === 'remove') out = out.filter(e => e.id !== op.entryId);
+    else if (op.type === 'set') out = out.map(e => (e.id === op.entryId ? { ...e, ...(op.servings != null ? { servings: Number(op.servings) } : {}), ...(op.g != null ? { g: Number(op.g) } : {}) } : e));
+    applied.push(op.id);
+  }
+  return { log: out, applied, bad };
+}

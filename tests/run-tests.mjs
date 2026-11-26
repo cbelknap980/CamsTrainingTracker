@@ -18,7 +18,7 @@ import { runAdherence, runSummary } from '../js/progress.js';
 import { gymSecondsOf, pausedInGym, isUnchecked, fmtLong } from '../js/logger.js';
 import { Player, fmtGym, speakable } from '../js/player.js';
 // v1.20
-import { entryG, dayEntries, dayTotal, lastDays, addDays, fmtQty, amountText, makeEntry, checkProtein, checkFood, recentRepeat, applyFoodEdit, foodsList, foodId, progressOf } from '../js/nutrition.js';
+import { entryG, dayEntries, dayTotal, lastDays, addDays, fmtQty, amountText, makeEntry, checkProtein, checkFood, recentRepeat, applyFoodEdit, foodsList, foodId, progressOf, validFoodOp, applyFoodOps } from '../js/nutrition.js';
 // v1.18.1
 import { upgrade1181, upgrade1185, upgrade11810, olderThan } from '../js/upgrade.js';
 
@@ -1498,6 +1498,32 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('a new button gets a unique id', foodId('Cottage cheese', mine) === 'cottage_cheese' && foodId('Whey', [{ id: 'whey' }]) === 'whey_2');
   const pr = progressOf(113, 160);
   check('progress: 113 of 160 = 71%, 47 to go; 170 is hit, 100% wide', pr.pct === 71 && pr.left === 47 && !pr.hit && progressOf(170, 160).hit && progressOf(170, 160).pct === 100, pr);
+
+  console.log('\nv1.20.2: food from the computer, applied by the phone');
+  const pc = makeEntry(byId.chicken, { date: '2026-11-25', at: '2026-11-25T23:00:00.000Z', servings: 1, id: 'pc1' });
+  const steps = [
+    { id: 'o1', type: 'add', entry: pc },
+    { id: 'o2', type: 'set', entryId: log[0].id, servings: 1 },
+    { id: 'o3', type: 'remove', entryId: log[3].id }
+  ];
+  const r1 = applyFoodOps(log, steps);
+  check('add, change and delete apply in order (113 - 24 + 50 = 139 on Nov 25)', r1.applied.join() === 'o1,o2,o3' && dayTotal(r1.log, '2026-11-25') === 139 && r1.log.length === log.length, [dayTotal(r1.log, '2026-11-25'), r1.applied]);
+  check('the added entry is marked as from the computer, and the old log is not changed', r1.log.find(x => x.id === 'pc1').fromComputer === true && log.length === 5 && log[0].servings === 2);
+  const r2 = applyFoodOps(r1.log, steps.slice(0, 2));
+  check('applying the same steps again changes nothing (no double chicken)', dayTotal(r2.log, '2026-11-25') === 139 && r2.log.filter(x => x.id === 'pc1').length === 1);
+  const r3 = applyFoodOps(log, [{ id: 'a', type: 'add', entry: pc }, { id: 'b', type: 'remove', entryId: 'pc1' }]);
+  check('added then deleted on the computer: nothing lands', !r3.log.some(x => x.id === 'pc1') && r3.applied.length === 2);
+  const badSteps = [
+    { id: 'x1', type: 'add', entry: { ...pc, id: 'big', g: 400 } },
+    { id: 'x2', type: 'add', entry: { ...pc, id: 'neg', servings: -1 } },
+    { id: 'x3', type: 'add', entry: { ...pc, id: 'nodate', date: 'today' } },
+    { id: 'x4', type: 'set', entryId: log[0].id, g: 0 },
+    { id: 'x5', type: 'eat', entryId: log[0].id },
+    { id: 'x6', type: 'add', entry: { ...pc, id: 'many', servings: 8 } }
+  ];
+  const r4 = applyFoodOps(log, badSteps);
+  check('steps with numbers that cannot be right are left out (400 g, -1 servings, no date, 0 g, unknown, 8 x 50 g)', r4.bad.join() === 'x1,x2,x3,x4,x5,x6' && r4.applied.length === 0 && dayTotal(r4.log, '2026-11-25') === 113, r4.bad);
+  check('a step needs an id', !validFoodOp({ type: 'remove', entryId: 'a' }) && validFoodOp({ id: 'z', type: 'remove', entryId: 'a' }));
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');

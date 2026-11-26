@@ -4,8 +4,9 @@
 // The repo name and token live in IndexedDB on the device (kv "sync"). They are never part of a backup file,
 // and nothing here writes to the app's own repo.
 
-import { kvGet, kvSet, kvDel, exportAll, importAll, onDataChange } from './store.js';
+import { kvGet, kvSet, kvDel, exportAll, importAll, onDataChange, getFoodLog, setFoodLog } from './store.js';
 import { runUpgrades } from './upgrade.js';
+import { applyFoodOps } from './nutrition.js';
 
 export const SYNC_FILE = 'tracker-data.json';
 // v1.10: Garmin. A job in the same private repo writes GARMIN_FILE; the phone reads it and adds the runs.
@@ -15,6 +16,9 @@ export const GARMIN_JOB = '.github/workflows/garmin.yml';
 export const GARMIN_SECRET = 'GARMIN_PERSONAL_API_KEY';
 export const GARMIN_KEY_PAGE = 'https://connect.garmin.com/app/settings/personalApiToken';
 export const COACH_FILE = 'coach.json'; // v1.9: written by the coach review, read by the app
+// v1.20.2: food tapped on a computer that only views. The computer adds its steps; the phone applies them, uploads,
+// then takes them out. The phone's tracker-data.json stays the one copy of record.
+export const FOOD_INBOX = 'food-from-computer.json';
 const API = 'https://api.github.com';
 
 // ---- pure helpers (tested in node) ----
@@ -109,6 +113,7 @@ export async function pushNow(appVersion, planVersion) {
   const cfg = await getSync();
   if (!cfg || !cfg.repo || !cfg.token) return { ok: false, skipped: true };
   try {
+    const clearIds = (await kvGet('foodOpsToClear')) || []; // v1.20.2: computer steps already in this upload
     const data = await exportAll(appVersion, planVersion);
     const content = toBase64(JSON.stringify(data));
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -118,6 +123,7 @@ export async function pushNow(appVersion, planVersion) {
       const put = await call(cfg, `/contents/${SYNC_FILE}`, { method: 'PUT', body: { message: `Tracker data ${data.exportedAt}`, content, ...(sha ? { sha } : {}) } });
       if (put.ok) {
         await saveSync({ dirty: false, lastPushedAt: data.exportedAt, lastError: null });
+        if (clearIds.length) await clearFoodInbox(cfg, clearIds).catch(() => null);
         return { ok: true, at: data.exportedAt, sessions: data.sessions.length, runs: data.runs.length };
       }
       if (put.status !== 409 && put.status !== 422) throw new Error(explainStatus(put.status)); // 409: the file changed under us, read it again
@@ -135,6 +141,9 @@ export async function pullNow() {
   const cfg = await getSync();
   if (!cfg || !cfg.repo || !cfg.token) return { ok: false, skipped: true };
   try {
+    // v1.20.2: the computer's food steps are read before the phone's file, so a step the phone takes out after
+    // uploading is never missing from both
+    const inbox = cfg.role === 'viewer' ? await readFoodInbox(cfg).catch(() => null) : null;
     const res = await call(cfg, `/contents/${SYNC_FILE}`, { raw: true });
     if (res.status === 404) {
       const probe = await call(cfg, '');
@@ -151,7 +160,9 @@ export async function pullNow() {
       // v1.18.1: the phone's copy may come from an older version (it updates when it next opens)
       await runUpgrades().catch(() => null);
     }
+    if (cfg.role === 'viewer' && (changed || (inbox && inbox.ops.length))) await overlayFoodOps(inbox ? inbox.ops : []);
     await saveSync({ lastPulledExport: data.exportedAt, lastPulledAt: new Date().toISOString(), lastError: null });
+    if (cfg.role === 'viewer') sendFoodOps().catch(() => null);
     return { ok: true, changed, at: data.exportedAt, sessions: (data.sessions || []).length, runs: (data.runs || []).length };
   } catch (e) {
     const err = offline(e);
@@ -178,6 +189,115 @@ export async function pullCoach() {
   } catch (e) {
     return { ok: false, error: String(offline(e).message || e), file: (await kvGet('coach')) || null };
   }
+}
+
+// ---- v1.20.2: food from the computer ----
+
+async function readFoodInbox(cfg) {
+  const res = await call(cfg, `/contents/${FOOD_INBOX}`);
+  if (res.status === 404) return { ops: [], sha: undefined };
+  if (!res.ok) throw new Error(explainStatus(res.status));
+  const meta = await res.json();
+  let file = null;
+  try { file = JSON.parse(fromBase64(meta.content || '')); } catch (e) { file = null; }
+  return { ops: file && Array.isArray(file.ops) ? file.ops : [], sha: meta.sha };
+}
+
+/** Read, change, write back with the sha it read; GitHub refuses a write over a newer copy (409) and it reads again. */
+async function editFoodInbox(cfg, change, message) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { ops, sha } = await readFoodInbox(cfg);
+    const next = change(ops);
+    if (!next) return { ok: true, unchanged: true };
+    const body = { app: 'CamsTrainingTracker', file: 'food steps from the computer, applied by the phone', ops: next };
+    const put = await call(cfg, `/contents/${FOOD_INBOX}`, { method: 'PUT', body: { message, content: toBase64(JSON.stringify(body, null, 1)), ...(sha ? { sha } : {}) } });
+    if (put.ok) return { ok: true };
+    if (put.status !== 409 && put.status !== 422) throw new Error(explainStatus(put.status));
+  }
+  throw new Error('GitHub kept refusing the food upload.');
+}
+
+/** Computer: keep a step on this computer and send it. A step that cannot go yet waits and goes with the next one. */
+export async function queueFoodOp(op) {
+  const step = { id: `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, at: new Date().toISOString(), ...op };
+  const box = (await kvGet('foodOutbox')) || [];
+  box.push(step);
+  await kvSet('foodOutbox', box); // kept here first, so a failed send loses nothing
+  return sendFoodOps().catch(() => ({ ok: false }));
+}
+
+let sending = null;
+/** Computer: send the waiting steps. Returns { ok, waiting }. */
+export function sendFoodOps() {
+  if (sending) return sending.then(() => sendFoodOps());
+  sending = (async () => {
+    const cfg = await getSync();
+    const box = (await kvGet('foodOutbox')) || [];
+    if (!cfg || cfg.role !== 'viewer' || !cfg.repo || !cfg.token || !box.length) return { ok: true, waiting: box.length };
+    try {
+      await editFoodInbox(cfg, ops => [...ops, ...box.filter(b => !ops.some(o => o.id === b.id))], `Food from the computer ${new Date().toISOString()}`);
+      const left = ((await kvGet('foodOutbox')) || []).filter(b => !box.some(x => x.id === b.id));
+      await kvSet('foodOutbox', left);
+      await kvSet('foodOutboxError', null);
+      return { ok: true, waiting: left.length };
+    } catch (e) {
+      const msg = String(offline(e).message || e);
+      await kvSet('foodOutboxError', msg);
+      return { ok: false, error: msg, waiting: box.length };
+    }
+  })();
+  return sending.finally(() => { sending = null; });
+}
+
+/** Computer: how many taps are still on this computer only, and why. */
+export async function foodOutboxState() {
+  return { waiting: ((await kvGet('foodOutbox')) || []).length, error: (await kvGet('foodOutboxError')) || null };
+}
+
+/** Computer: lay the steps (from the repo and the ones still here) over the phone's copy just downloaded. */
+async function overlayFoodOps(repoOps) {
+  const box = (await kvGet('foodOutbox')) || [];
+  const ops = [...repoOps, ...box.filter(b => !repoOps.some(o => o.id === b.id))];
+  if (!ops.length) return;
+  const { log } = applyFoodOps(await getFoodLog(), ops);
+  await setFoodLog(log);
+}
+
+/** Phone: apply the computer's steps it has not applied yet. They go up with the next upload, then come out of the file. */
+export async function pullFoodInbox() {
+  const cfg = await getSync();
+  if (!cfg || cfg.role !== 'phone' || !cfg.repo || !cfg.token) return { ok: false, skipped: true };
+  try {
+    const { ops } = await readFoodInbox(cfg);
+    const done = (await kvGet('foodOpsApplied')) || [];
+    const todo = ops.filter(o => o && o.id && !done.includes(o.id));
+    const toClear = (await kvGet('foodOpsToClear')) || [];
+    if (!todo.length) {
+      // steps applied before whose upload went through but were not taken out yet
+      const stale = ops.filter(o => done.includes(o.id) && !toClear.includes(o.id)).map(o => o.id);
+      if (stale.length) await kvSet('foodOpsToClear', [...toClear, ...stale]);
+      return { ok: true, added: 0, removed: 0, changed: 0 };
+    }
+    const before = await getFoodLog();
+    const { log, applied, bad } = applyFoodOps(before, todo);
+    const ids = [...applied, ...bad];
+    await kvSet('foodOpsApplied', [...done, ...ids].slice(-500));
+    await kvSet('foodOpsToClear', [...toClear, ...ids]);
+    const add = todo.filter(o => o.type === 'add' && applied.includes(o.id) && !before.some(e => e.id === o.entry.id)).length;
+    const rem = todo.filter(o => o.type === 'remove' && applied.includes(o.id)).length;
+    const set = todo.filter(o => o.type === 'set' && applied.includes(o.id)).length;
+    await setFoodLog(log); // marks the phone's copy changed, so it uploads, and then the steps come out
+    return { ok: true, added: add, removed: rem, changed: set, bad: bad.length };
+  } catch (e) {
+    return { ok: false, error: String(offline(e).message || e) };
+  }
+}
+
+/** Phone, after an upload that holds them: take the applied steps out of the computer's file. */
+async function clearFoodInbox(cfg, ids) {
+  await editFoodInbox(cfg, ops => (ops.some(o => ids.includes(o.id)) ? ops.filter(o => !ids.includes(o.id)) : null), 'Phone has the food from the computer');
+  const left = ((await kvGet('foodOpsToClear')) || []).filter(id => !ids.includes(id));
+  await kvSet('foodOpsToClear', left);
 }
 
 // ---- Garmin (v1.10) ----
