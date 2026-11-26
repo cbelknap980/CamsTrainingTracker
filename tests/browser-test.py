@@ -343,7 +343,7 @@ with sync_playwright() as p:
     page.click('.day-row[data-day="3"]'); page.wait_for_selector('.plan-chips')
     check('v1.18.3 plan: tapping Wednesday opens Sessions on Lift 2, one session shown', page.locator('#plan-seg button.on').get_attribute('data-pane') == 'sessions' and page.locator('.plan-chip.on').get_attribute('data-pick') == 'lift2' and page.locator('.plan-session').count() == 1 and page.locator('.plan-session').get_attribute('data-session') == 'lift2', page.locator('.plan-chip.on').inner_text())
     page.click('.plan-chip[data-pick="runs"]'); page.wait_for_selector('#plan-runs')
-    check('v1.18.3 plan: Runs chip shows the two runs', page.locator('#plan-runs p').count() == 2 and page.locator('.plan-session').count() == 0)
+    check('v1.18.3 plan: Runs chip shows the two runs (v1.24.0: as rows, with the 5K check-ins)', page.locator('#plan-runs .run-row').count() == 2 and page.locator('#plan-checkins .rk-chip').count() == 3 and page.locator('.plan-session').count() == 0)
     page.click('#plan-seg button[data-pane="goals"]'); page.wait_for_selector('.goal-list')
     check('v1.9 plan: goals in order and the phases', page.locator('.goal-list li').count() == 10 and page.locator('.phase-row').count() == 5, page.locator('.goal-list li').count())
     page.click('#plan-seg button[data-pane="coach"]'); page.wait_for_selector('#checkin')

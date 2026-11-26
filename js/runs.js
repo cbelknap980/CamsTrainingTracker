@@ -287,6 +287,94 @@ export function weeklyMiles(runs, settings, rules, weeks = 12) {
   return rows;
 }
 
+// ---- v1.24.0: each run over the 12 weeks (Cameron, Nov 26: "lets put these 5k tests in the plan as defined points...
+// show the plan over the 12 week sprints (similar to how we show the plan for weights)"). Read by run-detail.js. ----
+
+/** The day of plan week `week` a run falls on: its calendar day (Saturday for the weekend long run). ISO date. */
+export function runDay(plan, settings, runId, week) {
+  const dow = Number(Object.keys(plan.calendar || {}).find(k => plan.calendar[k] === runId));
+  const d = parseISODate(weekRange(settings, week).start);
+  d.setDate(d.getDate() + ((dow + 6) % 7));
+  return toISODate(d);
+}
+
+const testWeek = (t, settings) => t.week || weekNumber(parseISODate(t.date), settings.startDate);
+
+/** The plan's 5K check-ins (run.tests) with where each stands: [{ week, date, name, why, result: a fiveKTests row or null }]. */
+export function checkIns(plan, settings, runs, run) {
+  const done = fiveKTests(runs, run.fiveKCheck).map(t => ({ ...t, week: testWeek(t, settings) }));
+  return (run.tests || []).map(t => ({
+    week: t.week, date: runDay(plan, settings, run.id, t.week), name: t.name, why: t.why,
+    result: done.filter(x => x.week === t.week).pop() || null
+  }));
+}
+
+/**
+ * Where the 5K could be each week to week 12, from the latest good check-in, in three cases: run.projection.perWeek
+ * is the share faster a week for each (doing well, steady, struggling). Null before the first good check-in.
+ * returns { from: { week, seconds, date }, cases: { well: [{ week, seconds }], steady: [...], struggle: [...] } }
+ */
+export function fiveKProjection(run, runs, settings) {
+  const cfg = run.projection;
+  if (!cfg || !cfg.perWeek) return null;
+  const good = fiveKTests(runs, run.fiveKCheck).filter(t => !t.flagged);
+  const last = good[good.length - 1];
+  if (!last) return null;
+  const week = Math.max(1, Math.min(12, testWeek(last, settings)));
+  const cases = {};
+  for (const [k, rate] of Object.entries(cfg.perWeek)) {
+    cases[k] = [];
+    for (let w = week; w <= 12; w++) cases[k].push({ week: w, seconds: Math.round(last.seconds * (1 - rate) ** (w - week)) });
+  }
+  return { from: { week, seconds: last.seconds, date: last.date }, cases };
+}
+
+/**
+ * Run 1 week by week: [{ week, date, kind: 'intervals' | 'test', text, reps, hardMin, pace, paceFrom, waitsFor, done }].
+ * pace is what that week asks, from the latest good 5K before it (or the plan's pace before the first one). A week
+ * after a check-in that has not happened yet gets pace null and waitsFor that check-in's week: its time sets the pace.
+ */
+export function intervalPlan(plan, settings, runs, run, today) {
+  const todayIso = toISODate(today);
+  const tested = fiveKTests(runs, run.fiveKCheck).map(x => testWeek(x, settings));
+  // check-in weeks still to come (not over yet, no 5K logged in them)
+  const ahead = (run.tests || []).map(t => t.week).filter(tw => !tested.includes(tw) && weekRange(settings, tw).end >= todayIso);
+  const out = [];
+  for (let w = 1; w <= 12; w++) {
+    const { start, end } = weekRange(settings, w);
+    const p = prescription(run, w, (runs || []).filter(r => r.date < start));
+    const hit = (runs || []).filter(r => r.date >= start && r.date <= end && countsFor(plan, r, run)).sort((a, b) => (a.date < b.date ? -1 : 1))[0] || null;
+    // a check-in still to come before this week: its time will set this week's pace
+    const waits = ahead.filter(tw => tw < w);
+    const waitsFor = p.kind === 'intervals' && waits.length ? waits[waits.length - 1] : null;
+    out.push({
+      week: w, date: runDay(plan, settings, run.id, w), kind: p.kind, name: p.kind === 'test' ? p.name : null,
+      text: p.kind === 'test' ? p.name : `${p.reps} × ${p.hardMin} min`, reps: p.reps || null, hardMin: p.hardMin || null,
+      pace: waitsFor ? null : (p.pace || null), paceFrom: waitsFor ? null : (p.paceFrom || null), waitsFor, done: hit
+    });
+  }
+  return out;
+}
+
+/**
+ * The long run week by week: [{ week, start, end, date, miles, done, past, now }]. Past weeks and this one: what the
+ * app asked (the 10% rule on the 30 days before the week). Later weeks: the same rule run forward as if each long
+ * run were done at its distance on its Saturday. done is the run logged that week (a ski day counts, with no miles).
+ */
+export function longRunPlan(plan, settings, runs, run, today) {
+  const todayIso = toISODate(today);
+  const sim = (runs || []).slice();
+  const out = [];
+  for (let w = 1; w <= 12; w++) {
+    const { start, end } = weekRange(settings, w);
+    const t = longRunTarget(run, sim.filter(r => r.date < start), start);
+    const hit = (runs || []).filter(r => r.date >= start && r.date <= end && countsFor(plan, r, run)).sort((a, b) => (b.distance || 0) - (a.distance || 0))[0] || null;
+    if (!hit && end >= todayIso) sim.push({ date: runDay(plan, settings, run.id, w), type: run.type, distance: t.miles, planId: run.id });
+    out.push({ week: w, start, end, date: runDay(plan, settings, run.id, w), miles: t.miles, done: hit, past: end < todayIso, now: start <= todayIso && todayIso <= end });
+  }
+  return out;
+}
+
 // ---- Garmin ----
 
 /** The list of activities in a Garmin file, whatever wraps it. */

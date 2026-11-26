@@ -771,10 +771,10 @@ body.in-session .toast-msg { white-space: normal; overflow: visible; max-width: 
 
 /* v1.18.11: Plan session list, one line a lift (Cameron, Nov 25: "The base view should just be weight and sets. Make
    more compact... provide a button or [cue] to show I can click in"). Name, sets x reps, weight, a chevron. */
-.plan-session .ps-head { display: flex; align-items: center; gap: 8px; }
-.plan-session .ps-head h2 { margin: 0; font-size: 1.2rem; }
-.plan-session .ps-sub { font-size: var(--t-small); margin-top: 2px; }
-.plan-session .ps-hint { display: flex; align-items: center; gap: 6px; font-size: var(--t-small); color: var(--muted); margin: 10px 0 0; }
+.plan-session .ps-head, .plan-runs .ps-head { display: flex; align-items: center; gap: 8px; }
+.plan-session .ps-head h2, .plan-runs .ps-head h2 { margin: 0; font-size: 1.2rem; }
+.plan-session .ps-sub, .plan-runs .ps-sub { font-size: var(--t-small); margin-top: 2px; }
+.plan-session .ps-hint, .plan-runs .ps-hint { display: flex; align-items: center; gap: 6px; font-size: var(--t-small); color: var(--muted); margin: 10px 0 0; }
 .ex-list { display: flex; flex-direction: column; }
 .ex-blk { font-size: 0.82rem; font-weight: 700; color: var(--accent); padding: 12px 0 2px; }
 .ex-blk.ex-blk-quiet { color: var(--muted); font-weight: 600; }
@@ -1024,3 +1024,46 @@ body.computer .nut-grid { grid-template-columns: repeat(auto-fill, minmax(150px,
 .pace.is-slow .pace-fill { background: var(--accent); }
 .player.tight-3 .pace-slow { margin-top: 4px; font-size: 0.8rem; }
 .slow-tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: var(--t-label); font-weight: 700; vertical-align: middle; }
+
+/* ---- v1.24.0: the runs over the 12 weeks (run-detail.js), run rows on the Plan list, 5K check-ins under the week strip ---- */
+.wk-mark { grid-row: 2; text-align: center; font-size: 0.62rem; font-weight: 750; line-height: 1; letter-spacing: 0.02em; color: var(--accent); min-height: 0; }
+.wk-mark.on { padding: 3px 0; border-radius: 5px; background: var(--accent-soft); }
+.wk-strip-wide .wk-mark { grid-row: 3; font-size: 0.68rem; }
+.run-row { grid-template-columns: minmax(0, 1fr) auto minmax(4.4rem, auto) 28px; }
+.run-row .ex-wt { text-align: right; white-space: nowrap; }
+.run-row-day { font-weight: 500; font-size: var(--t-small); }
+.rk-head { display: flex; justify-content: space-between; align-items: baseline; margin: 14px 0 6px; }
+.rk-chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.rk-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 48px; padding: 7px 9px; border-radius: 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--t-small); text-align: left; cursor: pointer; }
+.rk-chip span { color: var(--muted); }
+.rk-chip.done span { color: var(--text); font-weight: 700; }
+.rk-chip.missed { border-left-color: var(--muted); }
+.rk-chip:active { transform: scale(0.97); }
+.rp-strip { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin: 4px 0 10px; }
+.rp-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 0; min-height: 46px; padding: 5px 0; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-1); color: var(--muted); font: inherit; font-size: 0.66rem; font-weight: 600; line-height: 1.1; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.rp-cell b { font-size: 0.8rem; color: var(--text); }
+.rp-cell.test { background: var(--accent-soft); border-color: rgba(245, 165, 36, 0.45); color: var(--accent); font-weight: 800; }
+.rp-cell.done { box-shadow: inset 0 -3px 0 var(--good); }
+.rp-cell.now b { text-decoration: underline; text-underline-offset: 2px; }
+.rp-cell.on { border-color: rgba(255, 255, 255, 0.7); background: var(--surface-3); }
+.rp-cell.test.on { background: rgba(245, 165, 36, 0.28); border-color: var(--accent); }
+.rp-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rc-sub { margin: -4px 0 8px; min-height: 1.3em; }
+.rc-wait { margin: 2px 0 6px; padding: 10px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); }
+.rc-band { fill: rgba(245, 165, 36, 0.08); }
+.lc-wk.rc-mark { fill: #f5a524; font-weight: 700; }
+.rc-done { stroke: #20252d; stroke-width: 2; }
+.rc-done-label { fill: #f3f4f6; font-size: 10px; font-weight: 650; }
+.rc-key { display: flex; align-items: center; gap: 4px; }
+.rc-key i { font-style: normal; }
+.rc-key-5k { font-size: 0.62rem; font-weight: 800; color: var(--accent); background: var(--accent-soft); padding: 2px 5px; border-radius: 5px; }
+.rc-key-line { display: inline-block; width: 14px; height: 3px; border-radius: 2px; background: #5b8fe0; }
+.rc-key-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #f3f4f6; margin-left: 6px; }
+.rc-table tr.rc-test td:nth-child(3) { color: var(--accent); font-weight: 650; }
+.rc-table tr.on td { color: var(--accent); font-weight: 700; }
+.rc-checks { display: grid; }
+.rc-check { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 42px; border-bottom: 1px solid var(--line); font-size: var(--t-small); }
+.rc-check:last-child { border-bottom: 0; }
+.rc-next { color: var(--accent); font-weight: 700; }
+.rc-flag { color: #fcd34d; }
+body.computer .modal .sheet.sheet-page:has(#run-sheet) { max-width: 620px; }

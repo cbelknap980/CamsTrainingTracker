@@ -14,7 +14,8 @@ import { nextNumbers, nextWeekOf } from './lift-goal.js';
 import { openLiftDetail } from './lift-detail.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
 import { TAGS, thread } from './coach.js';
-import { countsFor, weekRuns, weekRange, openRunDays, runLine } from './runs.js';
+import { countsFor, weekRuns, weekRange, openRunDays, runLine, intervalPlan, longRunPlan, checkIns, fmtSeconds } from './runs.js';
+import { openRunDetail, nextRow } from './run-detail.js';
 import { stationFor, emomMinutesFor } from './builder.js';
 
 const DAYS = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['0', 'Sun']];
@@ -42,9 +43,17 @@ function weeksCard(plan, week) {
   }
   return el('div', { class: 'card', id: 'plan-weeks' }, [
     el('h3', {}, '12 weeks'),
-    el('div', { class: 'wk-strip' }, cells),
+    el('div', { class: 'wk-strip' }, cells.concat(testMarks(plan, 2))),
     phaseList(plan, week)
   ]);
+}
+
+/** v1.24.0: the 5K check-in weeks as marks under the week strip (one per column, empty where there is none). */
+function testMarks(plan, row) {
+  const weeks = new Set((plan.runs || []).flatMap(r => (r.tests || []).map(t => t.week)));
+  const marks = [];
+  for (let w = 1; w <= 12; w++) marks.push(el('div', { class: 'wk-mark' + (weeks.has(w) ? ' on' : ''), style: `grid-column:${w}${row ? `;grid-row:${row}` : ''}`, ...(weeks.has(w) ? { title: `Week ${w}: 5K check-in`, 'data-test-week': w } : { 'aria-hidden': 'true' }) }, weeks.has(w) ? '5K' : ''));
+  return marks;
 }
 
 function thisWeekCard(plan, settings, sessions, runs, today, week, onPick) {
@@ -59,12 +68,13 @@ function thisWeekCard(plan, settings, sessions, runs, today, week, onPick) {
     const id = plan.calendar[dow];
     const lift = id ? plan.sessions.find(s => s.id === id) : null;
     const run = id ? plan.runs.find(r => r.id === id) : null;
+    const test = run && (run.tests || []).find(t => t.week === week);
     const done = lift ? sessions.find(s => s.sessionId === id && s.week === week) : (run ? runs.find(r => r.date >= toISODate(start) && r.date <= weekEnd && countsFor(plan, r, run)) : null); // v1.12: a run done on another day of the week still counts; v1.18.1: a Garmin run only once he counts it
     const status = done ? 'done' : (iso < todayIso && (lift || run) ? 'missed' : '');
     const pick = onPick && (lift || run) ? () => onPick(lift ? lift.id : 'runs') : null;
     return el('div', { class: 'day-row' + (iso === todayIso ? ' today' : '') + (pick ? ' tappable' : ''), 'data-day': dow, ...(pick ? { role: 'button', tabindex: '0', onclick: pick, onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } } } : {}) }, [
       el('span', { class: 'day-name' }, d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })),
-      el('span', {}, lift ? lift.name : (run ? run.name : el('span', { class: 'muted' }, 'Rest or make-up day'))),
+      el('span', {}, lift ? lift.name : (run ? (test ? `${run.name.split(':')[0]}: ${test.name}` : run.name) : el('span', { class: 'muted' }, 'Rest or make-up day'))),
       el('span', { class: 'day-status ' + status }, status === 'done' ? '✓ done' : (status === 'missed' ? 'not logged' : (iso === todayIso ? 'today' : '')))
     ]);
   });
@@ -152,10 +162,47 @@ function sessionCard(data, s, onEx) {
   ]);
 }
 
-function runsCard(plan) {
-  return el('div', { class: 'card', id: 'plan-runs' }, [
-    el('h3', {}, 'Runs'),
-    ...plan.runs.map(r => el('p', {}, [el('b', {}, `${r.name} `), el('span', { class: 'muted' }, `${r.day} · ${r.plannedMinutes} min. ${r.note}`)]))
+/**
+ * v1.24.0 (Cameron, Nov 26: "lets put these 5k tests in the plan as defined points... show the plan over the 12 week
+ * sprints (similar to how we show the plan for weights)"): the runs as rows like the lifts, what each asks next and a
+ * chevron into its 12 weeks (run-detail.js), then the 5K check-ins as fixed points, each one tap from its week.
+ */
+function runsCard(data, onRun) {
+  const { plan, settings, runs } = data;
+  const today = data.today || new Date();
+  const week = Math.max(1, Math.min(12, weekNumber(today, settings.startDate)));
+  const rows = [];
+  let testRun = null;
+  for (const run of plan.runs || []) {
+    const list = run.intervals ? intervalPlan(plan, settings, runs, run, today) : (run.distance ? longRunPlan(plan, settings, runs, run, today) : null);
+    if (!list) continue;
+    if (run.tests && run.tests.length) testRun = run;
+    const n = nextRow(list, settings, today);
+    const label = run.name.includes(': ') ? run.name.split(': ')[1] : run.name;
+    let name = label, main = '–', side = '';
+    if (n && n.kind === 'test') { name = '5K check-in'; main = '3.1 mi'; side = monthDay(n.date); }
+    else if (n && n.kind === 'intervals') { main = `${n.reps} × ${n.hardMin} min`; side = n.pace || (n.waitsFor ? 'pace: 5K' : ''); }
+    else if (n && n.miles != null) { name = 'Long run'; main = `${n.miles} mi`; side = run.hr && run.hr.easy ? `HR ${run.hr.easy[0]}-${run.hr.easy[1]}` : 'easy'; }
+    const tap = onRun ? () => onRun(run.id) : null;
+    rows.push(el(tap ? 'button' : 'div', { class: 'ex-row run-row', 'data-run': run.id, ...(tap ? { type: 'button', onclick: tap, 'aria-label': `${name}, ${main}${side ? `, ${side}` : ''}. Open for its 12 weeks.` } : {}) }, [
+      el('span', { class: 'ex-name' }, [name, el('span', { class: 'muted run-row-day' }, n ? (n.kind === 'test' || n.kind === 'intervals' ? ` · ${run.day.slice(0, 3)}` : ' · weekend') : '')]),
+      el('span', { class: 'ex-sets' }, main),
+      el('span', { class: 'ex-wt' + (side ? '' : ' muted') }, side || '–'),
+      tap ? el('span', { class: 'ex-go' }, chevron()) : null
+    ]));
+  }
+  const checks = testRun ? checkIns(plan, settings, runs, testRun) : [];
+  const todayIso = toISODate(today);
+  const chips = checks.map(c => el(onRun ? 'button' : 'div', { class: 'rk-chip' + (c.result ? ' done' : (c.date < todayIso ? ' missed' : '')), 'data-test-week': c.week, ...(onRun ? { type: 'button', onclick: () => onRun(testRun.id, c.week) } : {}) }, [
+    el('b', {}, `Week ${c.week}`), el('span', {}, c.result ? fmtSeconds(c.result.seconds) : monthDay(c.date))
+  ]));
+  return el('div', { class: 'card plan-runs', id: 'plan-runs' }, [
+    el('div', { class: 'ps-head' }, [el('h2', {}, 'Runs'), infoBtn('Runs', plan.runs.map(r => `${r.name}. ${r.note}`), 'How the runs work')]),
+    el('div', { class: 'muted ps-sub' }, `Intervals Tuesday, long run at the weekend · week ${week}`),
+    onRun ? el('div', { class: 'ps-hint' }, ['Next time. Tap a run for its 12 weeks ', el('span', { class: 'ex-go mini' }, chevron())]) : null,
+    el('div', { class: 'ex-list' }, rows),
+    checks.length ? el('div', { class: 'rk-head' }, [el('b', {}, '5K check-ins'), el('span', { class: 'muted small' }, testRun.goal && testRun.goal.fiveK ? `Goal ${testRun.goal.fiveK}` : '')]) : null,
+    checks.length ? el('div', { class: 'rk-chips', id: 'plan-checkins' }, chips) : null
   ]);
 }
 
@@ -292,7 +339,7 @@ export function weekItems(data, week, today) {
       return;
     }
     const row = id && runRows.find(r => r.id === id);
-    if (row) out.push({ kind: 'run', id, iso, dow: Number(dow), name: row.name, row, status: { done: 'done', today: 'today', open: 'missed', later: 'later' }[row.status] });
+    if (row) out.push({ kind: 'run', id, iso, dow: Number(dow), name: row.plan.kind === 'test' ? `${row.name.split(':')[0]}: ${row.plan.name}` : row.name, row, status: { done: 'done', today: 'today', open: 'missed', later: 'later' }[row.status] });
   });
   return out;
 }
@@ -406,7 +453,7 @@ function stripCard(plan, settings, week) {
     const { start } = weekRange(settings, w);
     cells.push(el('div', { class: `wk-cell ph-${ph.id}` + (w === week ? ' now' : '') + (w < week ? ' past' : ''), style: `grid-column:${w}`, title: `Week ${w}: ${ph.name}, from ${fmtDate(start)}` }, [el('b', {}, String(w)), el('small', {}, monthDay(start))]));
   }
-  return el('div', { class: 'card plan-strip', id: 'plan-weeks' }, [el('div', { class: 'wk-strip wk-strip-wide' }, cells)]);
+  return el('div', { class: 'card plan-strip', id: 'plan-weeks' }, [el('div', { class: 'wk-strip wk-strip-wide' }, cells.concat(testMarks(plan, 3)))]);
 }
 
 /** Change 10: the text that reads the same every week, behind one fold. */
@@ -458,7 +505,7 @@ export function renderPlan(view, data, opts = {}) {
     up ? todayCard(data, up, onEx) : null,
     restOfWeek(data, items, up && up.item, onEx)
   ]);
-  const rail = el('div', { class: 'plan-rail' }, [checkinCard(data, opts), goalsCard(goals, false), aboutCard(plan, goals, raw)]);
+  const rail = el('div', { class: 'plan-rail' }, [checkinCard(data, opts), runsCard(data, (id, week) => openRunDetail(data, id, { ...opts, week })), goalsCard(goals, false), aboutCard(plan, goals, raw)]);
   view.appendChild(el('div', { class: 'plan-cols' }, [left, rail]));
   const chat = document.getElementById('chat-list');
   if (chat) chat.scrollTop = chat.scrollHeight;
@@ -496,7 +543,7 @@ function renderPhone(view, data, opts) {
       return el('button', { type: 'button', class: 'plan-chip' + (id === pick ? ' on' : ''), 'data-pick': id, 'aria-pressed': String(id === pick), onclick: () => go('sessions', id) }, s ? s.name.split(':')[0] : 'Runs');
     })));
     const s = plan.sessions.find(x => x.id === pick);
-    pane.append(s ? sessionCard(data, s, (id, sessionId) => openLiftDetail(data, id, { ...opts, sessionId })) : runsCard(plan));
+    pane.append(s ? sessionCard(data, s, (id, sessionId) => openLiftDetail(data, id, { ...opts, sessionId })) : runsCard(data, (id, week) => openRunDetail(data, id, { ...opts, week })));
   } else if (ui.pane === 'goals') {
     pane.append(goalsCard(goals), weeksCard(plan, week));
   } else {
