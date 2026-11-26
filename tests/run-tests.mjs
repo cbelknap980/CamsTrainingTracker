@@ -9,6 +9,7 @@ import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks, m
 import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../js/coach.js';
 import { applyRestAdjust } from '../js/builder.js';
 import { intervalPlan, longRunPlan, checkIns, fiveKProjection, runDay, fmtSeconds } from '../js/runs.js';
+import { planCheck, intervalMinutes, workoutBlocks, runGoals, inDays, planRunOf } from '../js/runs.js';
 import { fiveKSeconds, fiveKTests, paceFrom5k, vdotFrom5k, parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays, needsCredit, countsFor, creditOptions, countAs, keepAsSide, countCandidates, weekRange, countsMiles } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
 import { numberFlag, flaggedGroups, applyNumberFix, rateSavedSet, rerunLift, impossibleNumber } from '../js/sanity.js';
@@ -1706,6 +1707,52 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   const n2 = sp.slowNudge({ ...curl, record: { secs: { plan: 48, took: 25 } } }, plan.exercises.incline_curl, false);
   const n3 = sp.slowNudge({ ...tl.steps[first('oh_tri_ext')], record: { secs: { plan: 48, took: 46 } } }, plan.exercises.oh_tri_ext, false);
   check('Done well before the timer on a slow lift says so once per lift; on time says nothing', /slow lift: 3 s down, pause with straight arms. Use the whole timer/.test(n1) && n2 === '' && n3 === '', [n1, n2, n3]);
+}
+
+// ---- v1.25.0: the Runs tab cleaned up (Cameron, Nov 26). Plan check, intervals as blocks, the goals card. ----
+{
+  console.log('v1.25.0 Runs tab: plan check, blocks, goals');
+  const run1 = plan.runs.find(r => r.id === 'run1'), run2 = plan.runs.find(r => r.id === 'run2');
+  const st = { ...settings, startDate: '2026-11-16' };
+  const ask = w => prescription(run1, w, [], '2026-11-16');
+  check('intervals take warm-up + reps + cool-down: weeks 1-4 28 min, 5-8 33, 9-12 34 (easy 2-3 counts as 2.5)', intervalMinutes(run1, ask(1)) === 28 && intervalMinutes(run1, ask(5)) === 33 && intervalMinutes(run1, ask(9)) === 34, [intervalMinutes(run1, ask(1)), intervalMinutes(run1, ask(5)), intervalMinutes(run1, ask(9))]);
+  const bl = workoutBlocks(run1, ask(1));
+  check('week 1 as blocks: warm-up, 5 fast and 5 easy, cool-down, 28 min in all', bl.length === 12 && bl[0].kind === 'warm' && bl[11].kind === 'cool' && bl.filter(b => b.kind === 'fast').length === 5 && bl.reduce((m, b) => m + b.min, 0) === 28, bl);
+  check('no blocks for a 5K check-in week or the long run', workoutBlocks(run1, ask(3)) === null && workoutBlocks(run2, prescription(run2, 2, [], '2026-11-23')) === null);
+  // made-up runs shaped like his first two weeks (his own log never goes in the app repo)
+  const his = [
+    { id: 'r-1', source: 'manual', date: '2026-11-18', type: 'Intervals', planId: 'run1', distance: 2.7, minutes: 27, hr: 160, week: 1 },
+    { id: 'r-2', source: 'manual', date: '2026-11-22', type: 'Long run', planId: 'run2', distance: 3.6, minutes: 36, hr: 158, week: 1 },
+    { id: 'r-3', source: 'manual', date: '2026-11-26', type: 'Intervals', planId: 'run1', distance: 3.4, minutes: 61, hr: 135, week: 2 }
+  ];
+  const pc = r => planCheck(plan, rules, st, his, r);
+  check('Nov 18 intervals, 27 of 28 min: on plan', pc(his[0]).level === 'good' && pc(his[0]).label === 'On plan' && pc(his[0]).detail === '27 min of about 28', pc(his[0]));
+  check('Nov 22 long run, 3.6 of the 3.5 mi week 1 asked: on plan, and no heart rate check before the Nov 26 heart rates', pc(his[1]).level === 'good' && pc(his[1]).hr === null && pc(his[1]).detail === '3.6 of 3.5 mi', pc(his[1]));
+  check('Nov 26 intervals, 61 of 28 min (the watch ran on?): well over, red', pc(his[2]).level === 'off' && pc(his[2]).label === 'Well over' && pc(his[2]).ratio === 2.18, pc(his[2]));
+  const lr = (d, mi, hr) => planCheck(plan, rules, st, his, { id: 'x', date: d, type: 'Long run', planId: 'run2', distance: mi, minutes: mi * 10, hr, week: 2 });
+  check('the bands: 80-120% on plan, 50-79% a bit short, 121-150% a bit long, past that well off (TrainingPeaks, Final Surge)',
+    lr('2026-11-28', 3.1, 140).level === 'good' && lr('2026-11-28', 2.9, 140).label === 'A bit short' && lr('2026-11-28', 5, 140).label === 'A bit long' && lr('2026-11-28', 1.8, 140).label === 'Well short' && lr('2026-11-28', 5.7, 140).label === 'Well over',
+    [3.1, 2.9, 5, 1.8, 5.7].map(m => lr('2026-11-28', m, 140).label));
+  check('long run heart rate from Nov 26: 150 is easy, 158 a bit high (yellow), 165 high (red), and the distance still shows', lr('2026-11-28', 3.75, 150).level === 'good' && lr('2026-11-28', 3.75, 158).level === 'near' && lr('2026-11-28', 3.75, 158).label === 'HR high' && lr('2026-11-28', 3.75, 165).level === 'off' && lr('2026-11-28', 3.75, 165).detail.startsWith('3.75 of 3.75 mi'), [lr('2026-11-28', 3.75, 158), lr('2026-11-28', 3.75, 165)]);
+  check('short and too hard says both', lr('2026-11-28', 2.9, 165).label === 'A bit short · HR high', lr('2026-11-28', 2.9, 165).label);
+  check('a 5K check-in is on plan once it has a 5K time', planCheck(plan, rules, st, his, { id: 'k', date: '2026-12-01', type: '5K test', planId: 'run1', distance: 4.5, minutes: 44, best5k: 1600, week: 3 }).label === '5K done');
+  check('nothing for a side run, a Garmin run not counted yet, a ski day, or a run before the plan',
+    planCheck(plan, rules, st, his, { id: 'garmin-1', date: '2026-11-27', type: 'Easy run', planId: null, typeLocked: true, distance: 2, minutes: 20, week: 2 }) === null &&
+    planCheck(plan, rules, st, his, { id: 'garmin-2', date: '2026-11-27', type: 'Easy run', distance: 2, minutes: 20, week: 2 }) === null &&
+    planCheck(plan, rules, st, his, { id: 's', date: '2026-11-28', type: 'Ski day', planId: 'run2', week: 2, minutes: 200 }) === null &&
+    planCheck(plan, rules, st, his, { id: 'o', date: '2026-11-10', type: 'Intervals', planId: 'run1', distance: 2, minutes: 28, week: 0 }) === null);
+  check('planRunOf follows Count it', planRunOf(plan, his[0]).id === 'run1' && planRunOf(plan, { id: 'garmin-9', type: 'Easy run' }) === null);
+  check('inDays: today, tomorrow, in 5 days, in 4 weeks', inDays('2026-11-26', '2026-11-26') === 'today' && inDays('2026-11-26', '2026-11-27') === 'tomorrow' && inDays('2026-11-26', '2026-12-01') === 'in 5 days' && inDays('2026-12-01', '2026-12-29') === 'in 4 weeks');
+  const g = runGoals({ plan, settings: st, runs: his, today: new Date(2026, 10, 26, 15, 15) });
+  check('goals on Thu Nov 26: 5K 23:00 with no time yet, first check-in Tue Dec 1 in 5 days', g.fiveK.goal === '23:00' && g.fiveK.latest === null && g.fiveK.share === 0 && g.fiveK.next.date === '2026-12-01' && g.fiveK.next.when === 'in 5 days', g.fiveK);
+  check('long run: 3.6 of 7 mi (51%), 3.75 mi this weekend (10% rule), 7 mi in week 11 if every one is done', g.long.cap === 7 && g.long.longest.miles === 3.6 && Math.round(g.long.share * 100) === 51 && g.long.ask === 3.75 && g.long.reachWeek === 11, g.long);
+  check('3 planned runs done, none missed', g.done.runs === 3 && g.done.missed === 0, g.done);
+  const k1 = { id: 'k1', date: '2026-12-01', type: '5K test', planId: 'run1', distance: 4.5, minutes: 44, best5k: 1620, week: 3 };
+  const k2 = { id: 'k2', date: '2026-12-29', type: '5K test', planId: 'run1', distance: 4.5, minutes: 43, best5k: 1560, week: 7 };
+  const g2 = runGoals({ plan, settings: st, runs: [...his, k1, k2], today: new Date(2026, 11, 30, 12) });
+  check('after two check-ins (27:00, then 26:00): a quarter of the way from 27:00 to 23:00, next one Tue Feb 2', g2.fiveK.latest.seconds === 1560 && Math.round(g2.fiveK.share * 100) === 25 && g2.fiveK.next.date === '2027-02-02', g2.fiveK);
+  const g3 = runGoals({ plan, settings: st, runs: [...his, k1], today: new Date(2026, 11, 15, 12) });
+  check('on Dec 15 (week 5): 4 done, and 4 missed in weeks that are over (weeks 2 and 3 long runs, both runs in week 4)', g3.done.runs === 4 && g3.done.missed === 4, g3.done);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');

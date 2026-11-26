@@ -192,7 +192,8 @@ with sync_playwright() as p:
     check('the status line says Garmin is connected', 'Garmin is connected' in page.locator('#garmin-status').inner_text(), page.locator('#garmin-status').inner_text())
     check('miles by week is drawn', page.locator('#runs-miles .viz-bar').count() == 1 and '6.8 mi this week' in week, week)
     long_item = page.locator('.run-item[data-id="garmin-906"]')
-    check('a run from the watch is tagged, and asks for effort', 'Garmin' in long_item.inner_text() and 'Add effort' in long_item.inner_text(), long_item.inner_text())
+    # v1.25.0: no "Add effort" tag on every run (runs go by pace and heart rate); a plan check chip instead
+    check('a run from the watch is tagged, with its plan check and no effort nag', 'Garmin' in long_item.inner_text() and 'Add effort' not in long_item.inner_text() and long_item.locator('.run-check').count() == 1, long_item.inner_text())
     page.evaluate("document.getElementById('tabs').style.display = 'none'")   # the fixed tab bar would sit across the middle of a full-page picture
     page.screenshot(path=f'{SHOTS}/runs-phone.png', full_page=True)
     page.evaluate("document.getElementById('tabs').style.display = ''")
