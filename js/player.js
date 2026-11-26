@@ -456,9 +456,16 @@ export class Player {
       if (!prevSet) prevSet = x;
       if (x.exerciseId === next.exerciseId && x.record && x.record.done) { sameDone = x; break; }
     }
-    if (mode === 'exercise' ? !sameDone : (!prevSet || prevSet.blockId !== next.blockId)) return true;
-    // the bar has to be reloaded
     const ex = this.plan.exercises[next.exerciseId];
+    // v1.21.0 (Cameron, Nov 25: "dont need to confirm set-up for weight pullups", "dumbells and machines that dont take
+    // much setup... just move into workout"): a lift on rules.timing.noConfirmEquipment starts when its set-up time
+    // runs out; plan.json confirmSetup true or false on the exercise overrides that
+    const quick = !!ex && (ex.confirmSetup != null ? ex.confirmSetup === false : (t.noConfirmEquipment || []).includes(ex.equipment));
+    if (mode === 'exercise' ? !sameDone : (!prevSet || prevSet.blockId !== next.blockId)) return !quick;
+    // v1.21.0: one ramp-up to the next goes on its own clock (rules.rampUp.confirmBetween false); the first ramp-up and
+    // the first work set after them still wait for the tap
+    if (next.ramp && this.rules.rampUp && this.rules.rampUp.confirmBetween === false) return false;
+    // the bar has to be reloaded
     if (sameDone && ex && (t.confirmWeightChange || []).includes(ex.equipment)) {
       const was = sameDone.record.weight != null ? sameDone.record.weight : (sameDone.target ? sameDone.target.weight : null);
       const will = next.target ? next.target.weight : null;
@@ -876,9 +883,27 @@ export class Player {
 
     const carried = s.baseline || (s.target && v.weight !== s.target.weight);
     if (carried) this.carryWeight(this.s.idx, s, v.weight, s.target ? s.target.weight : null);
-    const note = this.adaptPace(s);
+    const note = this.adaptPace(s) || this.slowNudge(s, ex, auto);
     this.goTo(this.s.idx + 1);
     if (note && !gotPr && !(s.baseline && carried)) toast(note, 5000);
+  }
+
+  /**
+   * v1.21.0 (Cameron, Nov 25: "for workout where slowing down or focusing on eccentric is important specifically note
+   * this. Highlight i should take full time to complete set"): Done tapped well before the timer on a lift marked slow
+   * in plan.json says so, once per lift per session ('' otherwise). Early is pacing's test: at least
+   * max(earlySeconds, earlyFraction x the set's time) left.
+   */
+  slowNudge(s, ex, auto) {
+    if (auto || !ex || !ex.slow || s.ramp || s.holdSeconds || !s.record || !s.record.secs) return '';
+    const p = this.rules.pacing || {};
+    const plan = s.record.secs.plan || 0;
+    const left = plan - (s.record.secs.took || 0);
+    if (!(plan > 0) || left < Math.max(p.earlySeconds || 5, (p.earlyFraction || 0.15) * plan)) return '';
+    const told = this.s.slowTold = this.s.slowTold || {};
+    if (told[s.exerciseId]) return '';
+    told[s.exerciseId] = true;
+    return `${s.name} is a slow lift: ${ex.slow}. Use the whole timer on the next set.`;
   }
 
   /**
@@ -913,7 +938,7 @@ export class Player {
     const more = (e.nudge || 0) > nudged[id];
     nudged[id] = e.nudge || 0;
     if (change) return `${s.name}: sets now get ${change.to} s (was ${change.from} s), to match your pace`;
-    if (more && ex.keepTempo) return `${s.name}: you keep finishing early. ${ex.keepTempo}`;
+    if (more && (ex.keepTempo || ex.slow)) return `${s.name}: you keep finishing early. ${ex.keepTempo || `It is a slow lift: ${ex.slow}.`}`;
     return '';
   }
 
@@ -1254,7 +1279,7 @@ export class Player {
         what = `${top ? 'top set, then ' : ''}${count ? count + ' · ' : ''}${noWeight ? 'pick a weight ' : ''}${this.shortTarget(os)}`;
       }
       return el('div', { class: 'ov-ex-row' }, [
-        el('div', { class: 'ov-row' }, [el('span', { class: 'ov-name' }, e.name), el('span', { class: 'ov-target' }, what)]),
+        el('div', { class: 'ov-row' }, [el('span', { class: 'ov-name' }, [e.name, ex && ex.slow ? el('span', { class: 'slow-tag', title: ex.slow }, 'Slow') : null]), el('span', { class: 'ov-target' }, what)]),
         e.ramps.length ? el('div', { class: 'ov-sets ramps' }, [el('span', { class: 'ov-lab' }, 'Ramp-up'), ...e.ramps.map(chip)]) : null,
         el('div', { class: 'ov-sets' }, e.sets.map(chip))
       ]);
@@ -1263,6 +1288,8 @@ export class Player {
       if (b.type === 'emom') {
         const stations = [...new Set(b.items.map(x => x.name.replace(/^Min \d+ of \d+:\s*/, '')))];
         const done = b.items.filter(x => x.done).length;
+        // v1.21.0: a test week is one long step (the 2,000 m row), not a minute (it read "1 min, one station a minute")
+        if (b.items.length === 1 && !b.items[0].setIndex) return [el('div', { class: 'ov-line' }, `Benchmark, up to ${Math.round((b.items[0].seconds || 0) / 60)} min${done ? ' · done' : ''}`), el('div', { class: 'ov-line sub' }, b.items[0].name)];
         return [el('div', { class: 'ov-line' }, `${b.items.length} min, one station a minute${done ? ` · ${done} done` : ''}`), ...stations.map(n => el('div', { class: 'ov-line sub' }, n))];
       }
       const groups = [];
@@ -1496,7 +1523,9 @@ export class Player {
     if (x.kind === 'set') {
       const w = x.target && x.target.weight != null ? `${fmtWeight(x.target.weight)} lb` : '';
       const r = x.holdSeconds ? `${x.holdSeconds} s${x.perSide ? ' / side' : ''}` : (x.target && x.target.reps != null ? `× ${x.target.reps}` : '');
-      return `${x.name} ${w} ${r}`.replace(/\s+/g, ' ').trim();
+      // v1.21.0: a slow lift says so on the rest screen, before the set starts
+      const slow = !x.ramp && this.plan.exercises[x.exerciseId] && this.plan.exercises[x.exerciseId].slow ? ' · slow' : '';
+      return `${x.name} ${w} ${r}${slow}`.replace(/\s+/g, ' ').trim();
     }
     if (x.kind === 'decision') return x.name;
     if (x.perSide && x.sideSeconds) return `${x.name} ${fmtClock(x.sideSeconds)} / side`;
@@ -1751,10 +1780,13 @@ export class Player {
     main.appendChild(el('div', { class: 'step-name big' }, [el('span', { class: 'sn-text' }, s.name), s.pr ? el('span', { class: 'pr-badge' }, 'PR') : null]));
     main.appendChild(this.heroReadout(s, ex));
     if (sided) main.appendChild(this.sidesPanel(s));
+    // v1.21.0: a lift marked slow in plan.json says how, and to use the whole timer
+    const slow = ex && ex.slow && !s.ramp && !s.holdSeconds ? el('div', { class: 'pace-slow fit-4', id: 'slow-note' }, [el('b', {}, 'Slow lift. '), el('span', { class: 'fit-3' }, `${ex.slow}. `), 'Use the whole timer.']) : null;
     if (s.auto && !s.holdSeconds) {
-      main.appendChild(el('div', { class: 'pace', id: 'pace' }, [
+      main.appendChild(el('div', { class: 'pace' + (slow ? ' is-slow' : ''), id: 'pace' }, [
         el('div', { class: 'pace-row' }, [el('span', { class: 'pace-text', id: 'pace-text' }, ''), el('span', { class: 'pace-clock', id: 'timer' }, '0:00')]),
-        el('div', { class: 'pace-track' }, [el('div', { class: 'pace-fill', id: 'pace-fill' })])
+        el('div', { class: 'pace-track' }, [el('div', { class: 'pace-fill', id: 'pace-fill' })]),
+        slow
       ]));
     } else if (!sided) main.appendChild(this.timerBlock(this.isCountdown(s)));
     // L2: last time

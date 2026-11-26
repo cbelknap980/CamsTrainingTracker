@@ -1,6 +1,6 @@
 // data.js - loads the data files and provides plan helpers (week number, phase, today's session).
 
-export const APP_VERSION = '1.20.2';
+export const APP_VERSION = '1.21.0';
 
 let cache = null;
 

@@ -176,11 +176,14 @@ with sync_playwright() as p:
             if k2() in ('timed', 'stretch'): run(secs(pg) + 1)
             else: main_tap()
         return False
-    check('reached the set-up before the first dumbbell row set', go_setup('Dumbbell row'))
+    # v1.21.0: dumbbells no longer wait for Set-up done, so the paused set-up tap is checked on the push press (a barbell)
+    check('reached the set-up before the first push press set', go_setup('Push press'))
     pg.click('#pause-btn'); pg.wait_for_timeout(60)
     pg.clock.run_for(600 * 1000); pg.wait_for_timeout(60)
     main_tap()   # Set-up done while still paused
     pg.click('#pause-btn'); pg.wait_for_timeout(60)
+    check('reached the first push press set', go_to('work', 'Push press'))
+    pp_at = step2()
     check('reached the first dumbbell row set', go_to('work', 'Dumbbell row'))
     at = step2()
     cls = pg.locator('#sides').get_attribute('class')
@@ -201,7 +204,7 @@ with sync_playwright() as p:
 
     # ---- what the independent code review found ----
     ip = store("m.getInProgress()")
-    lead = (ip['timeline']['steps'][at].get('record') or {}).get('lead') or {}
+    lead = (ip['timeline']['steps'][pp_at].get('record') or {}).get('lead') or {}
     check('Set-up done tapped during a 10 min pause: the pause is in the set-up record, so at most a minute of it counts (it read as a 5 s set-up)', lead.get('by') == 'tap' and lead.get('tapPaused', 0) >= 595 and lead.get('tap', 0) >= lead.get('tapPaused', 0), lead)
     row_secs = ip['timeline']['steps'][at]['seconds']
     check('review F2: the early Right tap leaves the set its planned 83 s (it was cut to where Right was tapped)', row_secs == 83, row_secs)
