@@ -15,6 +15,7 @@ import { openLiftDetail } from './lift-detail.js';
 import { fmtWeight, fmtDate, repsText, weekNumber, phaseForWeek, parseISODate, toISODate } from './data.js';
 import { TAGS, thread } from './coach.js';
 import { countsFor, weekRuns, weekRange, openRunDays, runLine } from './runs.js';
+import { stationFor, emomMinutesFor } from './builder.js';
 
 const DAYS = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['0', 'Sun']];
 const when = iso => { const d = new Date(iso); return `${fmtDate(toISODate(d))}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`; };
@@ -109,8 +110,19 @@ function sessionCard(data, s, onEx) {
     }
     if (b.type === 'emom') {
       const st = b.stations || [];
-      rows.push(el('div', { class: 'ex-blk' }, `${b.name} · EMOM about ${b.minutes} min${b.room ? ` · ${b.room}` : ''}`));
-      st.forEach((x, i) => rows.push(el('div', { class: 'ex-emom' }, [el('span', {}, `Minute ${i + 1}: ${x.name}`), x.cue ? el('span', { class: 'muted' }, x.cue) : null])));
+      // v1.21.0: the stations of the coming week (the rower and the sled in their weeks), or that week's benchmark
+      const wk = emomMinutesFor(b, week);
+      if (wk.test) {
+        rows.push(el('div', { class: 'ex-blk' }, `${b.name} · benchmark, up to ${Math.round(wk.test.seconds / 60)} min${b.room ? ` · ${b.room}` : ''}`));
+        rows.push(el('div', { class: 'ex-emom' }, [el('span', {}, wk.test.name), wk.test.cue ? el('span', { class: 'muted' }, wk.test.cue) : null]));
+        continue;
+      }
+      rows.push(el('div', { class: 'ex-blk' }, `${b.name} · EMOM ${wk.minutes || b.minutes} min${b.room ? ` · ${b.room}` : ''}`));
+      st.forEach((x0, i) => {
+        const x = stationFor(x0, week);
+        const other = x0.alt ? (x === x0 ? `Weeks ${x0.alt.weeks.join(', ')}: ${x0.alt.name}.` : `Other weeks: ${x0.name}.`) : '';
+        rows.push(el('div', { class: 'ex-emom' }, [el('span', {}, `Minute ${i + 1}: ${x.name}`), x.cue ? el('span', { class: 'muted' }, `${x.cue}${other ? ' ' + other : ''}`) : null]));
+      });
       continue;
     }
     const label = b.type === 'finisher' ? `Finisher · ${b.rounds} rounds` : (b.type === 'iftime' ? 'If there is time' : `${b.name} · ${b.type === 'superset' ? 'superset' : 'straight sets'}`);
@@ -121,7 +133,7 @@ function sessionCard(data, s, onEx) {
       const n = rowNumbers(data, it, b, targets[it.exercise], phaseId);
       const tap = onEx ? () => onEx(it.exercise, s.id) : null;
       rows.push(el(tap ? 'button' : 'div', { class: 'ex-row', 'data-ex': it.exercise, ...(tap ? { type: 'button', onclick: tap, 'aria-label': `${ex.name}, ${n.sets}${n.weight ? `, ${n.weight}` : ''}. Open for the plan and chart.` } : {}) }, [
-        el('span', { class: 'ex-name' }, ex.name),
+        el('span', { class: 'ex-name' }, [ex.name, ex.slow ? el('span', { class: 'slow-tag', title: ex.slow }, 'Slow') : null]),
         el('span', { class: 'ex-sets' }, n.sets),
         el('span', { class: 'ex-wt' + (n.weight === 'bw' || !n.weight ? ' muted' : '') }, n.weight || '–'),
         tap ? el('span', { class: 'ex-go' }, chevron()) : null

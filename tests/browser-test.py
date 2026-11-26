@@ -1,5 +1,5 @@
 """End-to-end check in headless Chrome at phone size. Run: python3 tests/browser-test.py (serves the repo on :8080)."""
-import json, os, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -179,10 +179,9 @@ with sync_playwright() as p:
     print('    waited for a tap before:', seen.get('confirm_for'))
     # v1.18 (Cameron: "for things setting up bar, ensure im good to go", "for stretch section, do a check also"): the first
     # set of every exercise, the bar change after the squat baseline, and the stretch block each wait for a tap
-    check('v1.18 Lift 1 waited for a tap before each exercise, the bar change after the baseline, and the stretches (10)',
-          seen.get('confirm_for') == ['Set-up done: Back squat', 'Set-up done: Back squat', 'Set-up done: Romanian deadlift', 'Set-up done: Standing calf raise',
-                                      'Set-up done: Bulgarian split squat', 'Set-up done: Seated leg curl', 'Set-up done: Standing dumbbell curl',
-                                      'Set-up done: Overhead triceps extension', 'Set-up done: Ab wheel', 'Ready: Couch stretch'], seen.get('confirm_for'))
+    # v1.21.0 (Cameron, Nov 25): dumbbells, machines, the pull-up and bodyweight moves start on their own; barbells still wait
+    check('v1.18 Lift 1 waited for a tap before each barbell lift, the bar change after the baseline, and the stretches (v1.21.0: 4)',
+          seen.get('confirm_for') == ['Set-up done: Back squat', 'Set-up done: Back squat', 'Set-up done: Romanian deadlift', 'Ready: Couch stretch'], seen.get('confirm_for'))
     check('v1.5 finisher row lists its exercises', all(x in seen.get('fin', '') for x in ('Standing curl', 'Tri ext', 'Ab wheel')), seen.get('fin'))
     page.click('#settings-btn'); page.wait_for_selector('.modal')
     page.locator('.toggle', has_text='End each set on its own timer').locator('input').check(); page.wait_for_timeout(150)
@@ -455,13 +454,12 @@ with sync_playwright() as p:
     check('v1.18 voice: the get-ready count says the name and the reps again (Cameron: say reps)', said[-2] == 'Back squat, 5 reps.', said[-3:])
     check('v1.4 work screen: green, pace bar, where-you-are line', page.evaluate("document.body.getAttribute('data-kind')") == 'work' and page.locator('#pace-fill').count() == 1 and 'Barbell' in page.locator('.step-where').inner_text(), page.locator('.step-where').inner_text())
     page.clock.run_for(8000); page.wait_for_timeout(120)
-    check('v1.4 pace bar counts reps', 'rep 1 of 5' in page.locator('#pace-text').inner_text().lower(), page.locator('#pace-text').inner_text())
+    check('v1.4 pace bar counts reps', re.match(r'^rep [12] of 5$', page.locator('#pace-text').inner_text().lower()) is not None, page.locator('#pace-text').inner_text())
     # let this ramp-up set end on its own timer
     page.clock.run_for((timer_secs(page) + 1) * 1000); page.wait_for_timeout(150)
     check('v1.4 set ended by itself and rest started', page.locator('.step-kind').inner_text().lower().startswith('rest') and page.evaluate("document.body.getAttribute('data-kind')") == 'rest', page.locator('.step-kind').inner_text())
-    import re
-    check('v1.4 voice says rest and its length, v1.18 then the next set with reps and weight', re.match(r'^Rest, 1 minute\. Then Back squat, ramp-up, \d+ reps? at \d+ pounds\.$', page.evaluate('window.__said.slice(-1)[0]')) is not None, page.evaluate('window.__said.slice(-1)[0]'))
-    check('v1.18 the rest before a heavier ramp-up says what to change on the bar and waits for the tap', page.locator('#confirm-btn').count() == 1 and 'Change the weight: 45 →' in page.locator('#change-weight').inner_text() and 'a side' in page.locator('#change-weight').inner_text(), page.locator('#up-next').inner_text())
+    check('v1.4 voice says rest and its length, v1.18 then the next set with reps and weight (v1.21.0: 30 s between ramp-ups)', re.match(r'^Rest, 30 seconds\. Then Back squat, ramp-up, \d+ reps? at \d+ pounds\.$', page.evaluate('window.__said.slice(-1)[0]')) is not None, page.evaluate('window.__said.slice(-1)[0]'))
+    check('v1.18 the rest before a heavier ramp-up says what to change on the bar (v1.21.0: and runs on without a tap)', page.locator('#confirm-btn').count() == 0 and 'Change the weight: 45 →' in page.locator('#change-weight').inner_text() and 'a side' in page.locator('#change-weight').inner_text(), page.locator('#up-next').inner_text())
     # v1.18: Back moved from the header into the menu (the header holds Plan, the gym clock, Pause and the menu)
     check('v1.18 header: Plan, time in the gym, Pause, menu', page.locator('.player-head #plan-btn').count() == 1 and page.locator('.player-head #gym-clock').count() == 1 and page.locator('#back-btn').count() == 0)
     page.click('#more-btn'); page.wait_for_selector('.menu'); page.click('.menu-item:has-text("Back one step")'); page.wait_for_timeout(100)
@@ -478,7 +476,7 @@ with sync_playwright() as p:
             tap_main(page, '#confirm-btn'); page.clock.run_for(700)
         else: tap_main(page, '.player-actions button.btn.primary')
         page.wait_for_timeout(60)
-    check('v1.18 every bar change on the way up waited for Set-up done', bar_changes >= 3, bar_changes)
+    check('v1.21.0 only the bar change into the work sets waited for Set-up done (Cameron: "Make ramp ups faster")', bar_changes == 1, bar_changes)
     check('v1.4 work set: large name, set n of N, focus cues, plain effort', 'Set 1 of 3' in page.locator('.step-where').inner_text() and page.locator('.tips .tip').count() >= 2 and 'Leave 2-3 in the tank' in page.locator('.hl-effort').inner_text(), page.locator('.step-main').inner_text()[:200])
     check('v1.14 cues are open on the first work set of a lift', page.locator('details.cues[open]').count() == 1)
     page.screenshot(path=f'{SHOTS}/v14-work-set.png')

@@ -2,9 +2,10 @@
 // after a restore or (on the computer) a pull brings in data an older version wrote: importAll keeps that data's
 // appVersion as dataVersion, and every change for a newer version runs once.
 
-import { getTargets, setTargets, getRuns, putRun, getSessions, putSession, kvGet, kvSet } from './store.js';
+import { getTargets, setTargets, getRuns, putRun, getSessions, putSession, kvGet, kvSet, getSettings } from './store.js';
 import { APP_VERSION, getData, snapLoad, roundEst } from './data.js';
 import { settleRun } from './runs.js';
+import { rerunBeatPlan } from './sanity.js';
 
 /** a < b for versions like 1.9 and 1.18.1. */
 export function olderThan(a, b) {
@@ -90,7 +91,18 @@ export function upgrade11813({ targets, sessions, plan }) {
   return { targets, zeroed: 0, runs: [], sessions: changed };
 }
 
-const UPGRADES = [{ version: '1.18.1', run: upgrade1181 }, { version: '1.18.5', run: upgrade1185 }, { version: '1.18.10', run: upgrade11810 }, { version: '1.18.13', run: upgrade11813 }];
+/**
+ * v1.21.0 (rules.lastSetRating.beatPlan, Cameron Nov 25): sessions saved before the rule are worked out again where
+ * he beat the plan and left the last set unrated, so his Nov 25 row (55 x 8, 60 x 8, 60 x 8: it held at 55) and arm
+ * lifts move on from what he did. Only each lift's latest session, and only when he or the coach has not set the
+ * target since. Returns { targets, zeroed (lifts changed), runs: [], sessions, lifts }.
+ */
+export function upgrade1210({ targets, sessions, rules, plan, settings }) {
+  const out = rerunBeatPlan({ sessions, targets, plan, rules, settings });
+  return { targets: out.targets, zeroed: out.lifts.length, runs: [], sessions: out.sessions, lifts: out.lifts };
+}
+
+const UPGRADES = [{ version: '1.18.1', run: upgrade1181 }, { version: '1.18.5', run: upgrade1185 }, { version: '1.18.10', run: upgrade11810 }, { version: '1.18.13', run: upgrade11813 }, { version: '1.21.0', run: upgrade1210 }];
 
 /**
  * Run each upgrade newer than the data on this device, once. Returns { zeroed, runs } (counts) when something ran,
@@ -106,8 +118,8 @@ export async function runUpgrades() {
   const { rules, plan } = getData();
   let zeroed = 0, runsChanged = 0;
   for (const u of due) {
-    const [targets, runs, sessions] = await Promise.all([getTargets(), getRuns(), getSessions()]);
-    const out = u.run({ targets, runs, sessions, rules, plan });
+    const [targets, runs, sessions, settings] = await Promise.all([getTargets(), getRuns(), getSessions(), getSettings()]);
+    const out = u.run({ targets, runs, sessions, rules, plan, settings });
     if (out.zeroed) await setTargets(out.targets);
     for (const r of out.runs) await putRun(r);
     for (const s of out.sessions || []) await putSession(s);

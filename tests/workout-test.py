@@ -225,7 +225,9 @@ with sync_playwright() as p:
             # the whole workout, with sets and weights (Cameron: "allow screen to show overall workout planned w/ details and weights")
             w.tap('#plan-btn'); page.wait_for_selector('#plan-sheet')
             sheet = page.locator('#plan-sheet').inner_text()
-            rows = {r.locator('.ov-name').inner_text().strip(): r.locator('.ov-target').inner_text().strip() for r in page.locator('#plan-sheet .ov-row').all()}
+            rows = {r.locator('.ov-name').evaluate("n => n.firstChild.textContent").strip(): r.locator('.ov-target').inner_text().strip() for r in page.locator('#plan-sheet .ov-row').all()}
+            slow_rows = [r.locator('.ov-name').evaluate("n => n.firstChild.textContent").strip() for r in page.locator('#plan-sheet .ov-row').all() if r.locator('.slow-tag').count()]
+            check('v1.21.0 whole workout: the slow lifts carry a Slow tag (preacher curl, calf raise, leg curl), the others none', slow_rows == ['Dumbbell preacher curl', 'Standing calf raise', 'Seated leg curl'], slow_rows)
             check('whole workout: seven blocks, each lift with sets, reps and weight', page.locator('#plan-sheet .ov-block').count() == 7 and rows.get('Power clean') == '4 sets · 185 lb × 2' and rows.get('Front squat') == '3 sets · 245 lb × 5' and rows.get('Push press') == '3 sets · 165 lb × 3' and rows.get('Standing calf raise') == '3 rounds · 245 lb × 10', rows)
             check('whole workout: dumbbell pairs, one side at a time, holds and stretches read right', rows.get('Lateral raise') == '3 sets · 40 lb (2 × 20) × 12' and rows.get('Dumbbell row') == '3 sets · 110 lb × 8 / side' and rows.get('Side plank') == '3 rounds · 25 s / side' and rows.get('Couch stretch') == '1:00 / side' and rows.get('Forward fold') == '0:45', rows)
             check('whole workout: ramp-up weights listed, time in the gym on top, nothing wider than the screen', 'Ramp-up' in sheet and '45×5' in sheet.replace(' ', '') and 'in the gym' in page.locator('#plan-sheet .ov-sub').inner_text() and page.evaluate("(() => { const m = document.querySelector('#modal .sheet') || document.querySelector('#modal'); return m.scrollWidth <= m.clientWidth + 1 && document.documentElement.scrollWidth <= window.innerWidth; })()"), sheet[:300])
@@ -256,25 +258,32 @@ with sync_playwright() as p:
             check('ramp-up set: the pill says Ramp-up, the line beside it only the equipment (not "Ramp-up" twice)', f['stepWhere'] == 'Barbell', f['stepWhere'])
             return True
 
-        # ---- each bar change waits too, and says what to change ----
+        # ---- v1.21.0 (Cameron, Nov 25: "Make ramp ups faster"): one ramp-up to the next does not wait, 30 s between ----
+        if not s['confirm'] and nm == 'Power clean' and k == 'rest' and 'pc' not in seen and 'ramp_rest' not in seen:
+            seen['ramp_rest'] = 1
+            before = clock_secs(s['timer'])
+            check('v1.21.0 between two ramp-ups: a 30 s rest and no Set-up done tap', not s['confirm'] and 26 <= before <= 30 and s['primary'] == 'Skip rest', (before, s['primary'], s['kind']))
+            took = w.run_out()
+            g = w.state()
+            check('v1.21.0 that rest runs out by itself into the next ramp-up, with Go', g['kind'] == 'ramp-up' and g['name'] == 'Power clean' and before - 1 <= took <= before + 6 and 'Go.' in w.said[-2:], (g['kind'], took, before, w.said[-3:]))
+            return True
+
+        # ---- the bar change into the first work set still waits, and says what to change ----
         if s['confirm'] and nm == 'Power clean' and k == 'rest':
             n = seen['bar_changes'] = seen.get('bar_changes', 0) + 1
             cw = page.locator('#change-weight').inner_text() if page.locator('#change-weight').count() else ''
             seen.setdefault('bar_texts', []).append(cw)
             if n == 1:
                 jd = page.locator('#just-done')
-                check('bar change after a ramp-up: that set is one line with nothing to rate (Cameron: "too busy"), so the plates to add and the sets to come all show',
-                      'slim' in jd.get_attribute('class').split() and jd.locator('.effort-chip').count() == 0 and jd.locator('.jd-steps').count() == 0 and 'ramp-up · 45 lb × 5' in jd.locator('.jd-sub').inner_text() and jd.locator('#jd-undo').count() == 1
-                      and 'Then ramp-up | 135 × 3, 155 × 2' in s['upNext'] and 'Then 4 work sets | 185 lb × 2' in s['upNext'] and page.locator('#change-side').is_visible() and s['fit'] == '0', (jd.inner_text(), s['upNext'], s['fit']))
+                check('bar change after the last ramp-up: that set is one line with nothing to rate (Cameron: "too busy"), so the plates to add and the sets to come all show',
+                      'slim' in jd.get_attribute('class').split() and jd.locator('.effort-chip').count() == 0 and jd.locator('.jd-steps').count() == 0 and 'ramp-up · 155 lb × 2' in jd.locator('.jd-sub').inner_text() and jd.locator('#jd-undo').count() == 1
+                      and '185' in s['upNext'] and page.locator('#change-side').is_visible() and s['fit'] == '0', (jd.inner_text(), s['upNext'], s['fit']))
                 before = clock_secs(s['timer'])
                 w.confirm()
                 r = w.state(); w.look(r, 'tap during the rest')
                 check('a Set-up done tap during the rest keeps the rest: a chip beside the clock says the tap is in, the clock runs on without a jump, nothing else moves',
                       r['step'] == s['step'] and not r['confirm'] and r['kind'] == 'rest' and page.locator('#ready-note').inner_text().strip() == 'Set-up done' and before - 2 <= clock_secs(r['timer']) <= before
                       and r['primary'] == 'Skip rest' and r['fit'] == s['fit'] and r['upNext'] == s['upNext'] and r['toast'] == 'It starts when the rest ends.', (r['kind'], before, r['timer'], r['primary'], r['fit'], r['toast']))
-                took = w.run_out()
-                g = w.state()
-                check('the rest then runs out by itself into the next ramp-up, as long as the rest was planned (60 s)', g['kind'] == 'ramp-up' and g['name'] == 'Power clean' and before + 2 <= took <= before + 6 and 'Go.' in w.said[-2:], (g['kind'], took, before, w.said[-3:]))
                 return True
             return False
 
@@ -284,7 +293,7 @@ with sync_playwright() as p:
             if n == 1:
                 seen['pc_time'] = clock_secs(s['timer'])
                 check('work set: the weight is the big number, reps and effort under it, set n of N on top', page.locator('#hero-readout .hw-num').inner_text().strip() == '185' and page.locator('.hl-reps b').inner_text().strip() == '2' and 'Set 1 of 4' in s['stepWhere'] and s['bodyKind'] == 'work', s['main'][:200])
-                check('bar changes on the way up: 4 of them waited for Set-up done, each saying what to add', seen.get('bar_changes') == 4 and seen['bar_texts'][0].startswith('Change the weight: 45 → 95 lb') and '(add 25 a side)' in seen['bar_texts'][0] and '155 → 185 lb' in seen['bar_texts'][3] and '(add 15 a side)' in seen['bar_texts'][3], seen.get('bar_texts'))
+                check('v1.21.0 bar changes on the way up: only the one into the work sets waited for Set-up done, saying what to add', seen.get('bar_changes') == 1 and seen.get('ramp_rest') == 1 and seen['bar_texts'][0].startswith('Change the weight: 155 → 185 lb') and '(add 15 a side)' in seen['bar_texts'][0], seen.get('bar_texts'))
             if n <= 3:
                 w.run(9); w.tap('.player-actions button.btn.primary')
                 r = w.state()
@@ -328,14 +337,18 @@ with sync_playwright() as p:
                 check('cues: Hide closes them again and the screen is as it was', c2['there'] and not c2['open'] and c2['hint'] == 'Show' and c2['over'] <= 1 and c2['scrolled'] == 0 and c2['fit'] == c0['fit'], c2)
             w.run_out()      # all three left to the timer: three sets nobody rated, for the review
             return True
-        if s['confirm'] and nm == 'Lateral raise' and k == 'rest + set up' and 'lr_setup' not in seen:
+        if nm == 'Lateral raise' and k == 'rest + set up' and 'lr_setup' not in seen:
             seen['lr_setup'] = 1
-            before = clock_secs(s['timer'])
-            w.confirm()
-            r = w.state(); w.look(r, 'tap during the rest')
-            # 30 s of rest (Cameron approved 30 s here on Nov 20, it was 60) plus 30 s to get the dumbbells: the tap drops the set-up part
-            check('a Set-up done tap during "rest + set up" drops the set-up time and keeps the rest: the pill now says Rest, with the chip', r['step'] == s['step'] and not r['confirm'] and r['kind'] == 'rest' and page.locator('#ready-note').inner_text().strip() == 'Set-up done'
-                  and before - 32 <= clock_secs(r['timer']) <= before - 28 and r['primary'] == 'Skip rest' and r['fit'] == s['fit'], (r['kind'], r['timer'], before, r['fit'], s['fit'], r['main'][:200]))
+            check('v1.21.0 dumbbells (Cameron: "no need to confrim setup done, just move into workout"): the lateral raise\'s rest + set-up has no Set-up done tap', not s['confirm'] and s['primary'] in ('Skip rest', 'Start now'), (s['kind'], s['primary']))
+            return False
+        # v1.21.0: with dumbbells and machines going straight in, no lift in the plan has a barbell second in a superset,
+        # so "rest + set up" never waits for a tap now; the push press (a barbell, after the block change) still does
+        if nm == 'Push press' and k == 'set up' and 'pp_setup' not in seen:
+            seen['pp_setup'] = 1
+            check('v1.21.0 a barbell still waits: the push press set-up has the Set-up done tap', s['confirm'], (s['kind'], s['primary']))
+            w.run(20); w.confirm()
+            r = w.state()
+            check('after Set-up done on the push press: the get-ready count', r['kind'] == 'get ready' and r['name'] == 'Push press', (r['kind'], r['name']))
             return True
         if k == 'work' and nm == 'Lateral raise' and 'lr' not in seen:
             seen['lr'] = 1
@@ -397,12 +410,22 @@ with sync_playwright() as p:
                 check('left side done early: a tap on Right starts it now with its full time', 'phase-right' in page.locator('#sides').get_attribute('class') and 'active' in page.locator('#side-right').get_attribute('class') and w.said[-1] == 'Right side.' and a['step'] == s['step'], (page.locator('#sides').get_attribute('class'), w.said[-2:]))
             return False
 
+        # ---- v1.21.0 (Cameron: "for workout where slowing down or focusing on eccentric is important specifically note this") ----
+        if k == 'work' and nm == 'Dumbbell preacher curl' and 'slow_note' not in seen:
+            seen['slow_note'] = 1
+            note = page.locator('#slow-note').inner_text() if page.locator('#slow-note').count() else ''
+            check('v1.21.0 a slow lift says so on its set screen: how, and to use the whole timer, under an amber pace bar', note.startswith('Slow lift.') and '3 s down' in note and note.endswith('Use the whole timer.') and page.locator('#slow-note').is_visible() and page.locator('#pace.is-slow').count() == 1, (note, s['fit']))
+        if k == 'work' and nm == 'Rope pushdown' and 'fast_note' not in seen:
+            seen['fast_note'] = 1
+            check('v1.21.0 a lift not marked slow has no slow note', page.locator('#slow-note').count() == 0 and page.locator('#pace.is-slow').count() == 0)
+
         # ---- the finisher: its exercises on top, Equipment taken inside it ----
         if s['fin'] and 'fin' not in seen:
             seen['fin'] = 1
             chips = page.locator('#fin-row .fin-ex').all_inner_texts()
             check('finisher: its four exercises are listed on top with the next one picked out, none cut off', len(chips) == 4 and page.locator('#fin-row .fin-ex.now').count() == 1 and 'Calf' in chips and s['where'].startswith('Finisher · Round 1 of 3') and page.evaluate("(() => { const f = document.querySelector('#fin-row'); return f.scrollWidth <= f.clientWidth + 1; })()"), (chips, s['where']))
-        if s['confirm'] and nm == 'Standing calf raise' and 'Round 1 of 3' in s['where'] and 'calf_swap' not in seen:
+        # v1.21.0: the calf raise is a machine, so its set-up no longer waits for a tap; the swap is on its lead-in screen
+        if k != 'work' and nm == 'Standing calf raise' and 'Round 1 of 3' in s['where'] and 'calf_swap' not in seen:
             seen['calf_swap'] = 1
             check('Equipment taken is on the calf raise set-up in the finisher (Cameron: "I don\'t see equipment taken on standing calf raise finisher")', s['swap'], s['main'][:200])
             w.tap('#swap-btn'); page.wait_for_selector('.swap-choice')
@@ -414,7 +437,7 @@ with sync_playwright() as p:
             check('after the swap the round moves on without it, with Undo on offer', r['name'] == 'Dumbbell preacher curl' and 'Round 2 of 3' in r['where'] and 'Doing Standing calf raise after the last round' in r['toast'] and page.locator('#toast-action').is_visible(), (r['name'], r['where'], r['toast']))
             w.tap('#toast-action')
             r = w.state()
-            check('Undo puts the calf raise back where it was', r['name'] == 'Standing calf raise' and 'Round 1 of 3' in r['where'] and r['confirm'] and r['swap'] and r['step'] == s['step'], (r['name'], r['where']))
+            check('Undo puts the calf raise back where it was', r['name'] == 'Standing calf raise' and 'Round 1 of 3' in r['where'] and not r['confirm'] and r['swap'] and r['step'] == s['step'], (r['name'], r['where'], r['confirm'], r['step'], s['step']))
             return True
         if nm == 'Dumbbell preacher curl' and 'Round 2 of 3' in s['where'] and s['swap'] and 'first_swap' not in seen:
             seen['first_swap'] = 1
@@ -459,7 +482,7 @@ with sync_playwright() as p:
 
     ended = w.go(on_screen)
     page.wait_for_selector('#save-session')
-    check('the session ran to the review', ended and all(x in seen for x in ('pc_setup', 'fs_setup', 'lr_setup', 'pp', 'calf_swap', 'first_swap', 'ready', 'couch', 'calf_stretch')) and seen.get('row') == 3 and seen.get('plank') == 3 and seen.get('fs') == 3, seen)
+    check('the session ran to the review', ended and all(x in seen for x in ('pc_setup', 'fs_setup', 'lr_setup', 'pp_setup', 'pp', 'calf_swap', 'slow_note', 'fast_note', 'first_swap', 'ready', 'couch', 'calf_stretch')) and seen.get('row') == 3 and seen.get('plank') == 3 and seen.get('fs') == 3, seen)
     check(f'360 x 698: none of the {w.screens} screens scrolls, overflows, cuts text or runs off the screen (Cameron: "have to scroll down to see everything")', not w.bad and w.screens > 80, w.bad[:6])
     check('360 x 698: no screen had to fold the last-set steppers or drop the sets to come (fit level 2 at most)', max(int(k) for k in w.fits) <= 2, w.fits)
     print(f"    screens by kind: {', '.join(f'{k} {v}' for k, v in sorted(w.kinds.items()))}")

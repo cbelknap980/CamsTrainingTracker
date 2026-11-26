@@ -1,5 +1,5 @@
 {
-  "planVersion": "1.6",
+  "planVersion": "1.7",
   "planName": "12-Week Strength Block",
   "source": "2026-11-15 General 12-Week Training Plan.md",
   "startDate": "2026-11-16",
@@ -88,6 +88,7 @@
       "name": "Romanian deadlift",
       "equipment": "barbell",
       "mainLift": false,
+      "slow": "3 s down to the hamstring stretch, no bounce",
       "benchmark": true,
       "cue": "Hinge, soft knees, bar close.",
       "short": "RDL",
@@ -106,6 +107,7 @@
       "name": "Standing calf raise",
       "equipment": "machine",
       "mainLift": false,
+      "slow": "2 s down, 2 s pause at the bottom",
       "keepTempo": "Pause 2 seconds at the bottom of every rep.",
       "cue": "Pause at the bottom.",
       "short": "Calf",
@@ -124,6 +126,7 @@
       "name": "Bulgarian split squat",
       "equipment": "dumbbell",
       "mainLift": false,
+      "slow": "3 s down, knee tracking over the toes",
       "perSide": true,
       "cue": "Tuck the pelvis on the back leg.",
       "short": "Split sq",
@@ -143,6 +146,7 @@
       "name": "Seated leg curl",
       "equipment": "machine",
       "mainLift": false,
+      "slow": "3 s letting the pad back up",
       "short": "Leg curl",
       "tempo": [
         3,
@@ -177,9 +181,10 @@
       "name": "Overhead triceps extension",
       "equipment": "dumbbell",
       "mainLift": false,
+      "slow": "3 s down into the stretch, 1 s pause",
       "short": "Tri ext",
       "tempo": [
-        2,
+        3,
         1,
         1,
         0
@@ -193,6 +198,7 @@
       "name": "Ab wheel",
       "equipment": "bodyweight",
       "mainLift": false,
+      "slow": "3 s out, 2 s back, hips never sag",
       "cue": "Pelvis tucked.",
       "short": "Ab wheel",
       "tempo": [
@@ -298,6 +304,7 @@
       "name": "Incline dumbbell curl",
       "equipment": "dumbbell",
       "mainLift": false,
+      "slow": "3 s down, pause with straight arms",
       "short": "Incline curl",
       "tempo": [
         3,
@@ -421,6 +428,7 @@
       "name": "Dumbbell preacher curl",
       "equipment": "dumbbell",
       "mainLift": false,
+      "slow": "3 s down, pause near straight",
       "short": "Preacher curl",
       "tempo": [
         3,
@@ -830,16 +838,36 @@
           "cue": "RPE 8: finish each minute with 10-20 s to spare. Rest is what's left of the minute.",
           "stations": [
             {
-              "name": "Bike or ski erg, 12-15 cal",
-              "cue": "Alternate machines week to week. Bike if the knee complains."
+              "name": "Echo bike, 12-15 cal",
+              "cue": "Arms and legs together, hard from the first second.",
+              "alt": {
+                "weeks": [
+                  4,
+                  6,
+                  8,
+                  10
+                ],
+                "name": "Row, 15-18 cal",
+                "cue": "Concept2, damper 4-5. Legs, then body, then arms. Echo bike instead if the knee complains."
+              }
             },
             {
               "name": "Kettlebell swings x 12",
-              "cue": "Snap the hips; the arms just guide the bell."
+              "cue": "A heavy bell you can snap for 12 (one of the black ones). Snap the hips; the arms just guide the bell."
             },
             {
-              "name": "Hanging leg raises x 6-10 + 5 burpees",
-              "cue": "Push-ups instead of burpees if the knee complains. Toes-to-bar instead of leg raises if a bar is handy."
+              "name": "Leg raises x 6-10 + 5 slam balls",
+              "cue": "Leg raises on the captain's chair (the dip station), no swing. Then 5 slams with the 20 lb slam ball. Push-ups instead of slams if the back complains.",
+              "alt": {
+                "weeks": [
+                  4,
+                  6,
+                  8,
+                  10
+                ],
+                "name": "Sled push, 2 lengths",
+                "cue": "Load the sled before the Engine starts: heavy enough that you have to drive, light enough to keep moving. No lowering and no landing, so it is easy on the knee."
+              }
             }
           ],
           "schedule": [
@@ -855,9 +883,9 @@
                 2
               ],
               "test": {
-                "name": "2,000 m ski erg test",
+                "name": "2,000 m row test",
                 "seconds": 600,
-                "cue": "Benchmark. Steady first 500 m, then build. Tap Next when you finish and note your time."
+                "cue": "Benchmark on the Concept2, damper 4-5. Steady first 500 m, then build; the last 500 m all out. Tap Next when you finish and note your time. Knee complaining? 10 min on the Echo bike for max calories instead, and retest the same way."
               }
             },
             {
@@ -888,13 +916,13 @@
                 12
               ],
               "test": {
-                "name": "2,000 m ski erg retest",
+                "name": "2,000 m row retest",
                 "seconds": 600,
-                "cue": "Beat your week 2 time. Tap Next when you finish and note your time."
+                "cue": "Beat your week 2 time, same damper. Tap Next when you finish and note your time."
               }
             }
           ],
-          "note": "Replaces the old toes-to-bar, calf raise and face pull block (v1.11). Calf raises moved to the Friday finisher."
+          "note": "Replaces the old toes-to-bar, calf raise and face pull block (v1.11). Calf raises moved to the Friday finisher. v1.21.0 (Cameron, Nov 25: no ski erg in the functional room; it has a Rogue Echo bike, a Concept2 rower, a push sled, kettlebells, slam balls and a captain's chair): the ski erg is out. Minute 1 is the Echo bike, the rower in weeks 4, 6, 8 and 10 (a station's alt takes its place in those weeks); minute 3 is leg raises and slam balls, a sled push in the rower weeks. The week 2 and 12 benchmark is a 2,000 m row."
         },
         {
           "id": "stretch",

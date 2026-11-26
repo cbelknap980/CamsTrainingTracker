@@ -166,7 +166,7 @@ export function learnPacing({ sessions, plan, rules, settings, extra }) {
     if (!ex) continue;
     const tempoSeconds = repSecondsFor(rules, ex);
     const defaultSetup = setupSecondsFor(rules, ex, null);
-    const r = learnRep(sets[id], tempoSeconds, cfg, !!ex.keepTempo);
+    const r = learnRep(sets[id], tempoSeconds, cfg, !!(ex.keepTempo || ex.slow));   // v1.21.0: a slow lift is never shortened either
     const u = learnSetup(leads[id], defaultSetup, cfg);
     const e = { tempoSeconds, defaultSetup };
     if (r.repSeconds != null) e.repSeconds = r.repSeconds;

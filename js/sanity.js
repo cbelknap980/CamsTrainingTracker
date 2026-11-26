@@ -225,3 +225,32 @@ export function rateSavedSet({ sessions, targets, recordId, index, rpe, plan, ru
   }
   return { record, target: cur, retargeted, why, line, stillUnrated };
 }
+
+/**
+ * v1.21.0 (rules.lastSetRating.beatPlan; Cameron, Nov 25: "make sure to utilize the data point if I change weight or
+ * reps... in post workout assessment"): the one-time pass for sessions saved before the rule. Each lift's latest
+ * session is worked out again from the target it had going in (rule 12); when the new rule decides it (he beat the
+ * plan and left the last set unrated) and the next target comes out different, the target and the session's
+ * what-changed line take the new result. A target he or the coach set since that session stays as it is.
+ * Returns { targets, sessions (the records that changed, new objects), lifts: [{ exerciseId, from, to }] }.
+ */
+export function rerunBeatPlan({ sessions, targets, plan, rules, settings }) {
+  const next = JSON.parse(JSON.stringify(targets || {}));
+  const all = (sessions || []).map(s => JSON.parse(JSON.stringify(s)));
+  const touched = new Map();
+  const lifts = [];
+  for (const id of Object.keys(next)) {
+    const record = all.filter(s => loggedLift(s, id)).sort((a, b) => when(b).localeCompare(when(a)))[0];
+    const cur = next[id];
+    if (!record || !cur || setSince(cur, record)) continue;
+    const run = rerunLift({ record, exerciseId: id, plan, rules, settings });
+    if (!run.line || !run.line.beat) continue;
+    const t = run.target || {};
+    if (t.weight === cur.weight && t.reps === cur.reps) continue;
+    lifts.push({ exerciseId: id, from: { weight: cur.weight, reps: cur.reps }, to: { weight: t.weight, reps: t.reps } });
+    takeRerun(cur, t);
+    putLine(record, id, run.line, '');
+    touched.set(record.id, record);
+  }
+  return { targets: next, sessions: [...touched.values()], lifts };
+}

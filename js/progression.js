@@ -399,6 +399,21 @@ export function accessoryNext(target, sets, o) {
 }
 
 /**
+ * v1.21.0 (rules.lastSetRating.beatPlan): did these sets beat the target? Every planned set done (no fewer done sets
+ * than planned), each at the target weight or heavier (a lift with no weight: reps only) with the target reps or more
+ * (the target's reps inside `bounds`), and at least one set heavier or with more reps.
+ */
+export function beatThePlan(sets, planned, target, bounds) {
+  const W = target && okNum(target.weight) ? target.weight : null;
+  if (!target || target.reps == null || !okNum(target.reps)) return false;
+  const R = clampTo(target.reps, bounds || [0, Infinity]);
+  const good = (sets || []).filter(s => s && okNum(s.reps) && (W == null || okNum(s.weight)));
+  if (!good.length || good.length < planned) return false;
+  if (!good.every(s => (W == null || s.weight >= W) && s.reps >= R)) return false;
+  return good.some(s => (W != null && s.weight > W) || s.reps > R);
+}
+
+/**
  * v1.18.15 (audit Nov 25, approved by Cameron): a weekly main lift that has asked for the same weight and reps for
  * rules.stallNote.sessions sessions in a row (Hard days hold without counting toward a reset, so nothing else would
  * say so). Returns [{ exerciseId, name, weight, reps, sessions, offer: { weight, reps } }]: the offer is one rep fewer
@@ -609,7 +624,20 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     const lastWork = done[done.length - 1];
     let judged = done;
     if (lastRule && lastWork && !lastWork.unconfirmed && done.some(s => s.unconfirmed)) judged = done.map(s => (s.unconfirmed ? { ...s, unconfirmed: false, rpe: null } : s));
-    const unrated = judged.filter(s => s.unconfirmed).length;
+    let unrated = judged.filter(s => s.unconfirmed).length;
+    // v1.21.0 (rules.lastSetRating.beatPlan; Cameron, Nov 25: "if I increase weight than plan or reps that likely
+    // indicates I could do more next time"): with the last set unrated, a lift that beat its target (every planned set
+    // at the target weight or heavier with the target reps or more, at least one over) counts the timer's guesses, the
+    // effort the plan asked for, as his ratings, and the rules below run from what he did.
+    let beatNote = '';
+    if (unrated && lastRule && lastRule.beatPlan && !ex.timed) {
+      const bounds = targetRepBounds(rules, ex, (planned.find(s => s.repRange) || {}).repRange || [0, Infinity], cur) || [0, Infinity];
+      if (beatThePlan(judged, planned.length, cur, bounds)) {
+        judged = judged.map(s => (s.unconfirmed ? { ...s, unconfirmed: false } : s));
+        unrated = 0;
+        beatNote = ' You beat the plan, so the sets you did not rate count at the effort the plan asked for.';
+      }
+    }
     // v1.18.15 (audit Nov 25, approved by Cameron: his curl held at 50 after 60 x 10 on every set): with the last set
     // unrated, a lift done heavier than its target on every planned set, with the target reps or more, takes the weight
     // he used and keeps the reps. Nothing is added on a guessed effort.
@@ -648,7 +676,8 @@ export function applyProgression({ session, targets, rules, plan, settings }) {
     // R4 rule 13: the v1.19 all-out check goes here, on `outcome`, after these rules and before the target is written.
 
     const text = lineFor(outcome, { name, detail, stall: stallRules });
-    say(`${text.text}${heavyNote}`, outcome.verdict, text.reason);
+    say(`${text.text}${beatNote}${heavyNote}`, outcome.verdict, beatNote ? `you beat the plan: ${text.reason}` : text.reason);
+    if (beatNote) lines[lines.length - 1].beat = true;
     cur.weight = snapLoad(rules, ex, outcome.weight);
     cur.reps = outcome.reps;
     if (ex.mainLift) cur.stall = outcome.stall;

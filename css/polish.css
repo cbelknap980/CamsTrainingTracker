@@ -1017,3 +1017,10 @@ span.nut-goal { text-decoration: none; cursor: default; }
 .nut-foods-row small { display: block; color: var(--muted); font-size: var(--t-label); }
 body.computer .nut-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .nut-row.swipeable { position: relative; transition: transform 0.22s var(--ease); }
+
+/* v1.21.0: a slow lift (plan.json `slow`) says how inside the pace block, in the amber accent, and in Plan lists */
+.pace-slow { margin-top: 7px; font-size: var(--t-small); line-height: 1.3; color: #ffd18a; }
+.pace-slow b { color: var(--accent); }
+.pace.is-slow .pace-fill { background: var(--accent); }
+.player.tight-3 .pace-slow { margin-top: 4px; font-size: 0.8rem; }
+.slow-tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: var(--t-label); font-weight: 700; vertical-align: middle; }

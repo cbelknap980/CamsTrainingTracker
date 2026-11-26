@@ -271,20 +271,26 @@ function addMainLiftEntry(ctx, block, item, ex, target, repRange) {
   if (item.rampUp && target.weight != null && target.weight >= r.rampUp.skipBelowLb) {
     const bar = r.rampUp.barWeightLb;
     // v1.18.5: easy plate loads (135 = bar + a 45 a side, not 130); a step that lands on the one before it is left out
+    // v1.21.0 (Cameron, Nov 25: "Make ramp ups faster"): a step with minWorkLb only when the work weight reaches it
+    // (strict press 95: the bar and 65), betweenSeconds between two ramp-ups, restSeconds before the first work set,
+    // and ramp-up reps timed at rampUp.repSeconds instead of the lift's work tempo
     const steps = [];
     for (const rs of r.rampUp.steps) {
+      if (rs.minWorkLb != null && target.weight < rs.minWorkLb) continue;
       const w = rs.fraction === 0 ? bar : easyLoad(r, target.weight * rs.fraction, target.weight);
       if (!steps.length || steps[steps.length - 1].w !== w) steps.push({ ...rs, w });
     }
+    const rampTempo = r.rampUp.repSeconds ? { ...ex, tempo: [r.rampUp.repSeconds] } : ex;
     steps.forEach((rs, i) => {
       const w = rs.w;
+      const lastRamp = i === steps.length - 1;
       push(ctx, { kind: 'set', blockId: block.id, blockName: block.name, blockType: block.type, name: ex.name,
         exerciseId: item.exercise, setIndex: null, setCount: null, ramp: true,
         target: { weight: w, reps: rs.reps }, repRange: [rs.reps, rs.reps], effort: null,
         effortText: rs.label ? `Ramp-up: ${rs.label.toLowerCase()}` : `Ramp-up ${i} of ${steps.length - 1}`, rpeDefault: null,
-        cue: '', ...timedSet(ctx, ex, rs.reps, false, null), tips: [] });
+        cue: '', ...timedSet(ctx, rampTempo, rs.reps, false, null), tips: [] });
       push(ctx, { kind: 'rest', blockId: block.id, blockName: block.name, blockType: block.type, name: 'Rest',
-        seconds: r.rampUp.restSeconds, countdown: true, trimKind: 'rest' });
+        seconds: lastRamp || r.rampUp.betweenSeconds == null ? r.rampUp.restSeconds : r.rampUp.betweenSeconds, countdown: true, trimKind: 'rest' });
     });
   }
   return { derived: false };
@@ -395,6 +401,10 @@ export function emomMinutesFor(block, week) {
   if (row && row.test) return { minutes: 0, test: row.test };
   return { minutes: row ? row.minutes : block.minutes, test: null };
 }
+/** v1.21.0: a station with `alt` = { weeks, name, cue } is swapped for it in those weeks (rower and sled weeks). */
+export function stationFor(st, week) {
+  return st && st.alt && Array.isArray(st.alt.weeks) && st.alt.weeks.includes(week) ? { ...st, name: st.alt.name, cue: st.alt.cue || st.cue } : st;
+}
 function addEmom(ctx, block) {
   const { minutes, test } = emomMinutesFor(block, ctx.week);
   if (test) {
@@ -407,7 +417,7 @@ function addEmom(ctx, block) {
   const n = stations.length;
   const rounds = Math.ceil(minutes / n);
   for (let m = 0; m < minutes; m++) {
-    const st = stations[m % n];
+    const st = stationFor(stations[m % n], ctx.week);
     push(ctx, { kind: 'timed', blockId: block.id, blockName: block.name, blockType: 'emom',
       name: `Min ${m + 1} of ${minutes}: ${st.name}`, seconds: 60, countdown: true,
       cue: st.cue || block.cue || '', setIndex: m + 1, setCount: minutes,

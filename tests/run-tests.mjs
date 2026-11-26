@@ -67,9 +67,11 @@ check('lift2: B alternates incline press and row, 3 sets each', bb === 'incline_
 check('lift2: old "last" block is gone', !l2.steps.some(s => s.blockId === 'last'));
 const eng = wk => buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: wk, targets: {} }).steps.filter(s => s.blockId === 'engine' && s.kind === 'timed');
 const e1 = eng(1);
-check('lift2 week 1: Engine = 9 one-minute timed steps rotating 3 stations', e1.length === 9 && e1.every(s => s.kind === 'timed' && s.seconds === 60 && s.countdown && s.blockType === 'emom') && e1[0].name.startsWith('Min 1 of 9: Bike') && e1[3].name.startsWith('Min 4 of 9: Bike') && e1[8].round === 3, e1.map(s => s.name));
+check('lift2 week 1: Engine = 9 one-minute timed steps rotating 3 stations', e1.length === 9 && e1.every(s => s.kind === 'timed' && s.seconds === 60 && s.countdown && s.blockType === 'emom') && e1[0].name.startsWith('Min 1 of 9: Echo bike') && e1[3].name.startsWith('Min 4 of 9: Echo bike') && e1[8].round === 3, e1.map(s => s.name));
 check('lift2: Engine minutes by week: 9, test, 9, 12, 6 (light), 15 (heavy), test', [1, 2, 3, 4, 7, 8, 12].map(w => eng(w).length).join(',') === '9,1,9,12,6,15,1', [1, 2, 3, 4, 7, 8, 12].map(w => eng(w).length));
-check('lift2 weeks 2 and 12: Engine is a 2,000 m ski erg test', /2,000 m ski erg/.test(eng(2)[0].name) && /2,000 m ski erg/.test(eng(12)[0].name));
+check('lift2 weeks 2 and 12: Engine is a 2,000 m row test (v1.21.0: his gym has no ski erg)', /2,000 m row test/.test(eng(2)[0].name) && /2,000 m row retest/.test(eng(12)[0].name) && eng(2).length === 1);
+check('v1.21.0 no ski erg in any Engine station or benchmark', plan.sessions.every(l => l.blocks.filter(b => b.type === 'emom').every(b => !/ski erg/i.test(JSON.stringify([b.stations, b.schedule, b.cue])))));
+check('v1.21.0 Engine week 4: rower and sled push take minutes 1 and 3; week 5: Echo bike and leg raises', /Row, 15-18 cal/.test(eng(4)[0].name) && /Sled push/.test(eng(4)[2].name) && /Kettlebell/.test(eng(4)[1].name) && /Echo bike/.test(eng(5)[0].name) && /Leg raises/.test(eng(5)[2].name) && eng(4)[0].cue.includes('Concept2'), [eng(4).slice(0, 3).map(s => s.name), eng(5).slice(0, 3).map(s => s.name)]);
 check('lift2: transition into the Engine names the functional room', l2.steps.some(s => s.kind === 'transition' && /engine \(functional room\)/.test(s.name)));
 const l2w4 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 4, targets: {} });
 const engFrom = l2w4.steps.findIndex(s => s.blockId === 'engine');
@@ -92,7 +94,7 @@ check('week 3 lift1: 4 ramp-up sets on easy plate loads (v1.18.5: 45, 95, 135, 1
 check('week 3 lift1: work sets pre-filled 185 x 4', w3.steps.filter(s => s.exerciseId === 'back_squat' && !s.ramp).every(s => s.target.weight === 185 && s.target.reps === 4));
 check('week 3 lift1: planned within 61 min', w3.plannedSeconds / 60 <= 61, { min: w3.plannedSeconds / 60 });
 const w3l2 = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 3, targets });
-check('week 3 lift2: press ramps on easy loads (95 lb target, v1.18.5: 45, 65, 75; 50 % lands on the bar and is left out)', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight).join(',') === '45,65,75', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight));
+check('week 3 lift2: press ramps on easy loads (95 lb target, v1.21.0: the bar and 65 only; the 50 % step waits for 185 and the 85 % step for 135)', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight).join(',') === '45,65', w3l2.steps.filter(s => s.ramp).map(s => s.target.weight));
 check('week 3 lift2: planned within 62 min', w3l2.plannedSeconds / 60 <= 62, { min: w3l2.plannedSeconds / 60 });
 const w3l3 = buildTimeline({ plan, rules, settings, sessionId: 'lift3', week: 3, targets });
 check('week 3 lift3: planned within 65 min without if-time (v1.11: calf raise in the finisher; v1.18: the row is timed per arm)', w3l3.steps.filter(s => !s.iftime).reduce((a, s) => a + s.seconds, 0) / 60 <= 65, { min: w3l3.steps.filter(s => !s.iftime).reduce((a, s) => a + s.seconds, 0) / 60 });
@@ -874,8 +876,10 @@ console.log('v1.18 player rules (no screen needed)');
   const cleans = tl.steps.map((s, i) => (s.kind === 'set' && s.exerciseId === 'power_clean' ? i : -1)).filter(i => i >= 0);
   const ramps = cleans.filter(i => tl.steps[i].ramp), work = cleans.filter(i => !tl.steps[i].ramp);
   done(cleans[0]);
-  check('v1.18 a barbell set at a new weight waits too (the bar has to be reloaded)', tl.steps[cleans[1]].target.weight !== tl.steps[cleans[0]].target.weight && p.needsConfirm(cleans[1] - 1) === true, [tl.steps[cleans[0]].target, tl.steps[cleans[1]].target]);
-  cleans.slice(1, cleans.indexOf(work[0]) + 1).forEach(i => done(i));
+  check('v1.21.0 one ramp-up to the next does not wait (rampUp.confirmBetween false)', tl.steps[cleans[1]].ramp && tl.steps[cleans[1]].target.weight !== tl.steps[cleans[0]].target.weight && p.needsConfirm(cleans[1] - 1) === false, [tl.steps[cleans[0]].target, tl.steps[cleans[1]].target]);
+  cleans.slice(1, cleans.indexOf(work[0])).forEach(i => done(i));
+  check('v1.18 a barbell set at a new weight waits too (the first work set after the ramp-ups: the bar has to be reloaded)', tl.steps[work[0]].target.weight !== tl.steps[ramps[ramps.length - 1]].target.weight && p.needsConfirm(work[0] - 1) === true, [tl.steps[ramps[ramps.length - 1]].target, tl.steps[work[0]].target]);
+  done(work[0]);
   check('v1.18 the same weight again does not wait', tl.steps[work[1]].target.weight === tl.steps[work[0]].target.weight && p.needsConfirm(work[1] - 1) === false);
   done(work[0], 140);
   check('v1.18 a set logged at another weight than planned makes the next one wait', p.needsConfirm(work[1] - 1) === true);
@@ -1359,8 +1363,9 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
 }
 
 {
-  console.log('\nv1.18.15: audit fixes (rules.accessoryJump, lastSetRating.unratedHeavierFollows)');
-  const go = (id, t, sets, range, week = 3) => applyProgression({ session: mkSession(week, sets.map(([w, r, e, x]) => ws(id, w, r, e, range, x))), targets: { [id]: { ...t } }, rules, plan, settings }).targets[id];
+  console.log('\nv1.18.15: audit fixes (rules.accessoryJump, lastSetRating.unratedHeavierFollows; with beatPlan off, as they shipped)');
+  const r1815 = JSON.parse(JSON.stringify(rules)); r1815.lastSetRating.beatPlan = false;
+  const go = (id, t, sets, range, week = 3) => applyProgression({ session: mkSession(week, sets.map(([w, r, e, x]) => ws(id, w, r, e, range, x))), targets: { [id]: { ...t } }, rules: r1815, plan, settings }).targets[id];
   const U = { unconfirmed: true };
   let t = go('curl', { weight: 50, reps: 10 }, [[60, 10, 8, U], [60, 10, 9, U], [60, 10, 9, U]], [10, 12]);
   check('his Nov 24 curl: 60 x 10 on every set, last set unrated: the target follows to 60, reps stay 10', t.weight === 60 && t.reps === 10, t);
@@ -1413,7 +1418,7 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   check('coach change based on the latest session applies', !staleAdjustment({ exerciseId: 'curl', weight: 60, basedOn: '2026-11-24T23:53:55.873Z' }, ss));
   check('coach change older than a saved session of that lift is left out', staleAdjustment({ exerciseId: 'curl', weight: 60, basedOn: '2026-11-20T00:00:00Z' }, ss));
   check('coach change with no basedOn applies as before; another lift\'s session does not count', !staleAdjustment({ exerciseId: 'curl', weight: 60 }, ss) && !staleAdjustment({ exerciseId: 'rdl', weight: 200, basedOn: '2026-11-20T00:00:00Z' }, ss));
-  const off = JSON.parse(JSON.stringify(rules)); off.accessoryJump.on = false; off.lastSetRating.unratedHeavierFollows = false;
+  const off = JSON.parse(JSON.stringify(rules)); off.accessoryJump.on = false; off.lastSetRating.unratedHeavierFollows = false; off.lastSetRating.beatPlan = false;
   const o1 = applyProgression({ session: mkSession(3, [1, 2, 3].map(() => ws('curl', 30, 12, 9, [10, 12]))), targets: { curl: { weight: 30, reps: 12 } }, rules: off, plan, settings }).targets.curl;
   const o2 = applyProgression({ session: mkSession(3, [1, 2, 3].map(() => ws('curl', 60, 10, 9, [10, 12], U))), targets: { curl: { weight: 50, reps: 10 } }, rules: off, plan, settings }).targets.curl;
   check('switched off, both rules go back to v1.18.14 (40 x 10; unrated holds at 50)', o1.weight === 40 && o1.reps === 10 && o2.weight === 50, [o1, o2]);
@@ -1524,6 +1529,88 @@ console.log('v1.18 runs on Progress, gym time, unchecked sets');
   const r4 = applyFoodOps(log, badSteps);
   check('steps with numbers that cannot be right are left out (400 g, -1 servings, no date, 0 g, unknown, 8 x 50 g)', r4.bad.join() === 'x1,x2,x3,x4,x5,x6' && r4.applied.length === 0 && dayTotal(r4.log, '2026-11-25') === 113, r4.bad);
   check('a step needs an id', !validFoodOp({ type: 'remove', entryId: 'a' }) && validFoodOp({ id: 'z', type: 'remove', entryId: 'a' }));
+}
+
+{
+  console.log('\nv1.21.0: workout 5 tweaks (beat the plan, faster ramp-ups, no set-up tap on quick lifts, slow lifts, Engine)');
+  const U = { unconfirmed: true };
+  const go = (id, t, sets, range, week = 3) => applyProgression({ session: mkSession(week, sets.map(([w, r, e, x]) => ws(id, w, r, e, range, x))), targets: { [id]: { stall: 0, ...t } }, rules, plan, settings });
+  // his Nov 25 row: target 55 x 8; 55 x 8 rated Easy, then 60 x 8 twice that the timer logged (guess Solid)
+  let r = go('cs_row', { weight: 55, reps: 8 }, [[55, 8, 6], [60, 8, 8, U], [60, 8, 8, U]], [8, 10]);
+  let l = r.lines.find(x => x.exerciseId === 'cs_row');
+  check('his Nov 25 row (55 x 8, 60 x 8, 60 x 8, last unrated): beat the plan, so 60 x 10 next time, not 55 x 8', r.targets.cs_row.weight === 60 && r.targets.cs_row.reps === 10 && l.beat === true && /You beat the plan/.test(l.text), [r.targets.cs_row, l.text]);
+  r = go('incline_curl', { weight: 40, reps: 8 }, [[50, 8, 6], [50, 8, 9, U], [50, 8, 9, U]], [8, 12]);
+  check('his Nov 25 incline curl (40 asked, 50 x 8 on every set; the finisher guess is Hard): 50 x 9', r.targets.incline_curl.weight === 50 && r.targets.incline_curl.reps === 9, r.targets.incline_curl);
+  r = go('lateral_raise', { weight: 30, reps: 12 }, [[30, 14, 9, U], [30, 14, 9, U], [30, 14, 9, U]], [12, 15]);
+  check('more reps than asked at the same weight, all unrated: counts too (30 x 14 -> 30 x 15)', r.targets.lateral_raise.weight === 30 && r.targets.lateral_raise.reps === 15, r.targets.lateral_raise);
+  r = go('lateral_raise', { weight: 30, reps: 12 }, [[30, 12, 9, U], [30, 12, 9, U], [30, 12, 9, U]], [12, 15]);
+  check('exactly the plan, all unrated: still holds (nothing beaten)', r.targets.lateral_raise.weight === 30 && r.targets.lateral_raise.reps === 12 && !r.lines[0].beat, r.targets.lateral_raise);
+  r = go('cs_row', { weight: 55, reps: 8 }, [[60, 8, 8, U], [60, 8, 8, U], [60, 7, 8, U]], [8, 10]);
+  check('one set short of the target reps: not a beat, holds', r.targets.cs_row.weight === 55 && r.targets.cs_row.reps === 8 && !r.lines[0].beat, r.targets.cs_row);
+  r = go('cs_row', { weight: 55, reps: 8 }, [[60, 8, 8, U], [60, 8, 8, U], [null, null, null, { done: false, skipped: true }]], [8, 10]);
+  check('a planned set skipped (2 of 3 done): not a beat', r.targets.cs_row.weight === 55 && !r.lines[0].beat, r.targets.cs_row);
+  r = go('back_squat', { weight: 185, reps: 5 }, [[195, 5, 8, U], [195, 5, 8, U], [195, 5, 8, U]], [4, 6]);
+  check('main lift done heavier, last set unrated (guess Solid): steps up from what he did, 200 x 5', r.targets.back_squat.weight === 200 && r.targets.back_squat.reps === 5 && r.targets.back_squat.stall === 0, r.targets.back_squat);
+  r = go('back_squat', { weight: 185, reps: 5 }, [[195, 5, 9], [195, 5, 9], [195, 5, 8, U]], [4, 6]);
+  check('main lift done heavier with sets he rated Hard: the weight he used, no step (195 x 5)', r.targets.back_squat.weight === 195 && r.targets.back_squat.reps === 5, r.targets.back_squat);
+  r = go('cs_row', { weight: 55, reps: 8 }, [[60, 8, 9], [60, 8, 9], [60, 8, 9]], [8, 10]);
+  check('last set rated: the normal rule, no beat note (60 x 9 on Hard)', r.targets.cs_row.weight === 60 && r.targets.cs_row.reps === 9 && !r.lines[0].beat, r.targets.cs_row);
+  const offB = JSON.parse(JSON.stringify(rules)); offB.lastSetRating.beatPlan = false;
+  const o = applyProgression({ session: mkSession(3, [ws('cs_row', 55, 8, 6, [8, 10]), ws('cs_row', 60, 8, 8, [8, 10], U), ws('cs_row', 60, 8, 8, [8, 10], U)]), targets: { cs_row: { weight: 55, reps: 8 } }, rules: offB, plan, settings }).targets.cs_row;
+  check('beatPlan false: back to holding at 55 x 8', o.weight === 55 && o.reps === 8, o);
+
+  // the one-time pass over saved sessions
+  const { upgrade1210 } = await import('../js/upgrade.js');
+  const rec = { ...mkSession(2, [ws('cs_row', 55, 8, 6, [8, 10], { target: { weight: 55, reps: 8 } }), ws('cs_row', 60, 8, 8, [8, 10], U), ws('cs_row', 60, 8, 8, [8, 10], U), ws('curl', 60, 10, 9, [10, 12], U), ws('curl', 60, 10, 9, [10, 12], U), ws('curl', 60, 10, 9, [10, 12], U)]), id: 'nov25', startedAt: '2026-11-26T00:10:00Z', endedAt: '2026-11-26T01:13:00Z', targetsBefore: { cs_row: { weight: 55, reps: 8, stall: 0 }, curl: { weight: 50, reps: 10, stall: 0 } }, whatChanged: [{ exerciseId: 'cs_row', text: 'old', verdict: 'hold' }] };
+  const tg0 = { cs_row: { weight: 55, reps: 8, source: 'engine', updated: '2026-11-18T17:42:06Z' }, curl: { weight: 60, reps: 10, source: 'coach', updated: '2026-11-26T04:00:00Z' } };
+  const snap = JSON.stringify([rec, tg0]);
+  const up = upgrade1210({ targets: tg0, sessions: [rec], rules, plan, settings });
+  check('upgrade 1.21.0: his row moves to 60 x 10 and the session says why; a target the coach set since stays', up.targets.cs_row.weight === 60 && up.targets.cs_row.reps === 10 && up.targets.curl.weight === 60 && up.targets.curl.reps === 10 && up.zeroed === 1 && /beat the plan/.test(up.sessions[0].whatChanged.find(x => x.exerciseId === 'cs_row').text), [up.targets, up.lifts]);
+  const again = upgrade1210({ targets: up.targets, sessions: [up.sessions[0]], rules, plan, settings });
+  check('upgrade 1.21.0: the input is not changed and a second run changes nothing', JSON.stringify([rec, tg0]) === snap && again.zeroed === 0, again.lifts);
+
+  // ramp-ups
+  const rampOf = (sid, ex, t) => {
+    const tl = buildTimeline({ plan, rules, settings, sessionId: sid, week: 3, targets: { ...targets, ...t } });
+    const i0 = tl.steps.findIndex(x => x.ramp && x.exerciseId === ex);
+    const steps = tl.steps.slice(i0, tl.steps.findIndex(x => x.kind === 'set' && x.exerciseId === ex && !x.ramp));
+    return { w: steps.filter(x => x.ramp).map(x => x.target.weight).join(','), rests: steps.filter(x => x.kind === 'rest').map(x => x.seconds).join(','), secs: steps.filter(x => x.ramp).map(x => x.seconds) };
+  };
+  let rp = rampOf('lift2', 'strict_press', { strict_press: { weight: 95, reps: 5 } });
+  check('press at 95: two ramp-ups (bar, 65), 30 s between, 60 s before the first work set', rp.w === '45,65' && rp.rests === '30,60', rp);
+  check('ramp-up reps are quick (the bar x 5 is timed under 25 s, not at the press tempo)', rp.secs[0] <= 25, rp.secs);
+  rp = rampOf('lift2', 'strict_press', { strict_press: { weight: 135, reps: 5 } });
+  check('press at 135: the 85 % step comes back (bar, 95, 115)', rp.w === '45,95,115' && rp.rests === '30,30,60', rp);
+  rp = rampOf('lift1', 'back_squat', { back_squat: { weight: 195, reps: 5 } });
+  check('squat at 195 keeps all four (45, 95, 135, 165), 30 s between', rp.w === '45,95,135,165' && rp.rests === '30,30,30,60', rp);
+
+  // set-up taps
+  const tl = buildTimeline({ plan, rules, settings, sessionId: 'lift2', week: 3, targets: { ...targets, strict_press: { weight: 95, reps: 5 }, incline_db_press: { weight: 120, reps: 7 }, cs_row: { weight: 55, reps: 8 } } });
+  const p = new Player({ timeline: tl, plan, rules, settings, targets, container: null, onFinish: () => {} });
+  const first = ex => tl.steps.findIndex(x => x.kind === 'set' && x.exerciseId === ex);
+  check('the strict press (barbell) still waits for Set-up done before its first ramp-up', p.needsConfirm(first('strict_press') - 1) === true);
+  check('weighted pull-up, incline dumbbell press, row and the dumbbell finisher start on their own', ['weighted_pullup', 'incline_db_press', 'cs_row', 'lateral_raise', 'incline_curl', 'oh_tri_ext'].every(ex => p.needsConfirm(first(ex) - 1) === false), ['weighted_pullup', 'incline_db_press', 'cs_row', 'lateral_raise'].map(ex => p.needsConfirm(first(ex) - 1)));
+  const plan2 = JSON.parse(JSON.stringify(plan)); plan2.exercises.incline_db_press.confirmSetup = true;
+  const p2 = new Player({ timeline: tl, plan: plan2, rules, settings, targets, container: null, onFinish: () => {} });
+  check('confirmSetup true on an exercise brings its tap back', p2.needsConfirm(first('incline_db_press') - 1) === true);
+  const eng = tl.steps.findIndex(x => x.blockType === 'emom');
+  check('the Engine still waits for Ready', p.needsConfirm(eng - 1) === true);
+
+  // slow lifts
+  const slow = Object.entries(plan.exercises).filter(([, e]) => e.slow).map(([k]) => k).sort().join(',');
+  check('eight lifts are marked slow', slow === 'ab_wheel,bss,calf_raise,incline_curl,leg_curl,oh_tri_ext,preacher_curl,rdl', slow);
+  check('overhead triceps extension: 3 s down (set of 8 gets about 48 s, was 39)', plan.exercises.oh_tri_ext.tempo[0] === 3 && setTiming(rules, plan.exercises.oh_tri_ext, 8, false).seconds === 48, setTiming(rules, plan.exercises.oh_tri_ext, 8, false));
+  check('no main lift, clean or push press is marked slow', ['back_squat', 'front_squat', 'strict_press', 'weighted_pullup', 'power_clean', 'push_press'].every(k => !plan.exercises[k].slow));
+  const early = [1, 2, 3, 4].map(i => ({ dir: 'early', used: 2.5, at: `t${i}` }));
+  check('pacing never shortens a slow lift (learnRep with keep-tempo)', learnRep(early, 5, pacingConfig(rules), true).repSeconds == null && learnRep(early, 5, pacingConfig(rules), false).repSeconds != null);
+  const lp = learnPacing({ sessions: [{ startedAt: '2026-12-01', sets: [1, 2, 3].map(i => ({ exerciseId: 'incline_curl', done: true, reps: 8, weight: 50, setIndex: i, secs: { plan: 48, took: 22, by: 'done' }, at: `2026-12-01T00:0${i}:00Z` })) }], plan, rules, settings });
+  check('his early Done taps on the incline curl do not shorten its timer', !(lp.incline_curl && lp.incline_curl.repSeconds), lp.incline_curl);
+  const sp = new Player({ timeline: tl, plan, rules, settings, targets, container: null, onFinish: () => {} });
+  const curl = tl.steps[first('incline_curl')];
+  const n1 = sp.slowNudge({ ...curl, record: { secs: { plan: 48, took: 25 } } }, plan.exercises.incline_curl, false);
+  const n2 = sp.slowNudge({ ...curl, record: { secs: { plan: 48, took: 25 } } }, plan.exercises.incline_curl, false);
+  const n3 = sp.slowNudge({ ...tl.steps[first('oh_tri_ext')], record: { secs: { plan: 48, took: 46 } } }, plan.exercises.oh_tri_ext, false);
+  check('Done well before the timer on a slow lift says so once per lift; on time says nothing', /slow lift: 3 s down, pause with straight arms. Use the whole timer/.test(n1) && n2 === '' && n3 === '', [n1, n2, n3]);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll tests passed');

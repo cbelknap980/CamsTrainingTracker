@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.15",
+  "rulesVersion": "1.16",
   "increments": {
     "description": "v1.18.10 (Cameron, Nov 25: \"Smallest increment for these types of weights should be 5lb\"): every step is 5 lb or more. The strict press stepped 2.5 lb (92.5 needs 1.25 lb plates); it now steps 5 like everything else.",
     "default": 5,
@@ -42,6 +42,8 @@
   "lastSetRating": {
     "description": "v1.18.7 (Cameron, Nov 24: \"What about other lifts too. You should be taking into account how i rates the... Last set\"): the effort picked on the last work set of a lift stands for the lift. Earlier sets the timer logged with no effort picked no longer hold the target (their guessed effort is ignored); an unrated last set still holds it. Accessories move by that rating: Easy (up to easyUpTo) adds a weight step now with reps at the bottom of the range, Solid (up to solidUpTo) adds solidReps reps, Hard or Maxed adds one rep as before, and a missed rep adds at most one. The top of the range still steps the weight. Week 2 no longer holds accessory weights. Main lifts keep rules R5, judged on the sets he rated. v1.18.15 (audit Nov 25, approved by Cameron): unratedHeavierFollows: with the last set unrated, every planned set done heavier than the target at the target reps or more moves the target to the weight he used, reps unchanged.",
     "unratedHeavierFollows": true,
+    "beatPlan": true,
+    "beatPlanDescription": "v1.21.0 (Cameron, Nov 25, workout 5: \"if I increase weight than plan or reps that likely indicates I could do more next time\"): with the lift's last set unrated, when every planned set was done at the target weight or heavier with the target reps or more, and at least one set beat the target, the sets he did not rate count at the effort the plan asked for (the guess the timer logged) and the normal rule runs from what he did: a finisher lift (Hard, 0-1 reps left) adds a rep, a Solid lift adds two, a main lift steps up from the weight he used. A rating he picked always counts as picked. Only for beating the plan: a set short of the target still holds it. beatPlan false restores unratedHeavierFollows alone.",
     "decides": true,
     "easyUpTo": 6.9,
     "solidUpTo": 8.7,
@@ -122,7 +124,8 @@
       },
       {
         "fraction": 0.5,
-        "reps": 5
+        "reps": 5,
+        "minWorkLb": 185
       },
       {
         "fraction": 0.7,
@@ -130,10 +133,15 @@
       },
       {
         "fraction": 0.85,
-        "reps": 2
+        "reps": 2,
+        "minWorkLb": 135
       }
     ],
     "restSeconds": 60,
+    "betweenSeconds": 30,
+    "confirmBetween": false,
+    "repSeconds": 2.5,
+    "v121Description": "v1.21.0 (Cameron, Nov 25, workout 5: \"set and ramp for barbell strict press seems too long. Make ramp ups faster\"): a step with minWorkLb is used only when the work weight is at least that heavy, so a light lift takes fewer ramp-ups (strict press 95: the bar and 65, not the bar, 65 and 75; a 195 squat keeps all four). The rest between two ramp-ups is betweenSeconds (load the next plates); the rest after the last one, before the first work set, stays restSeconds. With confirmBetween false a ramp-up starts on its own clock instead of waiting for a Set-up done tap (the first ramp-up and the first work set still wait). Ramp-up reps are timed at repSeconds a rep, not the lift's work tempo.",
     "skipBelowLb": 95,
     "barWeightLb": 45,
     "bigPlateLb": 45,
@@ -191,6 +199,8 @@
     "extendSeconds": 15,
     "rampSetSeconds": 30,
     "confirmSetup": "exercise",
+    "noConfirmEquipment": ["dumbbell", "machine", "cable", "weighted_bw", "bodyweight"],
+    "noConfirmDescription": "v1.21.0 (Cameron, Nov 25, workout 5: \"dont need to confirm set-up for weight pullups\", \"for workouts with dumbells and machines that dont take much setup, no need to confrim setup done, just move into workout\"): the first set of a lift on this equipment starts when its set-up time runs out, with no Set-up done tap. Barbell lifts still wait. An exercise in plan.json with confirmSetup true or false overrides its equipment.",
     "confirmSetupDescription": "v1.18: the countdown before the first set of each exercise waits for a 'Set-up done' tap instead of starting the set by itself (values: exercise, block, off). confirmWeightChange lists the equipment where a set whose weight differs from the set before it waits too (the bar has to be reloaded). confirmBeforeBlocks lists block types that wait for a 'Ready' tap before they start. A tap during a rest keeps the rest and only drops the set-up time added to it. The Settings toggle switches all of it off on the phone.",
     "confirmWeightChange": [
       "barbell"
