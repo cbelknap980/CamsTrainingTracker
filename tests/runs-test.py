@@ -241,7 +241,8 @@ with sync_playwright() as p:
     home = page.locator('.card.accent').inner_text()
     check('next Tuesday asks for the intervals and offers to log', '5 × 2 min fast, 2 min easy' in home and 'Easy: jog or walk until heart rate is under 160.' in home and 'RPE' not in home and page.locator('.card.accent button:has-text("Log this run")').count() == 1, home)
     page.click('#tabs button[data-view="runs"]'); page.wait_for_selector('#runs-week')
-    check('the long run target moves up half a mile after 3.6', '4 mi' in page.locator('.run-plan[data-run="run2"]').inner_text() and 'longest so far 3.6 mi' in page.locator('.run-plan[data-run="run2"]').inner_text(), page.locator('.run-plan[data-run="run2"]').inner_text())
+    # v1.22.0 (Nov 26 run plan review): at most 10% past the longest run in the last 30 days, rounded down to a quarter mile
+    check('v1.22.0 the long run target moves up 10% after 3.6 (3.75 mi) and names the last 30 days', '3.75 mi' in page.locator('.run-plan[data-run="run2"]').inner_text() and 'longest run in the last 30 days 3.6 mi' in page.locator('.run-plan[data-run="run2"]').inner_text() and '145-158' in page.locator('.run-plan[data-run="run2"]').inner_text(), page.locator('.run-plan[data-run="run2"]').inner_text())
 
     print('Off schedule (v1.12)')
     page.clock.set_system_time('2026-11-25T07:00:00')   # Wednesday of week 2: Tuesday's intervals were not run

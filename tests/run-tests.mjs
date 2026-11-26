@@ -554,19 +554,48 @@ console.log('v1.9 muscle groups and coach check-ins');
   check('v1.10 time prints as a clock', fmtDuration(27.5) === '27:30' && fmtDuration(62.5) === '1:02:30' && fmtDuration(8.867) === '8:52' && fmtDuration(null) === '');
   check('v1.10 one line per run; bike distance carries no pace', runLine({ type: 'Intervals', distance: 3.1, minutes: 27.5, hr: 151.6 }, rules) === '3.1 mi · 27:30 · 8:52/mi · HR 152' && runLine({ type: 'Bike/rower sub', distance: 5.59, minutes: 25 }, rules) === '5.59 mi · 25:00' && runLine({ type: 'Easy run' }, rules) === '');
   const [r1, r2] = plan.runs;
-  check('v1.10 the interval set follows the week', prescription(r1, 1).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 6).text === '5 × 3 min fast, 2 min easy' && prescription(r1, 12).text === '4 × 4 min fast, 2-3 min easy', [prescription(r1, 1).text, prescription(r1, 6).text, prescription(r1, 12).text]);
-  check('v1.10 the numbers on the plan runs agree with their notes', r1.note.includes('5 x 2 min fast / 2 min easy') && r1.note.includes('5 x 3 / 2') && r1.note.includes('4 x 4 / 2-3') && r2.note.includes('Start 3.5 mi, add 0.5 mi') && r2.distance.startMiles === 3.5 && r2.distance.stepMiles === 0.5);
+  check('v1.10 the interval set follows the week', prescription(r1, 1).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 6).text === '5 × 3 min fast, 2 min easy' && prescription(r1, 11).text === '4 × 4 min fast, 2-3 min easy', [prescription(r1, 1).text, prescription(r1, 6).text, prescription(r1, 11).text]);
+  // v1.22.0 (Nov 26 run plan review): 5K time trial in weeks 3 and 12, 3 rounds in the lighter week 7
+  check('v1.22.0 weeks 3 and 12 are a 5K time trial; week 7 is 3 rounds; weeks 6 and 8 stay 5', prescription(r1, 3).kind === 'test' && prescription(r1, 3).text === '5K time trial' && prescription(r1, 12).text === '5K time trial' && prescription(r1, 3).lines.length === 3 && /Compare it with your week 3 time/.test(prescription(r1, 12).lines[2])
+    && prescription(r1, 2).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 4).text === '5 × 2 min fast, 2 min easy' && prescription(r1, 7).text === '3 × 3 min fast, 2 min easy' && prescription(r1, 8).text === '5 × 3 min fast, 2 min easy' && prescription(r1, 9).text === '4 × 4 min fast, 2-3 min easy',
+    [3, 7, 8, 12].map(w => prescription(r1, w).text));
+  check('v1.22.0 every interval week 1-12 is covered by exactly one stage or test', Array.from({ length: 12 }, (_, i) => i + 1).every(w => r1.intervals.filter(iv => w >= iv.weeks[0] && w <= iv.weeks[1]).length === 1));
+  check('v1.10 the numbers on the plan runs agree with their notes', r1.note.includes('5 x 2 min fast / 2 min easy') && r1.note.includes('5 x 3 / 2') && r1.note.includes('4 x 4 / 2-3') && r2.note.includes('Start 3.5 mi, then add 0.5 mi') && r2.distance.startMiles === 3.5 && r2.distance.stepMiles === 0.5
+    && r1.note.includes('week 7, the lighter week: 3 x 3 / 2') && r1.intervals.find(iv => iv.weeks[0] === 7).reps === 3 && r1.note.includes('Weeks 3 and 12: a 5K time trial') && r1.tests.map(t => t.week).join() === '3,12'
+    && r2.note.includes(`never more than ${r2.distance.maxJump * 100}% past your longest run in the last ${r2.distance.windowDays} days`) && r2.note.includes(`passes ${r2.hr.easy[1]}`));
   // v1.18.4 (Cameron, Nov 24): pace targets and heart rate in place of RPE, in the plan data and the note alike
-  const lines1 = prescription(r1, 1).lines || [], lines6 = prescription(r1, 6).lines || [], lines12 = prescription(r1, 12).lines || [];
+  const lines1 = prescription(r1, 1).lines || [], lines6 = prescription(r1, 6).lines || [], lines12 = prescription(r1, 11).lines || [];
   check('v1.18.4 each interval stage has its own pace, and the fast line shows it with the heart rate check', lines1[0] === 'Fast: 7:45-8:15 per mile. Heart rate 178-188 by the end of each one.' && lines6[0].startsWith('Fast: 8:00-8:25') && lines12[0].startsWith('Fast: 8:10-8:35'), [lines1, lines6[0], lines12[0]]);
   check('v1.18.4 the easy line says how far heart rate comes down, and no line uses RPE', lines1[1] === 'Easy: jog or walk until heart rate is under 160.' && ![...lines1, r1.note, r1.effort, r2.note, r2.effort].some(t => /RPE/.test(t)), lines1);
   check('v1.18.4 the paces and heart rates in the note are the plan data\'s', r1.intervals.every(iv => r1.note.includes(iv.pace)) && r1.note.includes(`${r1.hr.fastEnd[0]}-${r1.hr.fastEnd[1]}`) && r1.note.includes(`under ${r1.hr.easyUnder}`) && r2.note.includes(`${r2.hr.easy[0]}-${r2.hr.easy[1]}`) && r2.effort.includes(`${r2.hr.easy[0]}-${r2.hr.easy[1]}`));
   check('v1.18.4 a run without pace data keeps the old wording', prescription({ ...r1, hr: undefined }, 1).text === '5 × 2 min hard, 2 min easy' && !prescription({ ...r1, hr: undefined }, 1).lines);
   const lr = (d, date, type = 'Long run') => ({ id: 'r' + date, date, type, planId: 'run2', distance: d, minutes: d * 10, week: 1 });
-  check('v1.10 long run: starts at 3.5, goes half a mile past the longest, a ski day does not move it, stops at the cap',
-    longRunTarget(r2, []).miles === 3.5 && longRunTarget(r2, [lr(3.62, '2026-11-21')]).miles === 4 && longRunTarget(r2, [lr(3.62, '2026-11-21'), lr(2, '2026-11-28')]).miles === 4
-    && longRunTarget(r2, [lr(9, '2026-11-21', 'Ski day')]).miles === 3.5 && longRunTarget(r2, [lr(6.8, '2026-12-20')]).miles === 7 && longRunTarget(r2, [lr(8, '2026-12-20')]).miles === 7,
-    [longRunTarget(r2, [lr(3.62, '2026-11-21')]), longRunTarget(r2, [lr(9, '2026-11-21', 'Ski day')])]);
+  const oldR2 = { ...r2, distance: { startMiles: 3.5, stepMiles: 0.5, capMiles: 7 } };
+  check('v1.10 long run (no maxJump): starts at 3.5, goes half a mile past the longest, a ski day does not move it, stops at the cap',
+    longRunTarget(oldR2, []).miles === 3.5 && longRunTarget(oldR2, [lr(3.62, '2026-11-21')]).miles === 4 && longRunTarget(oldR2, [lr(3.62, '2026-11-21'), lr(2, '2026-11-28')]).miles === 4
+    && longRunTarget(oldR2, [lr(9, '2026-11-21', 'Ski day')]).miles === 3.5 && longRunTarget(oldR2, [lr(6.8, '2026-12-20')]).miles === 7 && longRunTarget(oldR2, [lr(8, '2026-12-20')]).miles === 7,
+    [longRunTarget(oldR2, [lr(3.62, '2026-11-21')]), longRunTarget(oldR2, [lr(9, '2026-11-21', 'Ski day')])]);
+  // v1.22.0 (Nov 26 run plan review, Frandsen et al. BJSM 2025): at most 10% past the longest run of any kind in the last 30 days
+  const ivr = (d, date) => ({ id: 'i' + date, date, type: 'Intervals', planId: 'run1', distance: d, minutes: d * 9, week: 1 });
+  const lrt = (runs, asOf) => longRunTarget(r2, runs, asOf).miles;
+  check('v1.22.0 long run: his Nov 22 run (3.66 mi) still gives 4.0 mi; 3.62 gives 3.75 (10%, rounded down to a quarter mile)',
+    r2.distance.maxJump === 0.1 && r2.distance.windowDays === 30 && lrt([lr(3.66, '2026-11-22')], '2026-11-23') === 4 && lrt([lr(3.62, '2026-11-21')]) === 3.75 && lrt([]) === 3.5,
+    [lrt([lr(3.66, '2026-11-22')], '2026-11-23'), lrt([lr(3.62, '2026-11-21')])]);
+  let chain = [], d = 3.66, seq = [];
+  for (let k = 0; k < 12 && seq[seq.length - 1] !== 7; k++) { chain.push(lr(d, `2026-12-${String(k + 1).padStart(2, '0')}`)); d = lrt(chain); seq.push(d); }
+  check('v1.22.0 long run: run exactly as asked, it climbs 4, 4.25, 4.5, 4.75, 5, 5.5 ... to the 7 mi cap, never more than 10% or 0.5 mi a step',
+    seq[0] === 4 && seq[1] === 4.25 && seq[seq.length - 1] === 7 && seq.every((m, k) => m <= (k ? seq[k - 1] : 3.66) * 1.1 + 1e-9 && m - (k ? seq[k - 1] : 3.66) <= 0.5 + 1e-9), seq);
+  check('v1.22.0 long run: after 30 days with no runs it starts again at 3.5; a ski month does not keep the old distance',
+    lrt([lr(6, '2026-12-01'), lr(9, '2026-12-20', 'Ski day')], '2027-01-05') === 3.5 && lrt([lr(6, '2026-12-01')], '2026-12-20') === 6.5, [lrt([lr(6, '2026-12-01'), lr(9, '2026-12-20', 'Ski day')], '2027-01-05')]);
+  check('v1.22.0 long run: intervals and easy runs count toward the longest run in the window; bike and ski days do not',
+    lrt([lr(6, '2026-12-01'), ivr(3, '2026-12-29')], '2027-01-05') === 3.25 && lrt([ivr(3.2, '2026-11-20')], '2026-11-23') === 3.5
+    && lrt([{ id: 'b', date: '2026-12-29', type: 'Bike/rower sub', distance: 10, minutes: 30 }], '2027-01-05') === 3.5 && lrt([lr(6.8, '2026-12-20')]) === 7 && lrt([lr(8, '2026-12-20')]) === 7,
+    [lrt([lr(6, '2026-12-01'), ivr(3, '2026-12-29')], '2027-01-05')]);
+  const realRuns = [lr(3.66, '2026-11-22'), ivr(2.81, '2026-11-18')];
+  const wk2 = weekRuns({ plan, settings: st, runs: realRuns, week: 2, today: new Date('2026-11-26T08:00:00') });
+  const wk8 = weekRuns({ plan, settings: st, runs: realRuns, week: 8, today: new Date('2026-11-26T08:00:00') });
+  check('v1.22.0 this week the long run reads 4 mi with the last 30 days named; a later week shows the same next step as of today',
+    wk2[1].plan.text === '4 mi' && /longest run in the last 30 days 3.7 mi/.test(wk2[1].plan.detail) && /145-158/.test(wk2[1].plan.detail) && wk8[1].plan.text === '4 mi', [wk2[1].plan, wk8[1].plan.text]);
   check('v1.10 a ski day counts for the long run, a 5K test for the intervals, an easy run for neither', planRunForType(plan, 'Ski day').id === 'run2' && planRunForType(plan, '5K test').id === 'run1' && planRunForType(plan, 'Easy run') === null);
   const wk = (runs, day) => weekRuns({ plan, settings: st, runs, week: 1, today: new Date(day + 'T08:00:00') });
   const mon = wk([], '2026-11-16'), tue = wk([], '2026-11-17'), thu = wk([], '2026-11-19'), sun = wk([], '2026-11-22');
