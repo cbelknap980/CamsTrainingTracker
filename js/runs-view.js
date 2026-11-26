@@ -8,7 +8,7 @@ import { APP_VERSION, weekNumber, toISODate, parseISODate, fmtDate, getData } fr
 import { getRuns, putRun, deleteRun, getSettings, newId, ignoreGarmin } from './store.js';
 import { getSync, garminLinks, garminJobState, GARMIN_SECRET, GARMIN_FILE } from './sync.js';
 import { getGarminState, importFromGarmin, checkGarminNow } from './garmin.js';
-import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles, settleWeek, openRunDays, needsCredit, creditOptions, countAs, keepAsSide, countCandidates, weekRange, fiveKSeconds, fiveKTests, fmtSeconds } from './runs.js';
+import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles, settleWeek, openRunDays, needsCredit, creditOptions, countAs, keepAsSide, countCandidates, weekRange, fiveKSeconds, fiveKTests, fmtSeconds, workoutBlocks, planCheck, runGoals } from './runs.js';
 import { svg, tooltip, yTicks } from './progress.js';
 import { openRunDetail } from './run-detail.js';
 
@@ -141,6 +141,8 @@ function runSheet(r, ctx) {
       stat('5K time', fk ? fmtSeconds(fk) : null),
       stat('Avg heart rate', r.hr ? Math.round(r.hr) : null), stat('Max heart rate', r.maxHr ? Math.round(r.maxHr) : null), stat('Climb', r.climbFt ? `${r.climbFt} ft` : null), stat('Cadence', r.cadence ? `${r.cadence} spm` : null)
     ]),
+    // v1.25.0: how it measured up to what the plan asked that week
+    (() => { const chk = planCheck(plan, rules, settings, ctx.runs || [r], r); return chk ? el('p', { class: 'run-sheet-check', id: 'run-check' }, [checkChip(chk), el('span', { class: 'muted' }, ` ${chk.detail}`)]) : null; })(),
     mine && mine.flagged ? el('div', { class: 'count-it', id: 'run-5k-check' }, [
       el('p', { class: 'count-it-head' }, `Check this 5K: ${mine.why}. It won't set your interval paces until you say it's right.`),
       readOnly ? null : el('div', { class: 'btn-row' }, [
@@ -257,6 +259,195 @@ async function garminSheet(ctx, note) {
   });
 }
 
+// ---- v1.25.0: the Runs tab cleaned up (Cameron, Nov 26: "lets clean up the run tab. look into running apps that
+// travk progress towards a goal and get inspiration. propose then impliment 5 things"). Goals on top (Garmin's race
+// widget, Runna's plan overview, Strava's goal graphs), the next run first with finished ones folded to a line (Runna's
+// Today card, NN/g progressive disclosure), the intervals drawn as blocks (TrainingPeaks' builder, Runna's stages,
+// Garmin's step list), a plan check on every run (TrainingPeaks and Final Surge compliance colors, COROS Effort
+// Accuracy), and the runs grouped by week with Garmin's line at the bottom (Strava's training log, TrainingPeaks'
+// weekly summary). ----
+
+const round1 = v => Math.round(v * 10) / 10;
+// the same chevron the Plan list uses on a row that opens a page
+const chevron = () => {
+  const NS = 'http://www.w3.org/2000/svg';
+  const g = document.createElementNS(NS, 'svg');
+  g.setAttribute('viewBox', '0 0 16 16'); g.setAttribute('aria-hidden', 'true');
+  const pth = document.createElementNS(NS, 'path');
+  pth.setAttribute('d', 'M6 3.5 10.5 8 6 12.5'); pth.setAttribute('fill', 'none'); pth.setAttribute('stroke', 'currentColor');
+  pth.setAttribute('stroke-width', '2'); pth.setAttribute('stroke-linecap', 'round'); pth.setAttribute('stroke-linejoin', 'round');
+  g.appendChild(pth);
+  return g;
+};
+const shortDate = iso => parseISODate(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+/** The plan check as a small colored chip (green on plan, yellow a bit off, red well off). Null without one. */
+export function checkChip(chk) {
+  if (!chk) return null;
+  return el('span', { class: `run-check ${chk.level}`, 'data-check': chk.level, title: chk.detail }, chk.label);
+}
+
+/** The intervals as a row of blocks: width by minutes, height by effort, the fast parts in the accent color. */
+export function blocksBar(run, ask) {
+  const blocks = workoutBlocks(run, ask);
+  if (!blocks) return null;
+  const total = Math.round(blocks.reduce((m, b) => m + b.min, 0));
+  return el('div', { class: 'wo', 'data-minutes': total }, [
+    el('div', { class: 'wo-blocks', role: 'img', 'aria-label': `${run.warmupMin} min warm-up, then ${ask.reps} rounds of ${ask.hardMin} min fast and ${ask.easyMin} min easy, then ${run.cooldownMin} min cool-down. About ${total} min.` },
+      blocks.map(b => el('span', { class: `wo-b wo-${b.kind}`, style: `flex-grow:${b.min}` }))),
+    el('div', { class: 'wo-legend', 'aria-hidden': 'true' }, [el('span', {}, `${run.warmupMin} min warm-up`), el('span', { class: 'wo-total' }, `about ${total} min`), el('span', {}, `${run.cooldownMin} min cool-down`)])
+  ]);
+}
+
+// ---- 1. the goals card ----
+function goalCard(full, today) {
+  const { plan, settings, runs } = full;
+  const g = runGoals({ plan, settings, runs, today });
+  if (!g.fiveK && !g.long) return null;
+  const bar = (share, empty) => el('div', { class: 'goal-bar' + (empty ? ' empty' : '') }, el('span', { style: `width:${Math.round(share * 100)}%` }));
+  const top = (name, goal, now, none) => el('div', { class: 'goal-top' }, [
+    el('span', { class: 'goal-name' }, [el('b', {}, name), el('span', { class: 'muted' }, ` · goal ${goal}`)]),
+    el('span', { class: 'goal-now' + (none ? ' none' : '') }, now),
+    el('span', { class: 'ex-go', 'aria-hidden': 'true' }, chevron())
+  ]);
+  const card = el('div', { class: 'card', id: 'runs-goal' }, [
+    el('div', { class: 'row goal-head' }, [el('h3', { style: 'margin:0' }, 'Goals'), g.week >= 1 && g.week <= 12 ? el('span', { class: 'muted small' }, `Week ${g.week} of 12`) : null])
+  ]);
+  if (g.fiveK) {
+    const f = g.fiveK;
+    const say = [];
+    if (f.latest) say.push(f.latest.seconds <= f.goalSec ? 'Goal reached.' : `${fmtSeconds(f.latest.seconds - f.goalSec)} to go.`);
+    if (f.next) {
+      const which = f.latest ? 'Next check-in' : 'First check-in';
+      say.push(f.next.today ? `${which} is today, in place of the intervals.` : (f.next.passed ? `${which} was ${shortDay(f.next.date)}. It is still open this week.` : `${which} ${fmtDate(f.next.date)}, ${f.next.when}.`));
+    }
+    if (!f.latest) say.push('It sets your starting point and your interval paces.');
+    card.appendChild(el('button', { type: 'button', class: 'goal-row', id: 'runs-5k-weeks', 'data-goal': '5k', onclick: () => openRunDetail(full, f.runId) }, [
+      top('5K', f.goal, f.latest ? fmtSeconds(f.latest.seconds) : 'no time yet', !f.latest),
+      bar(f.share, !f.latest),
+      el('div', { class: 'goal-sub', id: 'runs-5k-next' }, say.join(' '))
+    ]));
+    const good = f.tests.filter(t => !t.flagged);
+    if (good.length) card.appendChild(el('div', { class: 'goal-tests', id: 'runs-5k' }, good.map(t => el('button', { type: 'button', class: 'goal-test', 'data-test': t.id, onclick: () => { const r = runs.find(x => x.id === t.id); if (r) runSheet(r, full); } }, [
+      el('span', { class: 'muted' }, shortDate(t.date)), ' ', el('b', {}, fmtSeconds(t.seconds)),
+      t.change === null ? null : el('span', { class: 'muted' }, ` ${t.change < 0 ? '−' : '+'}${fmtSeconds(Math.abs(t.change))}`)
+    ]))));
+    f.flagged.forEach(t => card.appendChild(el('button', { type: 'button', class: 'run-moved goal-flag', 'data-test': t.id, onclick: () => { const r = runs.find(x => x.id === t.id); if (r) runSheet(r, full); } },
+      `Check your ${shortDate(t.date)} 5K: ${t.why}. Tap to OK it or fix it. Until then your paces stay put.`)));
+  }
+  if (g.long) {
+    const l = g.long;
+    const say = [];
+    const longRun = (plan.runs || []).find(r => r.id === l.runId) || {};
+    if (l.longest && l.longest.miles >= l.cap) say.push('Goal reached.');
+    else {
+      if (l.ask && !l.askDone) say.push(`${/weekend/i.test(longRun.day || '') ? 'This weekend' : 'This week'}: ${l.ask} mi.`);
+      if (l.reachWeek) say.push(`Do every long run and you reach ${l.cap} mi in week ${l.reachWeek}.`);
+    }
+    card.appendChild(el('button', { type: 'button', class: 'goal-row', id: 'runs-goal-long', 'data-goal': 'long', onclick: () => openRunDetail(full, l.runId) }, [
+      top('Long run', `${l.cap} mi`, l.longest ? `${round1(l.longest.miles)} mi` : 'no run yet', !l.longest),
+      bar(l.share, !l.longest),
+      el('div', { class: 'goal-sub' }, [l.longest ? `Your longest, on ${shortDate(l.longest.date)}. ` : '', say.join(' ')])
+    ]));
+  }
+  if (g.week >= 1) card.appendChild(el('p', { class: 'muted card-foot', id: 'runs-goal-done' }, `${g.done.runs} planned ${g.done.runs === 1 ? 'run' : 'runs'} done so far${g.done.missed ? `, ${g.done.missed} missed` : ', none missed'}.`));
+  return card;
+}
+
+// ---- 2 and 4. this week: the next run first, drawn as blocks; finished runs fold to one line ----
+const ORDER = { today: 0, open: 1, later: 2, done: 3 };
+function weekCard(full, week, today) {
+  const { plan, rules, settings, runs, refresh, readOnly } = full;
+  const phone = !readOnly;
+  const rows = weekRuns({ plan, settings, runs, week, today }).sort((a, b) => ORDER[a.status] - ORDER[b.status] || (a.date < b.date ? -1 : 1));
+  const inWeek = runs.filter(r => (r.week || weekNumber(parseISODate(r.date), settings.startDate)) === week);
+  const miles = Math.round(inWeek.reduce((m, r) => m + (countsMiles(rules, r.type) ? (r.distance || 0) : 0), 0) * 10) / 10;
+  const doneN = rows.filter(r => r.status === 'done').length;
+  const dayText = row => (/weekend/i.test(row.day) ? 'Sat/Sun' : dayLabel(row.date));
+  const doneText = row => (row.run && !/weekend/i.test(row.day) && row.run.date !== row.date ? `✓ done ${shortDay(row.run.date)}` : STATUS.done);
+  const planRun = row => (plan.runs || []).find(r => r.id === row.id);
+  const lines = (row, blocks) => {
+    if (!row.plan.lines) return el('div', { class: 'muted run-detail' }, row.plan.detail);
+    // the warm-up and cool-down line is in the blocks already
+    const ls = blocks ? row.plan.lines.filter(t => !/^Warm up \d/.test(t)) : row.plan.lines;
+    return el('div', { class: 'muted run-detail run-lines' }, ls.map(t => { const i = t.indexOf(': '); return i > 0 && i < 12 ? el('div', {}, [el('b', {}, t.slice(0, i + 1) + ' '), t.slice(i + 2)]) : el('div', {}, t); }));
+  };
+  const full1 = row => {
+    const run = planRun(row);
+    const blocks = row.plan.kind === 'intervals' ? blocksBar(run, row.plan) : null;
+    return el('div', { class: `run-plan ${row.status}`, 'data-run': row.id }, [
+      el('span', { class: 'day-name' }, dayText(row)),
+      el('div', { class: 'run-plan-body' }, [
+        el('div', { class: 'row' }, [
+          el('b', {}, row.short),
+          !phone ? el('span', { class: 'day-status' }, STATUS[row.status])
+            : (row.status === 'later' ? null : el('button', { class: 'btn small', onclick: () => runForm(plan, settings, null, refresh, { type: row.type }) }, 'Log'))
+        ]),
+        el('div', { class: 'run-ask' }, row.plan.text),
+        blocks,
+        lines(row, blocks),
+        row.status === 'open' ? el('div', { class: 'run-moved' }, `Not done ${/weekend/i.test(row.day) ? 'yet' : shortDay(row.date)}. ${openRunText({ plan, rules, settings }, row.id, week, today)}`) : null,
+        phone ? countItBlock(row, { plan, rules, settings, runs, week }, () => refresh()) : null
+      ])
+    ]);
+  };
+  const folded = row => el('div', { class: 'run-plan done folded', 'data-run': row.id }, [
+    el('span', { class: 'day-name' }, dayText(row)),
+    el('button', { type: 'button', class: 'run-fold', onclick: () => runSheet(row.run, full) }, [
+      el('div', { class: 'row' }, [el('b', {}, row.short), el('span', { class: 'day-status done' }, doneText(row))]),
+      (() => {
+        const chk = planCheck(plan, rules, settings, runs, row.run);
+        return el('div', { class: 'run-fold-line' }, [el('span', { class: 'run-result' }, runLine(row.run, rules, true) || 'Logged'), checkChip(chk), chk ? el('span', { class: 'muted run-fold-why' }, chk.detail) : null]);
+      })()
+    ])
+  ]);
+  return el('div', { class: 'card', id: 'runs-week' }, [
+    el('h3', { class: 'runs-week-head' }, 'This week'),
+    ...rows.map(row => (row.status === 'done' && row.run ? folded(row) : full1(row))),
+    el('p', { class: 'muted card-foot', id: 'runs-week-total' }, `${doneN} of ${rows.length} planned runs done${miles ? ` · ${miles} mi this week` : ''}`),
+    el('details', { class: 'run-notes' }, [el('summary', {}, 'How to run them'), ...plan.runs.map(r => el('p', { class: 'muted' }, [el('b', {}, `${r.name}. `), r.note]))])
+  ]);
+}
+
+// ---- 5. every run, grouped by week with the week's total, each with its plan check ----
+const TYPE_CLASS = { 'Intervals': 'iv', 'Long run': 'lr', '5K test': 'fk', 'Easy run': 'ez' };
+function listCard(full, garminFoot) {
+  const { plan, rules, settings, runs, readOnly } = full;
+  const phone = !readOnly;
+  const list = el('div', { class: 'card', id: 'runs-list' }, [el('h3', {}, 'Runs by week')]);
+  if (!runs.length) list.appendChild(el('p', { class: 'muted', style: 'margin:0' }, phone ? 'No runs yet. Log one, or connect Garmin and they add themselves.' : 'No runs yet. They show up here after your phone logs one.'));
+  const weekOf = r => r.week || weekNumber(parseISODate(r.date), settings.startDate);
+  const sorted = runs.slice().sort((a, b) => (`${b.date} ${b.startTime || ''}` < `${a.date} ${a.startTime || ''}` ? -1 : 1));
+  const groups = [];
+  for (const r of sorted) {
+    const w = weekOf(r);
+    const key = w < 1 ? 'before' : (w > 12 ? 'after' : String(w));
+    let g = groups.find(x => x.key === key);
+    if (!g) { g = { key, week: w, runs: [] }; groups.push(g); }
+    g.runs.push(r);
+  }
+  for (const g of groups) {
+    const miles = round1(g.runs.reduce((m, r) => m + (countsMiles(rules, r.type) ? (r.distance || 0) : 0), 0));
+    const range = g.key === 'before' || g.key === 'after' ? null : weekRange(settings, g.week);
+    const span = range ? `${shortDate(range.start)} - ${parseISODate(range.end).getMonth() === parseISODate(range.start).getMonth() ? parseISODate(range.end).getDate() : shortDate(range.end)}` : '';
+    list.appendChild(el('div', { class: 'rl-week', 'data-week': g.key }, [
+      el('div', { class: 'rl-head' }, [
+        el('span', {}, [el('b', {}, g.key === 'before' ? 'Before the plan' : (g.key === 'after' ? 'After the plan' : `Week ${g.week}`)), span ? el('span', { class: 'muted' }, ` · ${span}`) : null]),
+        el('span', { class: 'rl-tot' }, `${miles ? `${miles} mi · ` : ''}${g.runs.length} ${g.runs.length === 1 ? 'run' : 'runs'}`)
+      ]),
+      ...g.runs.map(r => el('div', { class: 'list-item run-item', 'data-id': r.id, onclick: () => runSheet(r, full) }, [
+        el('div', { class: 'row' }, [
+          el('span', { class: 'run-name' }, [el('span', { class: `run-dot t-${TYPE_CLASS[r.type] || 'other'}`, 'aria-hidden': 'true' }), el('b', {}, `${fmtDate(r.date)} · ${r.type}`)]),
+          checkChip(planCheck(plan, rules, settings, runs, r))
+        ]),
+        el('div', { class: 'muted run-line' }, [runLine(r, rules) || (r.notes || 'No numbers logged'), r.source === 'garmin' ? ' · Garmin' : ''])
+      ]))
+    ]));
+  }
+  if (garminFoot) list.appendChild(garminFoot);
+  return list;
+}
+
 // ---- the tab ----
 let lastAutoCheck = 0;
 
@@ -276,9 +467,9 @@ export async function renderRunsTab(view, ctx) {
     phone ? el('button', { class: 'btn small primary', id: 'log-run', onclick: () => runForm(plan, settings, null, refresh) }, 'Log a run') : null
   ]));
 
-  // Garmin: one line under the heading
+  // Garmin: one quiet line at the bottom of the runs; at the top only when something is wrong
   const linked = !!(cfg && cfg.repo && garmin.found);
-  const gRow = el('div', { class: 'garmin-row', id: 'garmin-row' });
+  const gRow = el('div', { class: 'garmin-row' + (linked && garmin.lastError ? ' warn' : ' foot'), id: 'garmin-row' });
   if (linked) {
     gRow.appendChild(el('span', { class: 'garmin-state' + (garmin.lastError ? ' bad' : ''), id: 'garmin-status' }, garmin.lastError ? `Garmin: ${garmin.lastError}` : `Garmin is connected · last pull ${garmin.fetchedAt ? when(garmin.fetchedAt) : 'a while ago'}${phone ? '' : ' · runs show up here after your phone opens the app'}`));
     if (phone) gRow.appendChild(el('button', { class: 'link-btn', id: 'garmin-check', onclick: async e => {
@@ -292,90 +483,28 @@ export async function renderRunsTab(view, ctx) {
     gRow.appendChild(el('span', { class: 'garmin-state', id: 'garmin-status' }, 'Have a Garmin watch? Runs can show up here on their own.'));
     gRow.appendChild(el('button', { class: 'link-btn', id: 'garmin-setup', onclick: () => garminSheet(full) }, 'Connect Garmin'));
   }
-  view.appendChild(gRow);
+  if (linked && garmin.lastError) view.appendChild(gRow);
 
   const main = el('div', { class: 'runs-main' });
   const side = el('div', { class: 'runs-side' });
   view.appendChild(el('div', { class: 'runs-cols' }, [main, side]));
 
-  // this week
-  if (week >= 1 && week <= 12) {
-    const rows = weekRuns({ plan, settings, runs, week, today });
-    const inWeek = runs.filter(r => (r.week || weekNumber(parseISODate(r.date), settings.startDate)) === week);
-    const miles = Math.round(inWeek.reduce((m, r) => m + (countsMiles(rules, r.type) ? (r.distance || 0) : 0), 0) * 10) / 10;
-    main.appendChild(el('div', { class: 'card', id: 'runs-week' }, [
-      el('h3', {}, `Week ${week} of 12`),
-      ...rows.map(row => el('div', { class: `run-plan ${row.status}`, 'data-run': row.id }, [
-        el('span', { class: 'day-name' }, /weekend/i.test(row.day) ? 'Sat/Sun' : dayLabel(row.date)),
-        el('div', { class: 'run-plan-body' }, [
-          el('div', { class: 'row' }, [
-            el('b', {}, row.short),
-            row.status === 'done' || !phone
-              ? el('span', { class: 'day-status ' + (row.status === 'done' ? 'done' : '') }, row.status === 'done' && row.run && !/weekend/i.test(row.day) && row.run.date !== row.date ? `✓ done ${shortDay(row.run.date)}` : STATUS[row.status])
-              : (row.status === 'later' ? null : el('button', { class: 'btn small', onclick: () => runForm(plan, settings, null, refresh, { type: row.type }) }, 'Log'))
-          ]),
-          el('div', { class: 'run-ask' }, row.plan.text),
-          row.plan.lines ? el('div', { class: 'muted run-detail run-lines' }, row.plan.lines.map(t => { const i = t.indexOf(': '); return i > 0 && i < 12 ? el('div', {}, [el('b', {}, t.slice(0, i + 1) + ' '), t.slice(i + 2)]) : el('div', {}, t); })) : el('div', { class: 'muted run-detail' }, row.plan.detail),
-          row.status === 'open' ? el('div', { class: 'run-moved' }, `Not done ${/weekend/i.test(row.day) ? 'yet' : shortDay(row.date)}. ${openRunText({ plan, rules, settings }, row.id, week, today)}`) : null,
-          phone ? countItBlock(row, { plan, rules, settings, runs, week }, () => refresh()) : null,
-          row.run ? el('button', { class: 'run-result', onclick: () => runSheet(row.run, full) }, runLine(row.run, rules, true) || 'Logged') : null
-        ])
-      ])),
-      el('p', { class: 'muted card-foot', id: 'runs-week-total' }, `${rows.filter(r => r.status === 'done').length} of ${rows.length} planned runs done${miles ? ` · ${miles} mi this week` : ''}`),
-      el('details', { class: 'run-notes' }, [el('summary', {}, 'How to run them'), ...plan.runs.map(r => el('p', { class: 'muted' }, [el('b', {}, `${r.name}. `), r.note]))])
-    ]));
-  } else {
-    main.appendChild(el('div', { class: 'card', id: 'runs-week' }, [el('h3', {}, 'The plan\'s runs'), ...plan.runs.map(r => el('p', { class: 'muted' }, [el('b', {}, `${r.name}. `), r.note]))]));
-  }
-
-  // v1.23.0: 5K check-ins against the goal; each good one sets the interval paces
-  const testRun = (plan.runs || []).find(r => r.tests && r.tests.length);
-  if (testRun) {
-    const tests = fiveKTests(runs, testRun.fiveKCheck);
-    const good = tests.filter(t => !t.flagged);
-    const latest = good[good.length - 1] || null;
-    const goal = testRun.goal && testRun.goal.fiveK;
-    const goalSec = goal ? Math.round(parseMinutes(goal) * 60) : null;
-    const dow = Number(Object.keys(plan.calendar || {}).find(k => plan.calendar[k] === testRun.id));
-    const dayOf = w => { const d = parseISODate(weekRange(settings, w).start); d.setDate(d.getDate() + ((dow + 6) % 7)); return toISODate(d); };
-    const nextWeek = testRun.tests.map(t => t.week).find(w => w > week || (w === week && !tests.some(t => t.week === w)));
-    main.appendChild(el('div', { class: 'card', id: 'runs-5k' }, [
-      // v1.24.0: the check-ins are fixed points on the intervals' 12 weeks; one tap to see them there
-      el('div', { class: 'row', style: 'align-items:center' }, [el('h3', { style: 'margin:0' }, '5K check-ins'), el('button', { type: 'button', class: 'link-btn', id: 'runs-5k-weeks', onclick: () => openRunDetail(full, testRun.id) }, 'The 12 weeks ›')]),
-      ...tests.map(t => el('div', { class: 'list-item', 'data-test': t.id, onclick: () => { const r = runs.find(x => x.id === t.id); if (r) runSheet(r, full); } }, [
-        el('div', { class: 'row' }, [
-          el('b', {}, `${fmtDate(t.date)} · ${fmtSeconds(t.seconds)}`),
-          el('span', { class: 'muted' }, t.change === null ? (t.flagged ? '' : 'first') : `${t.change < 0 ? '−' : '+'}${fmtSeconds(Math.abs(t.change))}`)
-        ]),
-        t.flagged ? el('div', { class: 'run-moved' }, `Check this one: ${t.why}. Tap to OK it or fix it. Until then your paces stay put.`) : null
-      ])),
-      tests.length ? null : el('p', { class: 'muted', style: 'margin:0 0 6px' }, 'No check-in yet. Until the first one, the intervals use the plan\'s paces.'),
-      goal ? el('p', { class: 'muted', id: 'runs-5k-goal', style: 'margin:6px 0 0' }, latest
-        ? (latest.seconds <= goalSec ? `Goal ${goal} (a fit 31-year-old): reached.` : `Goal ${goal} (a fit 31-year-old): ${fmtSeconds(latest.seconds - goalSec)} to go. Your interval paces come from your ${fmtSeconds(latest.seconds)}.`)
-        : `Goal ${goal}, a fit 31-year-old's 5K.`) : null,
-      nextWeek ? el('p', { class: 'muted card-foot', id: 'runs-5k-next' }, `Next check-in: ${fmtDate(dayOf(nextWeek))} (week ${nextWeek}), in place of the intervals. Your time sets the interval paces.`) : null
-    ]));
-  }
+  // 1. the goals, then 2. this week
+  const goals = goalCard(full, today);
+  if (goals) main.appendChild(goals);
+  if (week >= 1 && week <= 12) main.appendChild(weekCard(full, week, today));
+  else main.appendChild(el('div', { class: 'card', id: 'runs-week' }, [el('h3', {}, 'The plan\'s runs'), ...plan.runs.map(r => el('p', { class: 'muted' }, [el('b', {}, `${r.name}. `), r.note]))]));
 
   // miles by week
   const byWeek = weeklyMiles(runs, settings, rules);
   if (byWeek.some(r => r.miles)) {
     const total = Math.round(byWeek.reduce((m, r) => m + r.miles, 0) * 10) / 10;
     const count = byWeek.reduce((n, r) => n + r.runs, 0);
-    main.appendChild(el('div', { class: 'card', id: 'runs-miles' }, [el('h3', {}, 'Miles by week'), milesBars(byWeek, week), el('p', { class: 'muted card-foot' }, `${total} mi over ${count} ${count === 1 ? 'run' : 'runs'} in this block`)]));
+    side.appendChild(el('div', { class: 'card', id: 'runs-miles' }, [el('h3', {}, 'Miles by week'), milesBars(byWeek, week), el('p', { class: 'muted card-foot' }, `${total} mi over ${count} ${count === 1 ? 'run' : 'runs'} in this block`)]));
   }
 
-  // every run
-  const list = el('div', { class: 'card', id: 'runs-list' }, [el('h3', {}, 'All runs')]);
-  if (!runs.length) list.appendChild(el('p', { class: 'muted', style: 'margin:0' }, phone ? 'No runs yet. Log one, or connect Garmin and they add themselves.' : 'No runs yet. They show up here after your phone logs one.'));
-  runs.forEach(r => list.appendChild(el('div', { class: 'list-item run-item', 'data-id': r.id, onclick: () => runSheet(r, full) }, [
-    el('div', { class: 'row' }, [
-      el('b', {}, `${fmtDate(r.date)} · ${r.type}`),
-      el('span', { class: 'run-tags' }, [r.rpe ? el('span', { class: 'tag' }, `Effort ${r.rpe}`) : (phone ? el('span', { class: 'tag tag-todo' }, 'Add effort') : null)])
-    ]),
-    el('div', { class: 'muted run-line' }, [runLine(r, rules) || (r.notes || 'No numbers logged'), r.source === 'garmin' ? ' · Garmin' : ''])
-  ])));
-  side.appendChild(list);
+  // 5. every run by week, Garmin's line under them
+  side.appendChild(listCard(full, linked && garmin.lastError ? null : gRow));
 
   // look for a newer Garmin file when the tab opens (at most once a minute; the file is small). The phone adds
   // what is new; a computer only notes that the file is there.

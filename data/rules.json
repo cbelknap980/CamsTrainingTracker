@@ -1,5 +1,5 @@
 {
-  "rulesVersion": "1.16",
+  "rulesVersion": "1.17",
   "increments": {
     "description": "v1.18.10 (Cameron, Nov 25: \"Smallest increment for these types of weights should be 5lb\"): every step is 5 lb or more. The strict press stepped 2.5 lb (92.5 needs 1.25 lb plates); it now steps 5 like everything else.",
     "default": 5,
@@ -374,6 +374,13 @@
       "Bike/rower sub",
       "Ski day"
     ]
+  },
+  "runCheck": {
+    "note": "v1.25.0 (Cameron, Nov 26: clean up the Runs tab with ideas from running apps that track progress to a goal). How a logged run measured up to what its planned run asked that week, shown as a colored chip on the run. The amount is the intervals' minutes (warm-up + reps + cool-down) or the long run's miles. onPlan: share of the ask that is green. near: yellow outside onPlan; past near is red. The bands are TrainingPeaks' (green within 20% of planned, yellow 50-79% or 121-150%), Final Surge's and McMillan's (the same 80-120% / 50-150%), and close to COROS Effort Accuracy (duration completion) and Garmin's workout execution score. hrFrom: the long run's average heart rate is checked against plan.json run2.hr.easy only for runs on or after this date, when those heart rates started (v1.22.0); runs before were asked by effort. hrNear: beats over the easy range that are yellow; more is red. It is only a label: it never changes a target or the plan.",
+    "onPlan": [0.8, 1.2],
+    "near": [0.5, 1.5],
+    "hrFrom": "2026-11-26",
+    "hrNear": 10
   },
   "runSchedule": {
     "note": "v1.12: days a planned run can move to when its own day passes without it (0 = Sunday ... 6 = Saturday). Lift days are never offered and lifts never move. Like catch-up sets, a run still open on Sunday night is dropped, not carried into next week.",

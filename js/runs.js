@@ -563,3 +563,149 @@ export function openRunDays({ plan, rules, settings, runId, week, today }) {
     return { d, iso: toISODate(at) };
   }).filter(x => x.iso >= todayIso && !lift(plan.calendar[x.d])).sort((a, b) => (a.iso < b.iso ? -1 : 1)).map(x => ({ name: names[x.d], iso: x.iso, today: x.iso === todayIso }));
 }
+
+// ---- v1.25.0: the Runs tab cleaned up (Cameron, Nov 26: "lets clean up the run tab. look into running apps that
+// track progress towards a goal and get inspiration"). The goals card, the intervals as blocks, and the plan check on
+// each run. Read by runs-view.js. ----
+
+const easyOf = iv => { const p = String(iv.easyMin).split('-').map(Number).filter(n => !Number.isNaN(n)); return p.length ? p.reduce((a, b) => a + b, 0) / p.length : 0; };
+
+/** Minutes a week's intervals take: warm-up, reps × (fast + easy), cool-down. An easy of "2-3" counts as 2.5. */
+export function intervalMinutes(run, iv) {
+  if (!run || !iv || !iv.reps) return null;
+  return round((run.warmupMin || 0) + iv.reps * ((iv.hardMin || 0) + easyOf(iv)) + (run.cooldownMin || 0), 1);
+}
+
+/**
+ * The intervals as blocks, the way TrainingPeaks, Runna and Garmin lay out a workout's steps:
+ * [{ kind: 'warm' | 'fast' | 'easy' | 'cool', min }], or null for anything but intervals.
+ */
+export function workoutBlocks(run, ask) {
+  if (!run || !ask || ask.kind !== 'intervals' || !ask.reps) return null;
+  const easy = easyOf(ask);
+  const out = [];
+  if (run.warmupMin) out.push({ kind: 'warm', min: run.warmupMin });
+  for (let i = 0; i < ask.reps; i++) { out.push({ kind: 'fast', min: ask.hardMin }); if (easy) out.push({ kind: 'easy', min: easy }); }
+  if (run.cooldownMin) out.push({ kind: 'cool', min: run.cooldownMin });
+  return out;
+}
+
+/** The planned run a logged run counts for, or null (a side run, a Garmin run not counted yet). */
+export function planRunOf(plan, r) {
+  return (plan.runs || []).find(run => countsFor(plan, r, run)) || null;
+}
+
+/**
+ * How a logged run measured up to what its planned run asked that week (rules.runCheck), the way TrainingPeaks and
+ * Final Surge color a finished workout and COROS scores one: the amount (intervals by minutes, the long run by miles)
+ * within 80-120% of the ask is on plan, 50-150% a bit off, past that well off. From rules.runCheck.hrFrom on, the long
+ * run's average heart rate is checked against its easy range too (over it by up to hrNear is a bit off, more is off).
+ * A 5K check-in is on plan once it has a 5K time. Nothing for a run that counts for no planned run, a ski or bike day,
+ * a week outside the 12, or a run with no numbers.
+ * returns { level: 'good' | 'near' | 'off', label, detail, ratio, hr: { level, label, detail } | null } or null.
+ */
+export function planCheck(plan, rules, settings, runs, r) {
+  const cfg = rules && rules.runCheck;
+  if (!cfg || !r || NOT_RUNNING.includes(r.type)) return null;
+  const run = planRunOf(plan, r);
+  if (!run) return null;
+  const week = r.week || weekNumber(parseISODate(r.date), settings.startDate);
+  if (week < 1 || week > 12) return null;
+  const { start } = weekRange(settings, week);
+  const ask = prescription(run, week, (runs || []).filter(x => x.date < start), start);
+  if (ask.kind === 'test' || r.type === '5K test') {
+    const s = fiveKSeconds(r);
+    return s ? { level: 'good', label: '5K done', detail: `5K in ${fmtSeconds(s)}`, ratio: 1, hr: null }
+      : { level: 'near', label: 'No 5K time', detail: 'No 5K time in this run yet', ratio: null, hr: null };
+  }
+  let planned = null, did = null, unit = '';
+  if (ask.kind === 'intervals') { planned = intervalMinutes(run, ask); did = r.minutes; unit = 'min'; }
+  else if (ask.kind === 'distance') { planned = ask.miles; did = r.distance; unit = 'mi'; }
+  else if (ask.kind === 'time') { planned = run.plannedMinutes; did = r.minutes; unit = 'min'; }
+  if (!planned || !did) return null;
+  const ratio = did / planned;
+  const [gLo, gHi] = cfg.onPlan || [0.8, 1.2];
+  const [nLo, nHi] = cfg.near || [0.5, 1.5];
+  const level = ratio >= gLo && ratio <= gHi ? 'good' : (ratio >= nLo && ratio <= nHi ? 'near' : 'off');
+  const label = level === 'good' ? 'On plan' : (level === 'near' ? (ratio < 1 ? 'A bit short' : 'A bit long') : (ratio < 1 ? 'Well short' : 'Well over'));
+  const detail = unit === 'min' ? `${Math.round(did)} min of about ${Math.round(planned)}` : `${round(did, 2)} of ${planned} mi`;
+  // the long run's heart rate, from the day the plan's heart rates started (runs before were asked by effort)
+  let hr = null;
+  const easy = run.hr && run.hr.easy;
+  if (easy && r.hr && (!cfg.hrFrom || r.date >= cfg.hrFrom)) {
+    const over = Math.round(r.hr) - easy[1];
+    hr = over <= 0 ? { level: 'good', label: 'HR easy', detail: `avg HR ${Math.round(r.hr)}, aim ${easy[0]}-${easy[1]}` }
+      : { level: over <= (cfg.hrNear || 10) ? 'near' : 'off', label: 'HR high', detail: `avg HR ${Math.round(r.hr)}, aim ${easy[0]}-${easy[1]}` };
+  }
+  const rank = { good: 0, near: 1, off: 2 };
+  const worst = hr && rank[hr.level] > rank[level] ? hr.level : level;
+  const both = hr && hr.level !== 'good' ? (level === 'good' ? hr.label : `${label} · ${hr.label}`) : label;
+  return { level: worst, label: both, detail: hr ? `${detail} · ${hr.detail}` : detail, ratio: round(ratio, 2), hr };
+}
+
+const DAY_MS = 86400000;
+const daysBetween = (fromIso, toIso) => Math.round((parseISODate(toIso) - parseISODate(fromIso)) / DAY_MS);
+
+/** "today", "tomorrow", "in 5 days", "in 4 weeks" from today to an ISO date ahead. */
+export function inDays(fromIso, toIso) {
+  const n = daysBetween(fromIso, toIso);
+  if (n <= 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  if (n < 14) return `in ${n} days`;
+  return `in ${Math.round(n / 7)} weeks`;
+}
+
+/**
+ * The two run goals for the top of the Runs tab, from the plan (run1.goal, run2.distance.capMiles) and his runs:
+ * fiveK: { goal, goalSec, tests, first, latest, flagged, share (0-1 of the way from the first check-in to the goal),
+ *          next: { week, date, when, today, passed } | null }
+ * long:  { cap, longest: { miles, date } | null, share, ask (this week's long run in miles), reachWeek (first week the
+ *          long run reaches the cap if every one is done) }
+ * done:  { runs, missed } planned runs done in the block so far, and missed in weeks that are over.
+ */
+export function runGoals({ plan, settings, runs, today }) {
+  const todayIso = toISODate(today);
+  const week = weekNumber(today, settings.startDate);
+  const run1 = (plan.runs || []).find(r => r.tests && r.tests.length) || null;
+  const run2 = (plan.runs || []).find(r => r.distance && r.distance.capMiles) || null;
+  let fiveK = null;
+  if (run1 && run1.goal && run1.goal.fiveK) {
+    const tests = fiveKTests(runs, run1.fiveKCheck);
+    const good = tests.filter(t => !t.flagged);
+    const first = good[0] || null, latest = good[good.length - 1] || null;
+    const goalSec = Math.round(parseMinutes(run1.goal.fiveK) * 60);
+    const share = first && latest ? (latest.seconds <= goalSec ? 1 : (first.seconds <= goalSec ? 0 : Math.max(0, Math.min(1, (first.seconds - latest.seconds) / (first.seconds - goalSec))))) : 0;
+    const doneWeeks = tests.map(t => t.week || weekNumber(parseISODate(t.date), settings.startDate));
+    const nw = run1.tests.map(t => t.week).find(w => !doneWeeks.includes(w) && weekRange(settings, w).end >= todayIso);
+    let next = null;
+    if (nw) {
+      const date = runDay(plan, settings, run1.id, nw);
+      next = { week: nw, date, when: inDays(todayIso, date), today: date === todayIso, passed: date < todayIso };
+    }
+    fiveK = { goal: run1.goal.fiveK, goalSec, tests, first, latest, flagged: tests.filter(t => t.flagged), share, next, runId: run1.id };
+  }
+  let long = null;
+  if (run2) {
+    const cap = run2.distance.capMiles;
+    const startIso = settings.startDate;
+    const ran = (runs || []).filter(r => r.date >= startIso && r.date <= todayIso && r.distance && !NOT_RUNNING.includes(r.type));
+    const best = ran.reduce((m, r) => (!m || r.distance > m.distance ? r : m), null);
+    const lp = week >= 1 && week <= 12 ? longRunPlan(plan, settings, runs, run2, today) : [];
+    const now = lp.find(w => w.now) || null;
+    const reach = lp.find(w => w.miles >= cap && !w.past);
+    long = {
+      cap, longest: best ? { miles: round(best.distance, 2), date: best.date } : null,
+      share: best ? Math.min(1, best.distance / cap) : 0,
+      ask: now ? now.miles : null, askDone: !!(now && now.done), reachWeek: reach ? reach.week : null, runId: run2.id
+    };
+  }
+  let doneCount = 0, missed = 0;
+  if (week >= 1) {
+    for (let w = 1; w <= Math.min(week, 12); w++) {
+      const rows = weekRuns({ plan, settings, runs, week: w, today });
+      doneCount += rows.filter(r => r.status === 'done').length;
+      if (w < week) missed += rows.filter(r => r.status !== 'done').length;
+    }
+  }
+  return { week, fiveK, long, done: { runs: doneCount, missed } };
+}
