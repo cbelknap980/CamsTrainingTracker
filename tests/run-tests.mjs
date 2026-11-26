@@ -8,6 +8,7 @@ import { parseRepo, toBase64, fromBase64, setupLink, readSetupLink, explainStatu
 import { strengthSeries, adherence, weeklySets, accessoryRows, prList, yTicks, muscleSets } from '../js/progress.js';
 import { changesFor, replyFor, pendingAdjustments, withRest, thread } from '../js/coach.js';
 import { applyRestAdjust } from '../js/builder.js';
+import { intervalPlan, longRunPlan, checkIns, fiveKProjection, runDay, fmtSeconds } from '../js/runs.js';
 import { fiveKSeconds, fiveKTests, paceFrom5k, vdotFrom5k, parseMinutes, fmtDuration, paceOf, runLine, planRunForType, longRunTarget, prescription, weekRuns, weeklyMiles, garminToRun, mergeGarmin, garminList, settleWeek, isAuto, openRunDays, needsCredit, countsFor, creditOptions, countAs, keepAsSide, countCandidates, weekRange, countsMiles } from '../js/runs.js';
 import { garminLinks, GARMIN_JOB } from '../js/sync.js';
 import { numberFlag, flaggedGroups, applyNumberFix, rateSavedSet, rerunLift, impossibleNumber } from '../js/sanity.js';
@@ -623,6 +624,44 @@ console.log('v1.9 muscle groups and coach check-ins');
     [tests2[1], prescription(r1, 8, [dec1, { ...jan, fiveKConfirmed: 1450 }]).pace]);
   check('v1.23.0 Count it in a check-in week makes the run the 5K test; other weeks it stays the intervals; a bike session stays a bike session',
     countAs({ id: 'g', type: 'Easy run', week: 3 }, r1).type === '5K test' && countAs({ id: 'g', type: 'Easy run', week: 2 }, r1).type === 'Intervals' && countAs({ id: 'g', type: 'Bike/rower sub', week: 3 }, r1).type === 'Bike/rower sub');
+  // v1.24.0 (Cameron, Nov 26: "lets put these 5k tests in the plan as defined points... show the plan over the 12 week sprints")
+  const st24 = { startDate: '2026-11-16' };
+  const nov26 = new Date('2026-11-26T13:00:00');
+  const runs24 = [{ id: 'a', date: '2026-11-18', type: 'Intervals', planId: 'run1', distance: 2.81, minutes: 27.36, week: 1 }, { id: 'b', date: '2026-11-22', type: 'Long run', planId: 'run2', distance: 3.66, minutes: 36.33, week: 1 }];
+  const ip = intervalPlan(plan, st24, runs24, r1, nov26);
+  check('v1.24.0 run 1 over the 12 weeks: the check-ins sit in weeks 3, 7 and 12 on Tuesdays (Dec 1, Dec 29, Feb 2); the stages fill the rest',
+    ip.length === 12 && ip.filter(r => r.kind === 'test').map(r => `${r.week} ${r.date}`).join() === '3 2026-12-01,7 2026-12-29,12 2027-02-02'
+    && ip.map(r => r.text).join('|') === '5 × 2 min|5 × 2 min|5K check-in|5 × 2 min|5 × 3 min|5 × 3 min|5K check-in|5 × 3 min|4 × 4 min|4 × 4 min|4 × 4 min|5K check-in' && ip[0].done && ip[0].done.id === 'a' && !ip[1].done,
+    ip.map(r => [r.week, r.date, r.text]));
+  check('v1.24.0 before the first check-in, weeks 1-2 use the plan\'s pace and later weeks wait for the check-in before them',
+    ip[0].pace === '7:45-8:15' && ip[1].pace === '7:45-8:15' && ip[3].pace === null && ip[3].waitsFor === 3 && ip[7].waitsFor === 7 && ip[10].waitsFor === 7, ip.map(r => [r.week, r.pace, r.waitsFor]));
+  const withDec1 = runs24.concat([tt('t1', '2026-12-01', { best5k: 1600 })]);
+  const ip2 = intervalPlan(plan, st24, withDec1, r1, new Date('2026-12-02T09:00:00'));
+  check('v1.24.0 after Dec 1 (26:40), weeks 4-6 show the paces it sets; weeks 8-11 wait for the week 7 check-in',
+    ip2[3].pace === '8:05-8:25' && ip2[3].paceFrom.date === '2026-12-01' && ip2[4].pace === paceFrom5k(1600, 3, r1.paceFrom5k) && ip2[2].done && ip2[7].pace === null && ip2[7].waitsFor === 7,
+    ip2.map(r => [r.week, r.pace, r.waitsFor]));
+  const missed3 = intervalPlan(plan, st24, runs24, r1, new Date('2026-12-08T09:00:00'));
+  check('v1.24.0 a check-in week that passed with no 5K stops holding the paces: week 4 goes back to the plan\'s pace',
+    missed3[3].waitsFor === null && missed3[3].pace === '7:45-8:15' && missed3[7].waitsFor === 7, missed3.map(r => [r.week, r.pace, r.waitsFor]));
+  const ck = checkIns(plan, st24, withDec1, r1);
+  check('v1.24.0 check-ins: the three fixed points with their dates, the Dec 1 one carrying its time',
+    ck.map(c => c.week).join() === '3,7,12' && ck[0].result && ck[0].result.seconds === 1600 && !ck[1].result && ck[2].date === '2027-02-02' && runDay(plan, st24, 'run2', 2) === '2026-11-28', ck);
+  const pj = fiveKProjection(r1, withDec1, st24);
+  const at = (k, w) => pj.cases[k].find(x => x.week === w).seconds;
+  check('v1.24.0 5K projection from Dec 1 (26:40): doing well 0.5% a week, steady 0.3%, struggling flat, out to week 12',
+    pj.from.week === 3 && pj.from.seconds === 1600 && pj.cases.well.length === 10 && at('well', 3) === 1600 && at('well', 7) === Math.round(1600 * 0.995 ** 4) && at('steady', 12) === Math.round(1600 * 0.997 ** 9) && at('struggle', 12) === 1600
+    && fmtSeconds(at('well', 12)) === '25:29' && fmtSeconds(at('steady', 12)) === '25:57' && fiveKProjection(r1, runs24, st24) === null,
+    [fmtSeconds(at('well', 12)), fmtSeconds(at('steady', 12))]);
+  check('v1.24.0 the rates rest on the plan\'s sources and stay inside them: doing well no faster than VDOT O2\'s best (1 point a 4 weeks, about 0.6% a week), struggling not slower than flat',
+    r1.projection.perWeek.well <= 0.006 && r1.projection.perWeek.well > r1.projection.perWeek.steady && r1.projection.perWeek.steady > r1.projection.perWeek.struggle && r1.projection.perWeek.struggle === 0
+    && ['VDOT O2', 'Gunnarsson', 'Skovgaard', 'Esfarjani'].every(n => r1.projection.why.includes(n) && r1.projection.say.includes(n)));
+  check('v1.24.0 a flagged 5K does not start the projection; his OK does', fiveKProjection(r1, withDec1.concat([jan]), st24).from.seconds === 1600 && fiveKProjection(r1, withDec1.concat([{ ...jan, fiveKConfirmed: 1450 }]), st24).from.seconds === 1450);
+  const lp = longRunPlan(plan, st24, runs24, r2, nov26);
+  check('v1.24.0 long run over the 12 weeks from his Nov 22 run (3.66 mi), run as asked: 4, 4.25, 4.5, 4.75, 5, 5.5, 6, 6.5, then 7 from week 10',
+    lp.map(r => r.miles).join() === '3.5,4,4.25,4.5,4.75,5,5.5,6,6.5,7,7,7' && lp[0].done && lp[0].done.id === 'b' && lp[0].past && lp[1].now && !lp[2].done && lp[1].date === '2026-11-28',
+    lp.map(r => r.miles));
+  const lpSki = longRunPlan(plan, st24, runs24.concat([{ id: 's', date: '2026-11-28', type: 'Ski day', distance: null, minutes: 240 }]), r2, new Date('2026-11-30T09:00:00'));
+  check('v1.24.0 a ski day covers week 2 but adds no miles, so week 3 asks what week 2 did (4 mi)', lpSki[1].done && lpSki[1].done.type === 'Ski day' && lpSki[2].miles === 4, lpSki.map(r => r.miles));
   check('v1.10 a ski day counts for the long run, a 5K test for the intervals, an easy run for neither', planRunForType(plan, 'Ski day').id === 'run2' && planRunForType(plan, '5K test').id === 'run1' && planRunForType(plan, 'Easy run') === null);
   const wk = (runs, day) => weekRuns({ plan, settings: st, runs, week: 1, today: new Date(day + 'T08:00:00') });
   const mon = wk([], '2026-11-16'), tue = wk([], '2026-11-17'), thu = wk([], '2026-11-19'), sun = wk([], '2026-11-22');

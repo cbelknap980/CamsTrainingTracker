@@ -10,6 +10,7 @@ import { getSync, garminLinks, garminJobState, GARMIN_SECRET, GARMIN_FILE } from
 import { getGarminState, importFromGarmin, checkGarminNow } from './garmin.js';
 import { weekRuns, weeklyMiles, runLine, fmtDuration, parseMinutes, paceOf, planRunForType, countsMiles, settleWeek, openRunDays, needsCredit, creditOptions, countAs, keepAsSide, countCandidates, weekRange, fiveKSeconds, fiveKTests, fmtSeconds } from './runs.js';
 import { svg, tooltip, yTicks } from './progress.js';
+import { openRunDetail } from './run-detail.js';
 
 const clock = iso => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 const when = iso => (toISODate(new Date(iso)) === toISODate(new Date()) ? `today at ${clock(iso)}` : `${fmtDate(iso)} at ${clock(iso)}`);
@@ -339,7 +340,8 @@ export async function renderRunsTab(view, ctx) {
     const dayOf = w => { const d = parseISODate(weekRange(settings, w).start); d.setDate(d.getDate() + ((dow + 6) % 7)); return toISODate(d); };
     const nextWeek = testRun.tests.map(t => t.week).find(w => w > week || (w === week && !tests.some(t => t.week === w)));
     main.appendChild(el('div', { class: 'card', id: 'runs-5k' }, [
-      el('h3', {}, '5K check-ins'),
+      // v1.24.0: the check-ins are fixed points on the intervals' 12 weeks; one tap to see them there
+      el('div', { class: 'row', style: 'align-items:center' }, [el('h3', { style: 'margin:0' }, '5K check-ins'), el('button', { type: 'button', class: 'link-btn', id: 'runs-5k-weeks', onclick: () => openRunDetail(full, testRun.id) }, 'The 12 weeks ›')]),
       ...tests.map(t => el('div', { class: 'list-item', 'data-test': t.id, onclick: () => { const r = runs.find(x => x.id === t.id); if (r) runSheet(r, full); } }, [
         el('div', { class: 'row' }, [
           el('b', {}, `${fmtDate(t.date)} · ${fmtSeconds(t.seconds)}`),
